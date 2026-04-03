@@ -8,7 +8,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 
 class AuthController {
   /**
-   * [POST] /api/v1/auth/register
+   * [POST] /api/auth/register
    * Đăng ký tài khoản bằng email + mật khẩu.
    */
   public async register(req: Request, res: Response): Promise<void> {
@@ -49,7 +49,7 @@ class AuthController {
   }
 
   /**
-   * [POST] /api/v1/auth/login
+   * [POST] /api/auth/login
    * Đăng nhập bằng email + mật khẩu.
    * Trả về access_token trong body + refresh_token trong HttpOnly Cookie.
    */
@@ -100,7 +100,7 @@ class AuthController {
   }
 
   /**
-   * [POST] /api/v1/auth/refresh-token
+   * [POST] /api/auth/refresh-token
    * Dùng Refresh Token (từ cookie) để cấp lại Access Token mới.
    * Giúp user duy trì đăng nhập mà không cần nhập lại mật khẩu.
    */
@@ -132,7 +132,7 @@ class AuthController {
   }
 
   /**
-   * [GET] /api/v1/auth/me
+   * [GET] /api/auth/me
    * Lấy thông tin profile (yêu cầu có Access Token hợp lệ).
    */
   public async getMe(req: AuthRequest, res: Response): Promise<void> {
@@ -175,7 +175,7 @@ class AuthController {
   }
 
   /**
-   * [POST] /api/v1/auth/logout
+   * [POST] /api/auth/logout
    * Đăng xuất — xóa cookie refresh token.
    */
   public async logout(_req: Request, res: Response): Promise<void> {

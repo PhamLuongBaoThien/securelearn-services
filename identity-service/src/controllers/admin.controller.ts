@@ -9,7 +9,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 
 class AdminController {
   /**
-   * [POST] /api/v1/admin/auth/login
+   * [POST] /api/admin/auth/login
    * Đăng nhập vào hệ thống quản trị.
    */
   public async login(req: Request, res: Response): Promise<void> {
@@ -58,7 +58,7 @@ class AdminController {
   }
 
   /**
-   * [POST] /api/v1/admin/auth/refresh-token
+   * [POST] /api/admin/auth/refresh-token
    * Cấp lại Access Token mới cho Admin.
    */
   public async refreshToken(req: Request, res: Response): Promise<void> {
@@ -89,7 +89,7 @@ class AdminController {
   }
 
   /**
-   * [GET] /api/v1/admin/auth/me
+   * [GET] /api/admin/auth/me
    * Lấy thông tin Admin đang đăng nhập.
    */
   public async getMe(req: AuthRequest, res: Response): Promise<void> {
@@ -107,7 +107,7 @@ class AdminController {
   }
 
   /**
-   * [POST] /api/v1/admin/auth/logout
+   * [POST] /api/admin/auth/logout
    * Đăng xuất Admin — xóa cookie refresh token.
    */
   public async logout(_req: Request, res: Response): Promise<void> {
