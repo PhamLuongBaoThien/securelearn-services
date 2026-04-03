@@ -1,0 +1,21 @@
+_format_version: "3.0"
+services:
+  - name: identity-service
+    url: http://identity-service:3001
+    routes:
+      - name: identity-routes
+        paths:
+          - /api/auth
+          - /api/users
+  - name: course-service
+    url: http://course-service:3002
+    routes:
+      - name: course-routes
+        paths:
+          - /api/courses
+  - name: media-service
+    url: http://media-service:3003
+    routes:
+      - name: media-routes
+        paths:
+          - /api/media

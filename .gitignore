@@ -1,0 +1,39 @@
+# 1. BẢO MẬT: Chặn tất cả các file môi trường ở MỌI thư mục con
+**/.env
+
+
+# 2. DEPENDENCIES: Chặn thư viện tải về của Node.js, Go, .NET
+**/node_modules/
+**/vendor/
+
+# 3. KẾT QUẢ BIÊN DỊCH: Nơi chứa code đã build ra
+**/dist/
+**/build/
+**/bin/
+**/obj/
+**/.out/
+
+# 4. DỮ LIỆU CỤC BỘ & DOCKER (Không đẩy dữ liệu Database lên Git)
+**/data/
+**/db-data/
+**/redis-data/
+**/.docker/
+**/.volumes/
+
+# 5. LOGS: Các file ghi chú lỗi
+**/logs/
+**/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 6. HỆ ĐIỀU HÀNH & EDITOR
+.DS_Store
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
