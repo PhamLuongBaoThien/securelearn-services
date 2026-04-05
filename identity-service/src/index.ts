@@ -11,19 +11,19 @@ const PORT = process.env.PORT || 5001;
 
 const bootServer = async () => {
   try {
-    console.log('⏳ Đang khởi động Identity Service...');
+    console.log('Đang khởi động Identity Service...');
 
     // Kết nối MongoDB Atlas
     await connectDB();
 
     // Bật server Express
     app.listen(PORT, () => {
-      console.log(`✅ Identity Service đang chạy tại http://localhost:${PORT}`);
-      console.log(`📌 API Auth: http://localhost:${PORT}/api/v1/auth`);
+      console.log(`Identity Service đang chạy tại http://localhost:${PORT}`);
+      console.log(`API Auth: http://localhost:${PORT}/api/auth`);
     });
   } catch (error) {
-    console.error('❌ Khởi động server thất bại:', error);
-    process.exit(1);
+    console.error('Khởi động server thất bại:', error);
+    process.exit(1); // tác dụng là dừng server nếu có lỗi
   }
 };
 

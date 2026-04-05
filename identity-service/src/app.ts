@@ -33,7 +33,7 @@ app.get('/health', (_req: Request, res: Response) => {
 
 // ===== Error Handler =====
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('❌ Server Error:', err.stack);
+  console.error('Server Error:', err.stack);
   res.status(500).json({ success: false, message: 'Lỗi hệ thống máy chủ.' });
 });
 

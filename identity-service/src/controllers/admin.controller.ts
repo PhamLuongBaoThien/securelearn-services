@@ -9,6 +9,34 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 
 class AdminController {
   /**
+   * [POST] /api/admin/auth/setup
+   * Tạo tài khoản Admin cho việc test.
+   */
+  public async setupAdmin(req: Request, res: Response): Promise<void> {
+    try {
+      const { email, password, fullName, permissions } = req.body;
+      if (!email || !password || !fullName) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp đủ thông tin.' });
+        return;
+      }
+
+      const admin = await adminService.setupAdmin({ email, password, fullName, permissions: permissions || [] });
+      res.status(201).json({
+        status: 'OK',
+        message: 'Tạo tài khoản Admin thành công.',
+        data: {
+          _id: admin._id,
+          email: admin.email,
+          fullName: admin.fullName,
+          permissions: admin.permissions
+        }
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
    * [POST] /api/admin/auth/login
    * Đăng nhập vào hệ thống quản trị.
    */

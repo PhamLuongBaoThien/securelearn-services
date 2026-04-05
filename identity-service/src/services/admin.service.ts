@@ -30,6 +30,22 @@ class AdminService {
   }
 
   /**
+   * Tạo tài khoản Admin mới (phục vụ mục đích setup/test).
+   */
+  public async setupAdmin(adminData: any): Promise<IAdmin> {
+    const existingAdmin = await Admin.findOne({ email: adminData.email });
+    if (existingAdmin) {
+      throw new Error('Admin với email này đã tồn tại.');
+    }
+    const hashPassword = await bcrypt.hash(adminData.password, 10);
+    const newAdmin = await Admin.create({
+      ...adminData,
+      password: hashPassword
+    });
+    return newAdmin;
+  }
+
+  /**
    * Lấy thông tin profile Admin.
    */
   public async getProfile(adminId: string): Promise<IAdmin | null> {

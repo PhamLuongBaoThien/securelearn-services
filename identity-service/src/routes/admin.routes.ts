@@ -8,16 +8,19 @@ import { verifyJWT } from '../middlewares/auth.middleware';
 
 const router = Router();
 
-// [POST] /api/v1/admin/auth/login — Đăng nhập Admin
+// [POST] /api/admin/auth/setup — Setup Admin (Test)
+router.post('/setup', adminController.setupAdmin);
+
+// [POST] /api/admin/auth/login — Đăng nhập Admin
 router.post('/login', adminController.login);
 
-// [POST] /api/v1/admin/auth/logout — Đăng xuất Admin
+// [POST] /api/admin/auth/logout — Đăng xuất Admin
 router.post('/logout', adminController.logout);
 
-// [GET] /api/v1/admin/auth/me — Lấy thông tin Admin đang đăng nhập
+// [GET] /api/admin/auth/me — Lấy thông tin Admin đang đăng nhập
 router.get('/me', verifyJWT, adminController.getMe);
 
-// [POST] /api/v1/admin/auth/refresh-token — Cấp lại token Admin
+// [POST] /api/admin/auth/refresh-token — Cấp lại token Admin
 router.post('/refresh-token', adminController.refreshToken);
 
 export default router;
