@@ -17,6 +17,7 @@ export interface IUser extends Document {
   role: Role;
   isVerified: boolean;
   subscriptionStatus: SubscriptionStatus;
+  phone?: string;
   profile?: {
     avatarUrl?: string;
     bio?: string;
@@ -56,6 +57,11 @@ const userSchema: Schema = new Schema(
       type: String,
       enum: Object.values(SubscriptionStatus),
       default: SubscriptionStatus.INACTIVE,
+    },
+
+    phone: {
+      type: String,
+      trim: true,
     },
 
     profile: {

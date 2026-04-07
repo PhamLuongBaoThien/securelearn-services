@@ -4,6 +4,8 @@
 // ========================
 import bcrypt from 'bcryptjs';
 import { User, IUser, Role } from '../models/user.model';
+import redisClient from '../config/redis';
+import mailerService from './mailer.service';
 
 class AuthService {
   /**
@@ -63,6 +65,131 @@ class AuthService {
   public async getProfile(userId: string): Promise<IUser | null> {
     const user = await User.findById(userId).select('-password');
     return user;
+  }
+
+  /**
+   * Cập nhật thông tin profile của user.
+   */
+  public async updateProfile(userId: string, data: { fullName?: string; phone?: string; avatarUrl?: string; bio?: string; headline?: string }): Promise<IUser | null> {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new Error('Người dùng không tồn tại.');
+    }
+
+    if (data.fullName !== undefined) user.fullName = data.fullName;
+    if (data.phone !== undefined) user.phone = data.phone;
+    
+    // Khởi tạo profile object nếu chưa có
+    if (!user.profile) {
+      user.profile = {};
+    }
+
+    if (data.avatarUrl !== undefined) user.profile.avatarUrl = data.avatarUrl;
+    if (data.bio !== undefined) user.profile.bio = data.bio;
+    if (data.headline !== undefined) user.profile.headline = data.headline;
+
+    await user.save();
+    return user;
+  }
+
+  /**
+   * Xóa tài khoản của user theo ID.
+   */
+  public async deleteAccount(userId: string): Promise<void> {
+    const result = await User.findByIdAndDelete(userId);
+    if (!result) {
+      throw new Error('Người dùng không tồn tại.');
+    }
+  }
+
+  /**
+   * Đổi mật khẩu
+   */
+  public async changePassword(userId: string, oldPassword?: string, newPassword?: string): Promise<void> {
+    const user = await User.findById(userId);
+    if (!user) throw new Error('Người dùng không tồn tại.');
+
+    if (!newPassword || newPassword.length < 6) {
+       throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự.');
+    }
+
+    if (user.password) {
+      // User đăng nhập bằng mật khẩu
+      if (!oldPassword) throw new Error('Vui lòng nhập mật khẩu hiện tại.');
+      const isMatch = await bcrypt.compare(oldPassword, user.password);
+      if (!isMatch) throw new Error('Mật khẩu hiện tại không đúng.');
+    } else {
+      // User ban đầu đăng nhập bằng google, chưa có mật khẩu
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+    await user.save();
+  }
+
+  /**
+   * Quên mật khẩu: Gửi OTP (15 phút) qua email cho user.
+   */
+  public async forgotPassword(email: string): Promise<void> {
+    const user = await User.findOne({ email });
+    if (!user) {
+      throw new Error('Email chưa được đăng ký trong hệ thống.');
+    }
+
+    // Tạo mã OTP 6 số
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Lưu OTP vào Redis với TTL là 15 phút = 900s
+    await redisClient.setex(`password_reset_otp:${email}`, 900, otp);
+
+    // Gửi OTP mail
+    await mailerService.sendPasswordResetOTP(email, otp);
+  }
+
+  /**
+   * Quét và kiểm tra tính hợp lệ của OTP (không xoá khỏi Redis)
+   */
+  public async verifyResetOTP(email: string, otp: string): Promise<void> {
+    const savedOtp = await redisClient.get(`password_reset_otp:${email}`);
+    
+    if (!savedOtp) {
+       throw new Error('Mã OTP đã hết hạn hoặc không tồn tại. Vui lòng yêu cầu lại.');
+    }
+
+    if (savedOtp !== otp) {
+       throw new Error('Mã OTP không chính xác.');
+    }
+  }
+
+  /**
+   * Reset mật khẩu thông qua OTP
+   */
+  public async resetPasswordByOTP(email: string, otp: string, newPassword: string): Promise<void> {
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự.');
+    }
+
+    // Lấy OTP từ Redis
+    const savedOtp = await redisClient.get(`password_reset_otp:${email}`);
+    
+    if (!savedOtp) {
+       throw new Error('Mã OTP đã hết hạn hoặc không tồn tại. Vui lòng yêu cầu lại.');
+    }
+
+    if (savedOtp !== otp) {
+       throw new Error('Mã OTP không chính xác.');
+    }
+
+    // Tìm và update User
+    const user = await User.findOne({ email });
+    if (!user) throw new Error('Người dùng không tồn tại.');
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+    await user.save();
+
+    // Xóa OTP khỏi Redis
+    await redisClient.del(`password_reset_otp:${email}`);
   }
 }
 

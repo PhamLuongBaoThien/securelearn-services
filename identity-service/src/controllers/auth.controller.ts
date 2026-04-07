@@ -182,6 +182,113 @@ class AuthController {
     res.clearCookie('refresh_token');
     res.status(200).json({ status: 'OK', message: 'Đăng xuất thành công.' });
   }
+
+  /**
+   * [PUT] /api/auth/profile
+   * Cập nhật thông tin profile của user
+   */
+  public async updateProfile(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { fullName, phone, bio, headline } = req.body;
+      const avatarUrl = req.file?.path; // Lấy URL từ Cloudinary nếu có up file
+
+      const updatedUser = await authService.updateProfile(req.userId!, {
+        fullName,
+        phone,
+        bio,
+        headline,
+        avatarUrl,
+      });
+
+      res.status(200).json({ status: 'OK', message: 'Cập nhật thành công', data: updatedUser });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [DELETE] /api/auth/account
+   * Xóa tài khoản người dùng
+   */
+  public async deleteAccount(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      await authService.deleteAccount(req.userId!);
+      res.clearCookie('refresh_token');
+      res.status(200).json({ status: 'OK', message: 'Đã xóa tài khoản thành công.' });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
+  /**
+   * [PUT] /api/auth/password
+   * Thay đổi mật khẩu
+   */
+  public async changePassword(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { oldPassword, newPassword } = req.body;
+      await authService.changePassword(req.userId!, oldPassword, newPassword);
+      res.status(200).json({ status: 'OK', message: 'Mật khẩu đã được cập nhật thành công.' });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [POST] /api/auth/forgot-password
+   * Yêu cầu gửi OTP về email
+   */
+  public async forgotPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp email.' });
+        return;
+      }
+
+      await authService.forgotPassword(email);
+      res.status(200).json({ status: 'OK', message: 'Mã OTP đã được gửi đến email của bạn.' });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [POST] /api/auth/verify-reset-otp
+   * Kiểm tra OTP hợp lệ trước khi cho phép nhập mật khẩu mới
+   */
+  public async verifyResetOTP(req: Request, res: Response): Promise<void> {
+    try {
+      const { email, otp } = req.body;
+      if (!email || !otp) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp email và otp.' });
+        return;
+      }
+      
+      await authService.verifyResetOTP(email, otp);
+      res.status(200).json({ status: 'OK', message: 'Mã OTP hợp lệ.' });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [POST] /api/auth/reset-password
+   * Nhập OTP và mật khẩu mới
+   */
+  public async resetPassword(req: Request, res: Response): Promise<void> {
+    try {
+       const { email, otp, newPassword } = req.body;
+       if (!email || !otp || !newPassword) {
+         res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp đầy đủ email, otp và newPassword.' });
+         return;
+       }
+
+       await authService.resetPasswordByOTP(email, otp, newPassword);
+       res.status(200).json({ status: 'OK', message: 'Khôi phục mật khẩu thành công. Vui lòng đăng nhập lại.' });
+    } catch (error: any) {
+       res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
 }
 
 export default new AuthController();
