@@ -62,8 +62,13 @@ class AuthService {
   /**
    * Lấy thông tin profile của user theo ID.
    */
-  public async getProfile(userId: string): Promise<IUser | null> {
-    const user = await User.findById(userId).select('-password');
+  public async getProfile(userId: string): Promise<any> {
+    const user = await User.findById(userId).lean();
+    if (user) {
+      // Trả về hasPassword để frontend biết user có mật khẩu cục bộ hay không
+      (user as any).hasPassword = !!user.password; // as any giúp bỏ qua lỗi type
+      delete (user as any).password; // Không trả password hash ra ngoài
+    }
     return user;
   }
 
@@ -135,6 +140,9 @@ class AuthService {
     if (!user) {
       throw new Error('Email chưa được đăng ký trong hệ thống.');
     }
+
+    // Cho phép cả tài khoản Google-only dùng chức năng này
+    // Mục đích: Tạo mật khẩu cục bộ để có thể đăng nhập bằng cả 2 cách
 
     // Tạo mã OTP 6 số
     const otp = Math.floor(100000 + Math.random() * 900000).toString();

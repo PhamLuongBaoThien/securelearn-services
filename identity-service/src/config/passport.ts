@@ -41,6 +41,23 @@ passport.use(
               avatarUrl: profile.photos?.[0]?.value || '',
             },
           });
+        } else {
+          // Account Linking: User đã tồn tại (đăng ký bằng email/password)
+          // → Cập nhật isVerified và avatar nếu chưa có
+          let needSave = false;
+
+          if (!user.isVerified) {
+            user.isVerified = true; // Đã xác thực qua Google
+            needSave = true;
+          }
+
+          if (!user.profile?.avatarUrl && profile.photos?.[0]?.value) {
+            if (!user.profile) user.profile = {};
+            user.profile.avatarUrl = profile.photos[0].value;
+            needSave = true;
+          }
+
+          if (needSave) await user.save();
         }
 
         return done(null, user);
