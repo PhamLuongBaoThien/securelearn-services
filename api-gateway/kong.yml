@@ -1,21 +1,66 @@
+# ========================
+# Kong Declarative Configuration
+# API Gateway cho SecureLearn Microservices
+# ========================
 _format_version: "3.0"
+
+# ===== SERVICES & ROUTES =====
 services:
+  # --- Identity Service ---
   - name: identity-service
-    url: http://identity-service:3001
+    url: http://identity-service:5001
     routes:
-      - name: identity-routes
+      - name: identity-auth-routes
         paths:
           - /api/auth
-          - /api/users
-  - name: course-service
-    url: http://course-service:3002
-    routes:
-      - name: course-routes
+        strip_path: false
+
+      - name: identity-admin-routes
         paths:
-          - /api/courses
-  - name: media-service
-    url: http://media-service:3003
-    routes:
-      - name: media-routes
-        paths:
-          - /api/media
+          - /api/admin/auth
+        strip_path: false
+
+  # --- Course Service (sẽ triển khai sau) ---
+  # - name: course-service
+  #   url: http://course-service:5002
+  #   routes:
+  #     - name: course-routes
+  #       paths:
+  #         - /api/courses
+  #       strip_path: false
+
+  # --- Media Service (sẽ triển khai sau) ---
+  # - name: media-service
+  #   url: http://media-service:5003
+  #   routes:
+  #     - name: media-routes
+  #       paths:
+  #         - /api/media
+  #       strip_path: false
+
+# ===== GLOBAL PLUGINS =====
+plugins:
+  # CORS — Quản lý tập trung tại Gateway
+  - name: cors
+    config:
+      origins:
+        - http://localhost:5173
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Authorization
+        - Content-Type
+        - X-Requested-With
+      credentials: true
+      max_age: 3600
+
+  # Rate Limiting — Chống spam/DDoS
+  - name: rate-limiting
+    config:
+      minute: 100
+      policy: local

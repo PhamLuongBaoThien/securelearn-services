@@ -1,0 +1,19 @@
+{
+  "name": "@securelearn/common",
+  "version": "1.0.0",
+  "description": "Shared library cho SecureLearn Microservices — Event Bus, Error Classes, Response Format",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.7"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.7",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
