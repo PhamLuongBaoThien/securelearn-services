@@ -4,6 +4,12 @@
 import passport from 'passport';
 import { Strategy as GoogleStrategy, Profile } from 'passport-google-oauth20';
 import { User, Role } from '../models/user.model';
+import {
+  publishMessage,
+  Exchange,
+  RoutingKey,
+  type UserRegisteredPayload,
+} from '@securelearn/common';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -41,6 +47,19 @@ passport.use(
               avatarUrl: profile.photos?.[0]?.value || '',
             },
           });
+
+          // Publish event: User mới đăng ký qua Google
+          await publishMessage<UserRegisteredPayload>(
+            Exchange.IDENTITY,
+            RoutingKey.USER_REGISTERED,
+            {
+              userId: user._id.toString(),
+              email: user.email,
+              fullName: user.fullName,
+              role: user.role,
+              registeredAt: new Date().toISOString(),
+            }
+          );
         } else {
           // Account Linking: User đã tồn tại (đăng ký bằng email/password)
           // → Cập nhật isVerified và avatar nếu chưa có
@@ -67,3 +86,4 @@ passport.use(
     }
   )
 );
+

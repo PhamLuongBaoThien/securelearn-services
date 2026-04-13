@@ -6,6 +6,14 @@ import bcrypt from 'bcryptjs';
 import { User, IUser, Role } from '../models/user.model';
 import redisClient from '../config/redis';
 import mailerService from './mailer.service';
+import {
+  publishMessage,
+  Exchange,
+  RoutingKey,
+  type UserRegisteredPayload,
+  type UserUpdatedPayload,
+  type UserDeletedPayload,
+} from '@securelearn/common';
 
 class AuthService {
   /**
@@ -31,6 +39,20 @@ class AuthService {
     });
 
     await newUser.save();
+
+    // Publish event: Thông báo cho các service khác biết có user mới
+    await publishMessage<UserRegisteredPayload>(
+      Exchange.IDENTITY,
+      RoutingKey.USER_REGISTERED,
+      {
+        userId: newUser._id.toString(),
+        email: newUser.email,
+        fullName: newUser.fullName,
+        role: newUser.role,
+        registeredAt: new Date().toISOString(),
+      }
+    );
+
     return newUser;
   }
 
@@ -94,6 +116,20 @@ class AuthService {
     if (data.headline !== undefined) user.profile.headline = data.headline;
 
     await user.save();
+
+    // Publish event: Thông báo profile đã được cập nhật
+    const updatedFields = Object.keys(data).filter(
+      (key) => data[key as keyof typeof data] !== undefined
+    );
+    await publishMessage<UserUpdatedPayload>(
+      Exchange.IDENTITY,
+      RoutingKey.USER_UPDATED,
+      {
+        userId,
+        updatedFields,
+      }
+    );
+
     return user;
   }
 
@@ -105,6 +141,16 @@ class AuthService {
     if (!result) {
       throw new Error('Người dùng không tồn tại.');
     }
+
+    // Publish event: Thông báo user đã bị xóa
+    await publishMessage<UserDeletedPayload>(
+      Exchange.IDENTITY,
+      RoutingKey.USER_DELETED,
+      {
+        userId,
+        email: result.email,
+      }
+    );
   }
 
   /**
