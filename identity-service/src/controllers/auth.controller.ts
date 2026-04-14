@@ -289,6 +289,22 @@ class AuthController {
        res.status(400).json({ status: 'ERR', message: error.message });
     }
   }
+
+  /**
+   * [PUT] /api/auth/profile/role
+   * Chuyển đổi vai trò sang giảng viên
+   */
+  public async switchToInstructor(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const updatedUser = await authService.switchToInstructor(req.userId!);
+      // Cần cấp lại token mới chứa role INSTRUCTOR (tùy chọn, vì token decode dựa trên Auth Middleware đã fetch lấy role mới nhất nếu chúng ta fetch)
+      // Tạm thời nếu user thay đổi role, lần tới refresh token hoặc login lại sẽ tự động lấy role mới. Hoặc ta có thể trả token mới.
+      // Front-end fetch `GET /me` sẽ lấy được role mới nhất.
+      res.status(200).json({ status: 'OK', message: 'Chuyển vai trò thành công', data: updatedUser });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
 }
 
 export default new AuthController();

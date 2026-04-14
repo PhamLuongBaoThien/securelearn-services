@@ -245,6 +245,33 @@ class AuthService {
     // Xóa OTP khỏi Redis
     await redisClient.del(`password_reset_otp:${email}`);
   }
+
+  /**
+   * Chuyển đổi vai trò của người dùng sang INSTRUCTOR
+   */
+  public async switchToInstructor(userId: string): Promise<IUser | null> {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new Error('Người dùng không tồn tại.');
+    }
+
+    if (user.role !== Role.INSTRUCTOR) {
+      user.role = Role.INSTRUCTOR;
+      await user.save();
+      
+      // Publish event: Thông báo role đã được cập nhật
+      await publishMessage<UserUpdatedPayload>(
+        Exchange.IDENTITY,
+        RoutingKey.USER_UPDATED,
+        {
+          userId,
+          updatedFields: ['role'],
+        }
+      );
+    }
+
+    return user;
+  }
 }
 
 export default new AuthService();

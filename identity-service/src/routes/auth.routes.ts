@@ -26,6 +26,9 @@ router.get('/me', extractUser, authController.getMe);
 // [PUT] /api/auth/profile — Cập nhật thông tin và avatar
 router.put('/profile', extractUser, upload.single('avatar'), authController.updateProfile);
 
+// [PUT] /api/auth/profile/role — Chuyển đổi vai trò sang giảng viên
+router.put('/profile/role', extractUser, authController.switchToInstructor);
+
 // [DELETE] /api/auth/account — Xóa tài khoản
 router.delete('/account', extractUser, authController.deleteAccount);
 
