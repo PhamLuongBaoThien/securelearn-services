@@ -4,30 +4,89 @@
 # ========================
 _format_version: "3.0"
 
-# ===== SERVICES & ROUTES =====
+# =============================================
+# CONSUMERS — Ứng dụng được phép sử dụng JWT
+# =============================================
+# Consumer = "Ai được phép gửi JWT?"
+# Khi Kong nhận JWT, nó đọc claim 'iss' → tìm consumer có 'key' trùng khớp
+# → dùng 'secret' của consumer đó để verify token
+consumers:
+  - username: securelearn-app
+    jwt_secrets:
+      - key: "securelearn"
+        secret: "securelearn_access_token_secret"   # PHẢI GIỐNG ACCESS_TOKEN trong .env
+        algorithm: HS256
+
+# =============================================
+# SERVICES & ROUTES
+# =============================================
 services:
-  # --- Identity Service ---
+  # ----- Identity Service -----
   - name: identity-service
-    url: http://identity-service:5001
+    url: http://identity-service:5001    # Tên service trong Docker network
     routes:
-      - name: identity-auth-routes
+      # Routes PUBLIC — Không cần JWT (đăng nhập, đăng ký, OAuth...)
+      - name: identity-public
         paths:
-          - /api/auth
+          - /api/auth/login
+          - /api/auth/register
+          - /api/auth/logout
+          - /api/auth/refresh-token
+          - /api/auth/forgot-password
+          - /api/auth/verify-reset-otp
+          - /api/auth/reset-password
+          - /api/auth/google
         strip_path: false
 
+      # Routes PROTECTED — Cần JWT
+      - name: identity-protected
+        paths:
+          - /api/auth/me
+          - /api/auth/profile
+          - /api/auth/account
+          - /api/auth/password
+        strip_path: false
+
+      # Admin routes (giữ riêng)
       - name: identity-admin-routes
         paths:
           - /api/admin/auth
         strip_path: false
 
-  # --- Course Service (sẽ triển khai sau) ---
-  # - name: course-service
-  #   url: http://course-service:5002
-  #   routes:
-  #     - name: course-routes
-  #       paths:
-  #         - /api/courses
-  #       strip_path: false
+  # ----- Course Service -----
+  - name: course-service
+    url: http://course-service:5002      # Tên service trong Docker network
+    routes:
+      # Routes PROTECTED GET — Cần JWT (enrolled, my-courses, manage)
+      # Kong match longest path trước → /api/courses/enrolled khớp trước /api/courses
+      - name: course-protected-reads
+        paths:
+          - /api/courses/enrolled
+          - /api/courses/my-courses
+        strip_path: false
+        methods:
+          - GET
+
+      # Routes PUBLIC — Không cần JWT
+      # GET /api/courses (danh sách) và GET /api/courses/:slug (chi tiết)
+      - name: course-public
+        paths:
+          - /api/courses
+        strip_path: false
+        methods:
+          - GET
+
+      # Routes PROTECTED — Cần JWT
+      # POST, PUT, PATCH, DELETE /api/courses/...
+      - name: course-protected
+        paths:
+          - /api/courses
+        strip_path: false
+        methods:
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
 
   # --- Media Service (sẽ triển khai sau) ---
   # - name: media-service
@@ -38,9 +97,11 @@ services:
   #         - /api/media
   #       strip_path: false
 
-# ===== GLOBAL PLUGINS =====
+# =============================================
+# PLUGINS
+# =============================================
 plugins:
-  # CORS — Quản lý tập trung tại Gateway
+  # ----- GLOBAL: CORS -----
   - name: cors
     config:
       origins:
@@ -53,14 +114,41 @@ plugins:
         - DELETE
         - OPTIONS
       headers:
-        - Authorization
+        - Authorization 
         - Content-Type
         - X-Requested-With
       credentials: true
       max_age: 3600
 
-  # Rate Limiting — Chống spam/DDoS
+  # ----- GLOBAL: Rate Limiting -----
   - name: rate-limiting
     config:
-      minute: 100
+      minute: 100 
       policy: local
+
+  # ----- JWT cho Identity Protected Routes -----
+  # Chỉ áp dụng cho route "identity-protected" (me, profile, account, password)
+  - name: jwt
+    route: identity-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  # ----- JWT cho Course Protected Routes -----
+  # Áp dụng cho route "course-protected" (POST, PUT, PATCH, DELETE)
+  - name: jwt
+    route: course-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  # ----- JWT cho Course Protected GET Routes -----
+  # Áp dụng cho route "course-protected-reads" (GET /enrolled, /my-courses)
+  - name: jwt
+    route: course-protected-reads
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp

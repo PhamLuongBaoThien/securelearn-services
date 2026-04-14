@@ -35,3 +35,27 @@ export const extractUser = (req: AuthRequest, res: Response, next: NextFunction)
   req.userRole = decoded.role;
   next();
 };
+
+/**
+ * Middleware kiểm tra role INSTRUCTOR.
+ * Phải dùng sau extractUser.
+ */
+export const requireInstructor = (req: AuthRequest, res: Response, next: NextFunction): void => {
+  if (req.userRole !== 'INSTRUCTOR') {
+    res.status(403).json({ status: 'ERR', message: 'Chỉ giảng viên mới có quyền thực hiện hành động này.' });
+    return;
+  }
+  next();
+};
+
+/**
+ * Middleware kiểm tra role STUDENT.
+ * Phải dùng sau extractUser.
+ */
+export const requireStudent = (req: AuthRequest, res: Response, next: NextFunction): void => {
+  if (req.userRole !== 'STUDENT') {
+    res.status(403).json({ status: 'ERR', message: 'Chỉ học viên mới có quyền thực hiện hành động này.' });
+    return;
+  }
+  next();
+};

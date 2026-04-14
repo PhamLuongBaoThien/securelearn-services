@@ -33,7 +33,7 @@ export const subscribeMessage = async <T>(
 
   // Đảm bảo exchange và queue tồn tại
   await channel.assertExchange(exchange, 'topic', { durable: true });
-  const q = await channel.assertQueue(queueName, { durable: true });
+  const q = await channel.assertQueue(queueName, { durable: true }); // durable: true tức là queue sẽ không bị mất khi restart rabbitmq
 
   // Bind queue với exchange theo routing key
   await channel.bindQueue(q.queue, exchange, routingKey);

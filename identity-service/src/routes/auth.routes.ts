@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import passport from 'passport';
 import authController from '../controllers/auth.controller';
-import { verifyJWT } from '../middlewares/auth.middleware';
+import { extractUser } from '../middlewares/auth.middleware';
 import upload from '../middlewares/upload.middleware';
 
 const router = Router();
@@ -21,16 +21,16 @@ router.post('/login', authController.login);
 router.post('/logout', authController.logout);
 
 // [GET] /api/auth/me — Lấy thông tin user đang đăng nhập (cần Access Token)
-router.get('/me', verifyJWT, authController.getMe);
+router.get('/me', extractUser, authController.getMe);
 
 // [PUT] /api/auth/profile — Cập nhật thông tin và avatar
-router.put('/profile', verifyJWT, upload.single('avatar'), authController.updateProfile);
+router.put('/profile', extractUser, upload.single('avatar'), authController.updateProfile);
 
 // [DELETE] /api/auth/account — Xóa tài khoản
-router.delete('/account', verifyJWT, authController.deleteAccount);
+router.delete('/account', extractUser, authController.deleteAccount);
 
 // [PUT] /api/auth/password — Thay đổi mật khẩu
-router.put('/password', verifyJWT, authController.changePassword);
+router.put('/password', extractUser, authController.changePassword);
 
 // ========== REFRESH TOKEN ==========
 

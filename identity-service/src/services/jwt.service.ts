@@ -10,7 +10,7 @@ dotenv.config();
 // ===== Sinh Access Token (ngắn hạn — 30 giây để test, production nên đặt 15m) =====
 const generalAccessToken = (payload: { id: string; role: string }) => {
   const access_token = jwt.sign(
-    { ...payload },
+    { ...payload, iss: 'securelearn' }, // iss claim để Kong JWT Plugin nhận diện
     process.env.ACCESS_TOKEN as string,
     { expiresIn: '30s' }
   );
@@ -20,7 +20,7 @@ const generalAccessToken = (payload: { id: string; role: string }) => {
 // ===== Sinh Refresh Token (dài hạn — 365 ngày) =====
 const generalRefreshToken = (payload: { id: string; role: string }) => {
   const refresh_token = jwt.sign(
-    { ...payload },
+    { ...payload, iss: 'securelearn' }, // iss claim để Kong JWT Plugin nhận diện
     process.env.REFRESH_TOKEN as string,
     { expiresIn: '365d' }
   );

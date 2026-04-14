@@ -4,7 +4,7 @@
 // ========================
 import { Router } from 'express';
 import adminController from '../controllers/admin.controller';
-import { verifyJWT } from '../middlewares/auth.middleware';
+import { extractUser } from '../middlewares/auth.middleware';
 
 const router = Router();
 
@@ -18,7 +18,7 @@ router.post('/login', adminController.login);
 router.post('/logout', adminController.logout);
 
 // [GET] /api/admin/auth/me — Lấy thông tin Admin đang đăng nhập
-router.get('/me', verifyJWT, adminController.getMe);
+router.get('/me', extractUser, adminController.getMe);
 
 // [POST] /api/admin/auth/refresh-token — Cấp lại token Admin
 router.post('/refresh-token', adminController.refreshToken);
