@@ -38,6 +38,17 @@ services:
           - /api/auth/google
         strip_path: false
 
+      # Routes PROTECTED CORS PREFLIGHT — Không cần JWT
+      - name: identity-preflight
+        paths:
+          - /api/auth/me
+          - /api/auth/profile
+          - /api/auth/account
+          - /api/auth/password
+        strip_path: false
+        methods:
+          - OPTIONS
+
       # Routes PROTECTED — Cần JWT
       - name: identity-protected
         paths:
@@ -46,6 +57,12 @@ services:
           - /api/auth/account
           - /api/auth/password
         strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
 
       # Admin routes (giữ riêng)
       - name: identity-admin-routes
@@ -57,6 +74,15 @@ services:
   - name: course-service
     url: http://course-service:5002      # Tên service trong Docker network
     routes:
+      # Routes CORS PREFLIGHT — Không cần JWT
+      # Cho phép browser gửi OPTIONS request mà không bị JWT chặn
+      - name: course-preflight
+        paths:
+          - /api/courses
+        strip_path: false
+        methods:
+          - OPTIONS
+
       # Routes PROTECTED GET — Cần JWT (enrolled, my-courses, manage)
       # Kong match longest path trước → /api/courses/enrolled khớp trước /api/courses
       - name: course-protected-reads

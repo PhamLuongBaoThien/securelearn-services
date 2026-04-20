@@ -7,13 +7,10 @@ import { User, IUser, Role } from '../models/user.model';
 import redisClient from '../config/redis';
 import mailerService from './mailer.service';
 import {
-  publishMessage,
-  Exchange,
-  RoutingKey,
-  type UserRegisteredPayload,
-  type UserUpdatedPayload,
-  type UserDeletedPayload,
-} from '@securelearn/common';
+  publishUserRegistered,
+  publishUserUpdated,
+  publishUserDeleted,
+} from '../events/publishers';
 
 class AuthService {
   /**
@@ -41,17 +38,13 @@ class AuthService {
     await newUser.save();
 
     // Publish event: Thông báo cho các service khác biết có user mới
-    await publishMessage<UserRegisteredPayload>(
-      Exchange.IDENTITY,
-      RoutingKey.USER_REGISTERED,
-      {
-        userId: newUser._id.toString(),
-        email: newUser.email,
-        fullName: newUser.fullName,
-        role: newUser.role,
-        registeredAt: new Date().toISOString(),
-      }
-    );
+    await publishUserRegistered({
+      userId: newUser._id.toString(),
+      email: newUser.email,
+      fullName: newUser.fullName,
+      role: newUser.role,
+      registeredAt: new Date().toISOString(),
+    });
 
     return newUser;
   }
@@ -121,14 +114,7 @@ class AuthService {
     const updatedFields = Object.keys(data).filter(
       (key) => data[key as keyof typeof data] !== undefined
     );
-    await publishMessage<UserUpdatedPayload>(
-      Exchange.IDENTITY,
-      RoutingKey.USER_UPDATED,
-      {
-        userId,
-        updatedFields,
-      }
-    );
+    await publishUserUpdated({ userId, updatedFields });
 
     return user;
   }
@@ -143,14 +129,7 @@ class AuthService {
     }
 
     // Publish event: Thông báo user đã bị xóa
-    await publishMessage<UserDeletedPayload>(
-      Exchange.IDENTITY,
-      RoutingKey.USER_DELETED,
-      {
-        userId,
-        email: result.email,
-      }
-    );
+    await publishUserDeleted({ userId, email: result.email });
   }
 
   /**
@@ -260,14 +239,7 @@ class AuthService {
       await user.save();
       
       // Publish event: Thông báo role đã được cập nhật
-      await publishMessage<UserUpdatedPayload>(
-        Exchange.IDENTITY,
-        RoutingKey.USER_UPDATED,
-        {
-          userId,
-          updatedFields: ['role'],
-        }
-      );
+      await publishUserUpdated({ userId, updatedFields: ['role'] });
     }
 
     return user;
