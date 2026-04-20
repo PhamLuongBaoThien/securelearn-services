@@ -3,7 +3,7 @@
 // ========================
 import { Enrollment, IEnrollment, EnrollmentStatus } from '../models/enrollment.model';
 import { Course } from '../models/course.model';
-import { publishMessage, Exchange, RoutingKey, type EnrollmentCreatedPayload } from '@securelearn/common';
+import { publishEnrollmentCreated } from '../events/publishers';
 
 class EnrollmentService {
   /**
@@ -37,15 +37,11 @@ class EnrollmentService {
     await Course.findByIdAndUpdate(courseId, { $inc: { enrollmentCount: 1 } });
 
     // 5. Publish event
-    await publishMessage<EnrollmentCreatedPayload>(
-      Exchange.COURSE,
-      RoutingKey.ENROLLMENT_CREATED,
-      {
-        enrollmentId: enrollment._id.toString(),
-        userId,
-        courseId,
-      }
-    );
+    await publishEnrollmentCreated({
+      enrollmentId: enrollment._id.toString(),
+      userId,
+      courseId,
+    });
 
     return enrollment;
   }

@@ -2,7 +2,7 @@
 // Service Layer: Logic nghiệp vụ Khóa học
 // ========================
 import { Course, ICourse, CourseStatus } from '../models/course.model';
-import { publishMessage, Exchange, RoutingKey, type CourseCreatedPayload } from '@securelearn/common';
+import { publishCourseCreated } from '../events/publishers';
 
 class CourseService {
   /**
@@ -25,15 +25,11 @@ class CourseService {
     await course.save();
 
     // Publish event
-    await publishMessage<CourseCreatedPayload>(
-      Exchange.COURSE,
-      RoutingKey.COURSE_CREATED,
-      {
-        courseId: course._id.toString(),
-        title: course.title,
-        instructorId: course.instructorId,
-      }
-    );
+    await publishCourseCreated({
+      courseId: course._id.toString(),
+      title: course.title,
+      instructorId: course.instructorId,
+    });
 
     return course;
   }
