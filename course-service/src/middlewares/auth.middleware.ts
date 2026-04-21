@@ -59,3 +59,17 @@ export const requireStudent = (req: AuthRequest, res: Response, next: NextFuncti
   }
   next();
 };
+
+/**
+ * Middleware cho phép cả STUDENT lẫn INSTRUCTOR truy cập.
+ * Dùng cho các chức năng mà giảng viên cũng được phép thực hiện với tư cách học viên
+ * (ví dụ: ghi danh khóa học của người khác, xem danh sách khóa đã học).
+ * Phải dùng sau extractUser.
+ */
+export const requireStudentOrInstructor = (req: AuthRequest, res: Response, next: NextFunction): void => {
+  if (req.userRole !== 'STUDENT' && req.userRole !== 'INSTRUCTOR') {
+    res.status(403).json({ status: 'ERR', message: 'Bạn không có quyền thực hiện hành động này.' });
+    return;
+  }
+  next();
+};

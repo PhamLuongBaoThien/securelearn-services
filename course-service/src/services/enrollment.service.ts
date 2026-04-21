@@ -8,8 +8,10 @@ import { publishEnrollmentCreated } from '../events/publishers';
 class EnrollmentService {
   /**
    * Ghi danh học viên vào khóa học.
+   * Cả STUDENT lẫn INSTRUCTOR đều có thể ghi danh,
+   * nhưng INSTRUCTOR không được ghi danh khóa học do chính mình tạo.
    */
-  public async enroll(userId: string, courseId: string): Promise<IEnrollment> {
+  public async enroll(userId: string, courseId: string, userRole: string): Promise<IEnrollment> {
     // 1. Kiểm tra khóa học có tồn tại và đã PUBLISHED không
     const course = await Course.findById(courseId);
     if (!course) {
@@ -19,13 +21,18 @@ class EnrollmentService {
       throw new Error('Khóa học chưa được xuất bản, không thể ghi danh.');
     }
 
-    // 2. Kiểm tra đã ghi danh chưa
+    // 2. Giảng viên không được ghi danh khóa học do chính mình tạo
+    if (userRole === 'INSTRUCTOR' && course.instructorId.toString() === userId) {
+      throw new Error('Giảng viên không thể ghi danh khóa học do chính mình tạo.');
+    }
+
+    // 3. Kiểm tra đã ghi danh chưa
     const existing = await Enrollment.findOne({ userId, courseId });
     if (existing) {
       throw new Error('Bạn đã ghi danh khóa học này rồi.');
     }
 
-    // 3. Tạo enrollment
+    // 4. Tạo enrollment
     const enrollment = new Enrollment({
       userId,
       courseId,
@@ -33,10 +40,10 @@ class EnrollmentService {
     });
     await enrollment.save();
 
-    // 4. Tăng enrollmentCount trên Course
+    // 5. Tăng enrollmentCount trên Course
     await Course.findByIdAndUpdate(courseId, { $inc: { enrollmentCount: 1 } });
 
-    // 5. Publish event
+    // 6. Publish event
     await publishEnrollmentCreated({
       enrollmentId: enrollment._id.toString(),
       userId,

@@ -292,15 +292,38 @@ class AuthController {
 
   /**
    * [PUT] /api/auth/profile/role
-   * Chuyển đổi vai trò sang giảng viên
+   * Chuyển đổi vai trò sang giảng viên.
+   * Cấp lại cả access_token + refresh_token mới chứa role INSTRUCTOR
+   * để frontend không cần đợi refresh/login lại.
    */
   public async switchToInstructor(req: AuthRequest, res: Response): Promise<void> {
     try {
       const updatedUser = await authService.switchToInstructor(req.userId!);
-      // Cần cấp lại token mới chứa role INSTRUCTOR (tùy chọn, vì token decode dựa trên Auth Middleware đã fetch lấy role mới nhất nếu chúng ta fetch)
-      // Tạm thời nếu user thay đổi role, lần tới refresh token hoặc login lại sẽ tự động lấy role mới. Hoặc ta có thể trả token mới.
-      // Front-end fetch `GET /me` sẽ lấy được role mới nhất.
-      res.status(200).json({ status: 'OK', message: 'Chuyển vai trò thành công', data: updatedUser });
+
+      // Sinh token mới với role INSTRUCTOR vừa được cập nhật
+      const access_token = generalAccessToken({
+        id: updatedUser!._id.toString(),
+        role: updatedUser!.role,
+      });
+      const refresh_token = generalRefreshToken({
+        id: updatedUser!._id.toString(),
+        role: updatedUser!.role,
+      });
+
+      // Ghi đè refresh token cũ trong cookie
+      res.cookie('refresh_token', refresh_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 365 * 24 * 60 * 60 * 1000, // 365 ngày
+      });
+
+      res.status(200).json({
+        status: 'OK',
+        message: 'Chuyển vai trò thành công',
+        data: updatedUser,
+        access_token, // Frontend lưu token mới vào state/localStorage
+      });
     } catch (error: any) {
       res.status(500).json({ status: 'ERR', message: error.message });
     }

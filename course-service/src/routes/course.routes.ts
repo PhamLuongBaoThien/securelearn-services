@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import courseController from '../controllers/course.controller';
 import enrollmentController from '../controllers/enrollment.controller';
-import { extractUser, requireInstructor, requireStudent } from '../middlewares/auth.middleware';
+import { extractUser, requireInstructor, requireStudent, requireStudentOrInstructor } from '../middlewares/auth.middleware';
 
 const router = Router();
 
@@ -13,13 +13,13 @@ const router = Router();
 // [GET] /api/courses — Danh sách khóa học đã publish (search, filter, pagination)
 router.get('/', courseController.getPublishedCourses);
 
-// ========== STUDENT (Cần đăng nhập + role STUDENT) ==========
+// ========== STUDENT & INSTRUCTOR (Có thể mua/học khóa học, nhưng INSTRUCTOR không được ghi danh khóa của chính mình) ==========
 
 // [GET] /api/courses/enrolled — Danh sách khóa học đã ghi danh
-router.get('/enrolled', extractUser, requireStudent, enrollmentController.getEnrolledCourses);
+router.get('/enrolled', extractUser, requireStudentOrInstructor, enrollmentController.getEnrolledCourses);
 
 // [POST] /api/courses/:id/enroll — Ghi danh vào khóa học
-router.post('/:id/enroll', extractUser, requireStudent, enrollmentController.enroll);
+router.post('/:id/enroll', extractUser, requireStudentOrInstructor, enrollmentController.enroll);
 
 // ========== INSTRUCTOR (Cần đăng nhập + role INSTRUCTOR) ==========
 

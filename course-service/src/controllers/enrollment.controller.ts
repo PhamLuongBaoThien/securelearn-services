@@ -8,11 +8,15 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 class EnrollmentController {
   /**
    * [POST] /api/courses/:id/enroll
-   * Ghi danh vào khóa học (Student).
+   * Ghi danh vào khóa học (Student hoặc Instructor học khóa của người khác).
    */
   public async enroll(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const enrollment = await enrollmentService.enroll(req.userId!, req.params.id as string);
+      const enrollment = await enrollmentService.enroll(
+        req.userId!,
+        req.params.id as string,
+        req.userRole!,
+      );
 
       res.status(201).json({
         status: 'OK',
@@ -20,7 +24,9 @@ class EnrollmentController {
         data: enrollment,
       });
     } catch (error: any) {
-      const status = error.message.includes('đã ghi danh') ? 409 : 400;
+      const status =
+        error.message.includes('đã ghi danh') ? 409 :
+        error.message.includes('không thể ghi danh') ? 403 : 400;
       res.status(status).json({ status: 'ERR', message: error.message });
     }
   }
