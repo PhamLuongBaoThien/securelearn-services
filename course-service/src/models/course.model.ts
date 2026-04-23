@@ -47,18 +47,21 @@ export interface ISection {
 export interface ICourse extends Document {
   title: string;
   slug: string;
-  description: string;
+  shortDescription: string;   // Mô tả ngắn hiển thị dưới tên khóa học
+  description: string;        // Mô tả chi tiết (rich text HTML)
   thumbnail: string;
-  instructorId: string;     // userId từ Identity Service
-  instructorName: string;   // Cache tên giảng viên (cập nhật qua event)
+  whatYouWillLearn: string[]; // Học viên sẽ học được gì
+  requirements: string[];     // Điều kiện tiên quyết
+  instructorId: string;       // userId từ Identity Service
+  instructorName: string;     // Cache tên giảng viên (cập nhật qua event)
   categoryId?: Types.ObjectId | null;
   level: CourseLevel;
   status: CourseStatus;
   price: number;
-  sections: ISection[]; // 1 course => nhiều section, 1 section => nhiều bài học
-  totalDuration: number;    // Tổng thời lượng (giây) — tính tự động
-  totalLessons: number;     // Tổng số bài — tính tự động
-  enrollmentCount: number;  // Số lượt ghi danh
+  sections: ISection[];
+  totalDuration: number;
+  totalLessons: number;
+  enrollmentCount: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -84,8 +87,11 @@ const courseSchema = new Schema<ICourse>(
   {
     title: { type: String, required: true, trim: true },
     slug: { type: String, unique: true },
+    shortDescription: { type: String, default: '', maxlength: 220 },
     description: { type: String, default: '' },
     thumbnail: { type: String, default: '' },
+    whatYouWillLearn: { type: [String], default: [] },
+    requirements: { type: [String], default: [] },
     instructorId: { type: String, required: true, index: true },
     instructorName: { type: String, default: '' },
     categoryId: { type: Schema.Types.ObjectId, ref: 'Category', default: null, index: true },

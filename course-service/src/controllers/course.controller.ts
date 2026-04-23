@@ -72,12 +72,15 @@ class CourseController {
    */
   public async updateCourse(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { title, description, thumbnail, categoryId, category, level, price, sections } = req.body;
+      const { title, shortDescription, description, thumbnail, whatYouWillLearn, requirements, categoryId, category, level, price, sections } = req.body;
 
       const course = await courseService.updateCourse(req.params.id as string, req.userId!, {
         title,
+        shortDescription,
         description,
         thumbnail,
+        whatYouWillLearn,
+        requirements,
         categoryId: categoryId !== undefined ? categoryId : category,
         level,
         price,

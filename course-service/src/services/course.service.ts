@@ -10,8 +10,11 @@ interface CourseResponse {
   _id: string;
   title: string;
   slug: string;
+  shortDescription: string;
   description: string;
   thumbnail: string;
+  whatYouWillLearn: string[];
+  requirements: string[];
   instructorId: string;
   instructorName: string;
   categoryId: string | null;
@@ -105,20 +108,18 @@ class CourseService {
   public async updateCourse(
     courseId: string,
     instructorId: string,
-    data: Partial<Pick<ICourse, 'title' | 'description' | 'thumbnail' | 'level' | 'price' | 'sections'>> & { categoryId?: string }
+    data: Partial<Pick<ICourse, 'title' | 'shortDescription' | 'description' | 'thumbnail' | 'whatYouWillLearn' | 'requirements' | 'level' | 'price' | 'sections'>> & { categoryId?: string }
   ): Promise<CourseResponse> {
     const course = await Course.findById(courseId);
-    if (!course) {
-      throw new Error('Khóa học không tồn tại.');
-    }
-    if (course.instructorId !== instructorId) {
-      throw new Error('Bạn không có quyền chỉnh sửa khóa học này.');
-    }
+    if (!course) throw new Error('Khóa học không tồn tại.');
+    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền chỉnh sửa khóa học này.');
 
-    // Cập nhật các trường được truyền vào
     if (data.title !== undefined) course.title = data.title;
+    if (data.shortDescription !== undefined) course.shortDescription = data.shortDescription;
     if (data.description !== undefined) course.description = data.description;
     if (data.thumbnail !== undefined) course.thumbnail = data.thumbnail;
+    if (data.whatYouWillLearn !== undefined) course.whatYouWillLearn = data.whatYouWillLearn;
+    if (data.requirements !== undefined) course.requirements = data.requirements;
     if (data.categoryId !== undefined) {
       if (!data.categoryId) {
         course.categoryId = null;
@@ -131,7 +132,7 @@ class CourseService {
     if (data.price !== undefined) course.price = data.price;
     if (data.sections !== undefined) course.sections = data.sections;
 
-    await course.save(); // Pre-save hook tự tính totalDuration, totalLessons
+    await course.save();
     return this.getCourseById(course._id.toString()) as Promise<CourseResponse>;
   }
 
@@ -263,8 +264,11 @@ class CourseService {
       _id: course._id.toString(),
       title: course.title,
       slug: course.slug,
+      shortDescription: course.shortDescription || '',
       description: course.description,
       thumbnail: course.thumbnail,
+      whatYouWillLearn: course.whatYouWillLearn || [],
+      requirements: course.requirements || [],
       instructorId: course.instructorId,
       instructorName: course.instructorName,
       categoryId: category?._id || (course.categoryId ? course.categoryId.toString() : null),
