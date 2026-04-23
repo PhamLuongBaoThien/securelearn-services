@@ -79,6 +79,7 @@ services:
       - name: course-preflight
         paths:
           - /api/courses
+          - /api/categories
         strip_path: false
         methods:
           - OPTIONS
@@ -89,6 +90,7 @@ services:
         paths:
           - /api/courses/enrolled
           - /api/courses/my-courses
+          - /api/categories/admin/all
         strip_path: false
         methods:
           - GET
@@ -98,6 +100,7 @@ services:
       - name: course-public
         paths:
           - /api/courses
+          - /api/categories
         strip_path: false
         methods:
           - GET
@@ -107,6 +110,7 @@ services:
       - name: course-protected
         paths:
           - /api/courses
+          - /api/categories
         strip_path: false
         methods:
           - POST
@@ -143,6 +147,7 @@ plugins:
         - Authorization 
         - Content-Type
         - X-Requested-With
+        - X-Auth-Context
       credentials: true
       max_age: 3600
 

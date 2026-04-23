@@ -12,7 +12,7 @@ class CourseController {
    */
   public async createCourse(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { title, description, category, level, price } = req.body;
+      const { title, description, categoryId, category, level, price } = req.body;
 
       if (!title) {
         res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp tên khóa học.' });
@@ -22,7 +22,7 @@ class CourseController {
       const course = await courseService.createCourse({
         title,
         description,
-        category,
+        categoryId: categoryId || category,
         level,
         price,
         instructorId: req.userId!,
@@ -72,13 +72,13 @@ class CourseController {
    */
   public async updateCourse(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { title, description, thumbnail, category, level, price, sections } = req.body;
+      const { title, description, thumbnail, categoryId, category, level, price, sections } = req.body;
 
       const course = await courseService.updateCourse(req.params.id as string, req.userId!, {
         title,
         description,
         thumbnail,
-        category,
+        categoryId: categoryId !== undefined ? categoryId : category,
         level,
         price,
         sections,

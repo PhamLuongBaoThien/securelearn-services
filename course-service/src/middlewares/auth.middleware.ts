@@ -49,6 +49,18 @@ export const requireInstructor = (req: AuthRequest, res: Response, next: NextFun
 };
 
 /**
+ * Middleware kiểm tra role ADMIN.
+ * Phải dùng sau extractUser.
+ */
+export const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction): void => {
+  if (req.userRole !== 'ADMIN') {
+    res.status(403).json({ status: 'ERR', message: 'Chỉ admin mới có quyền thực hiện hành động này.' });
+    return;
+  }
+  next();
+};
+
+/**
  * Middleware kiểm tra role STUDENT.
  * Phải dùng sau extractUser.
  */

@@ -14,9 +14,9 @@ export enum CourseLevel {
 }
 
 export enum CourseStatus {
-  DRAFT = 'DRAFT',
-  PUBLISHED = 'PUBLISHED',
-  ARCHIVED = 'ARCHIVED',
+  DRAFT = 'DRAFT', // Nháp
+  PUBLISHED = 'PUBLISHED', // Công khai
+  ARCHIVED = 'ARCHIVED', // Lưu trữ
 }
 
 export enum LessonType {
@@ -33,7 +33,7 @@ export interface ILesson {
   type: LessonType;
   content: string;       // URL video hoặc nội dung document
   duration: number;       // Thời lượng (giây), 0 nếu không phải video
-  order: number;
+  order: number;          // Thứ tự bài học
   isFreePreview: boolean; // Cho xem miễn phí (không cần ghi danh)
 }
 
@@ -51,11 +51,11 @@ export interface ICourse extends Document {
   thumbnail: string;
   instructorId: string;     // userId từ Identity Service
   instructorName: string;   // Cache tên giảng viên (cập nhật qua event)
-  category: string;
+  categoryId?: Types.ObjectId | null;
   level: CourseLevel;
   status: CourseStatus;
   price: number;
-  sections: ISection[];
+  sections: ISection[]; // 1 course => nhiều section, 1 section => nhiều bài học
   totalDuration: number;    // Tổng thời lượng (giây) — tính tự động
   totalLessons: number;     // Tổng số bài — tính tự động
   enrollmentCount: number;  // Số lượt ghi danh
@@ -88,7 +88,7 @@ const courseSchema = new Schema<ICourse>(
     thumbnail: { type: String, default: '' },
     instructorId: { type: String, required: true, index: true },
     instructorName: { type: String, default: '' },
-    category: { type: String, default: 'Uncategorized', trim: true },
+    categoryId: { type: Schema.Types.ObjectId, ref: 'Category', default: null, index: true },
     level: {
       type: String,
       enum: Object.values(CourseLevel),
