@@ -1,5 +1,7 @@
 import { Category, ICategory } from '../models/category.model';
 
+const MAX_CATEGORY_DEPTH = 4;
+
 interface CategoryNode {
   _id: string;
   name: string;
@@ -72,7 +74,7 @@ class CategoryService {
     }
 
     const nextParentId = data.parentId !== undefined ? data.parentId : category.parentId?.toString() ?? null;
-    const parent = await this.validateParent(nextParentId, categoryId);
+    const parent = await this.validateParent(nextParentId, categoryId, categoryId);
 
     if (data.parentId !== undefined) {
       category.parentId = parent?._id ?? null;
@@ -161,8 +163,15 @@ class CategoryService {
     return Array.from(collected);
   }
 
-  private async validateParent(parentId?: string | null, currentCategoryId?: string): Promise<ICategory | null> {
+  private async validateParent(
+    parentId?: string | null,
+    currentCategoryId?: string,
+    movingCategoryId?: string
+  ): Promise<ICategory | null> {
     if (parentId === undefined || parentId === null || parentId === '') {
+      if (movingCategoryId) {
+        await this.ensureDepthLimit(null, movingCategoryId);
+      }
       return null;
     }
 
@@ -187,7 +196,52 @@ class CategoryService {
       }
     }
 
+    await this.ensureDepthLimit(parent, movingCategoryId);
+
     return parent;
+  }
+
+  private async ensureDepthLimit(parent: ICategory | null, movingCategoryId?: string): Promise<void> {
+    const parentDepth = await this.getCategoryDepth(parent);
+    const subtreeHeight = movingCategoryId ? await this.getSubtreeHeight(movingCategoryId) : 1;
+
+    if (parentDepth + subtreeHeight > MAX_CATEGORY_DEPTH) {
+      throw new Error(`Danh mục chỉ được phép sâu tối đa ${MAX_CATEGORY_DEPTH} cấp.`);
+    }
+  }
+
+  private async getCategoryDepth(category: ICategory | null): Promise<number> {
+    let depth = 0;
+    let cursor = category;
+
+    while (cursor) {
+      depth += 1;
+      cursor = cursor.parentId ? await Category.findById(cursor.parentId) : null;
+    }
+
+    return depth;
+  }
+
+  private async getSubtreeHeight(categoryId: string): Promise<number> {
+    const categories = await Category.find().select('_id parentId').lean();
+    const childrenMap = new Map<string, string[]>();
+
+    for (const category of categories) {
+      if (!category.parentId) continue;
+      const parentId = category.parentId.toString();
+      const childId = category._id.toString();
+      const children = childrenMap.get(parentId) || [];
+      children.push(childId);
+      childrenMap.set(parentId, children);
+    }
+
+    const measure = (currentId: string): number => {
+      const children = childrenMap.get(currentId) || [];
+      if (children.length === 0) return 1;
+      return 1 + Math.max(...children.map((childId) => measure(childId)));
+    };
+
+    return measure(categoryId);
   }
 
   private buildTree(

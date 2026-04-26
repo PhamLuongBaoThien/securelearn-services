@@ -7,22 +7,22 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 dotenv.config();
 
-// ===== Sinh Access Token (ngắn hạn — 30 giây để test, production nên đặt 15m) =====
+// ===== Sinh Access Token (ngắn hạn) =====
 const generalAccessToken = (payload: { id: string; role: string }) => {
   const access_token = jwt.sign(
     { ...payload, iss: 'securelearn' }, // iss claim để Kong JWT Plugin nhận diện
     process.env.ACCESS_TOKEN as string,
-    { expiresIn: '30s' }
+    { expiresIn: '10m' }
   );
   return access_token;
 };
 
-// ===== Sinh Refresh Token (dài hạn — 365 ngày) =====
+// ===== Sinh Refresh Token =====
 const generalRefreshToken = (payload: { id: string; role: string }) => {
   const refresh_token = jwt.sign(
     { ...payload, iss: 'securelearn' }, // iss claim để Kong JWT Plugin nhận diện
     process.env.REFRESH_TOKEN as string,
-    { expiresIn: '365d' }
+    { expiresIn: '7d' }
   );
   return refresh_token;
 };

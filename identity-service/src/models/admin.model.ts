@@ -5,6 +5,10 @@ export interface IAdmin extends Document {
   password?: string;
   fullName: string;
   permissions: string[]; // VD: ['MANAGE_USERS', 'MANAGE_COURSES']
+  phone?: string;
+  department?: string;
+  bio?: string;
+  avatarUrl?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -32,7 +36,20 @@ const adminSchema: Schema = new Schema(
         type: String,
       },
     ],
-
+    phone: {
+      type: String,
+      trim: true,
+    },
+    department: {
+      type: String,
+      trim: true,
+    },
+    bio: {
+      type: String,
+    },
+    avatarUrl: {
+      type: String,
+    },
   },
   {
     timestamps: true,

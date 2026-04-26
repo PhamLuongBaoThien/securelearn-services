@@ -43,6 +43,7 @@ services:
         paths:
           - /api/auth/me
           - /api/auth/profile
+          - /api/auth/profile/role
           - /api/auth/account
           - /api/auth/password
         strip_path: false
@@ -54,6 +55,7 @@ services:
         paths:
           - /api/auth/me
           - /api/auth/profile
+          - /api/auth/profile/role
           - /api/auth/account
           - /api/auth/password
         strip_path: false
@@ -64,11 +66,34 @@ services:
           - PATCH
           - DELETE
 
-      # Admin routes (giữ riêng)
-      - name: identity-admin-routes
+      # Admin routes PUBLIC — Không cần JWT
+      - name: identity-admin-public
         paths:
           - /api/admin/auth
         strip_path: false
+        methods:
+          - POST
+
+      # Admin routes PROTECTED CORS PREFLIGHT — Không cần JWT
+      - name: identity-admin-preflight
+        paths:
+          - /api/admin/auth/me
+          - /api/admin/auth/profile
+          - /api/admin/auth/password
+        strip_path: false
+        methods:
+          - OPTIONS
+
+      # Admin routes PROTECTED — Cần JWT
+      - name: identity-admin-protected
+        paths:
+          - /api/admin/auth/me
+          - /api/admin/auth/profile
+          - /api/admin/auth/password
+        strip_path: false
+        methods:
+          - GET
+          - PUT
 
   # ----- Course Service -----
   - name: course-service
@@ -90,6 +115,7 @@ services:
         paths:
           - /api/courses/enrolled
           - /api/courses/my-courses
+          - ~/api/courses/[^/]+/manage$
           - /api/categories/admin/all
         strip_path: false
         methods:
@@ -146,8 +172,6 @@ plugins:
       headers:
         - Authorization 
         - Content-Type
-        - X-Requested-With
-        - X-Auth-Context
       credentials: true
       max_age: 3600
 
@@ -179,6 +203,14 @@ plugins:
   # Áp dụng cho route "course-protected-reads" (GET /enrolled, /my-courses)
   - name: jwt
     route: course-protected-reads
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  # ----- JWT cho Admin Protected Routes -----
+  - name: jwt
+    route: identity-admin-protected
     config:
       key_claim_name: iss
       claims_to_verify:

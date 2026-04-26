@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import adminController from '../controllers/admin.controller';
 import { extractUser } from '../middlewares/auth.middleware';
+import upload from '../middlewares/upload.middleware';
 
 const router = Router();
 
@@ -22,5 +23,11 @@ router.get('/me', extractUser, adminController.getMe);
 
 // [POST] /api/admin/auth/refresh-token — Cấp lại token Admin
 router.post('/refresh-token', adminController.refreshToken);
+
+// [PUT] /api/admin/auth/profile — Cập nhật thông tin và avatar Admin
+router.put('/profile', extractUser, upload.single('avatar'), adminController.updateProfile);
+
+// [PUT] /api/admin/auth/password — Thay đổi mật khẩu Admin
+router.put('/password', extractUser, adminController.changePassword);
 
 export default router;

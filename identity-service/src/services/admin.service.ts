@@ -52,6 +52,52 @@ class AdminService {
     const admin = await Admin.findById(adminId).select('-password');
     return admin;
   }
+
+  /**
+   * Cập nhật thông tin Admin (phone, department, bio, avatarUrl).
+   */
+  public async updateProfile(adminId: string, updateData: Partial<IAdmin>): Promise<IAdmin> {
+    const admin = await Admin.findByIdAndUpdate(
+      adminId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    ).select('-password');
+    if (!admin) {
+      throw new Error('Tài khoản admin không tồn tại.');
+    }
+    return admin;
+  }
+
+  /**
+   * Đổi mật khẩu Admin.
+   */
+  public async changePassword(adminId: string, oldPassword?: string, newPassword?: string): Promise<void> {
+    if (!newPassword) {
+      throw new Error('Vui lòng cung cấp mật khẩu mới.');
+    }
+    
+    const admin = await Admin.findById(adminId);
+    if (!admin) {
+      throw new Error('Tài khoản admin không tồn tại.');
+    }
+
+    if (!admin.password) {
+      throw new Error('Tài khoản admin chưa được thiết lập mật khẩu.');
+    }
+
+    if (!oldPassword) {
+      throw new Error('Vui lòng cung cấp mật khẩu hiện tại.');
+    }
+
+    const isMatch = await bcrypt.compare(oldPassword, admin.password);
+    if (!isMatch) {
+      throw new Error('Mật khẩu hiện tại không chính xác.');
+    }
+
+    const hashPassword = await bcrypt.hash(newPassword, 10);
+    admin.password = hashPassword;
+    await admin.save();
+  }
 }
 
 export default new AdminService();

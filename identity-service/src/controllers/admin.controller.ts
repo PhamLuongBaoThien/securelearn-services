@@ -142,6 +142,58 @@ class AdminController {
     res.clearCookie('admin_refresh_token');
     res.status(200).json({ status: 'OK', message: 'Đăng xuất Admin thành công.' });
   }
+
+  /**
+   * [PUT] /api/admin/auth/profile
+   * Cập nhật thông tin Admin. Hỗ trợ upload ảnh đại diện (multipart/form-data).
+   */
+  public async updateProfile(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { fullName, phone, department, bio } = req.body;
+      const adminId = req.userId!;
+
+      const updateData: any = {};
+      if (fullName) updateData.fullName = fullName;
+      if (phone !== undefined) updateData.phone = phone;
+      if (department !== undefined) updateData.department = department;
+      if (bio !== undefined) updateData.bio = bio;
+
+      // Xử lý avatarUrl nếu có upload file
+      if (req.file) {
+        updateData.avatarUrl = (req.file as any).path; // Lấy URL từ Cloudinary storage
+      }
+
+      const updatedAdmin = await adminService.updateProfile(adminId, updateData);
+      
+      res.status(200).json({
+        status: 'OK',
+        message: 'Cập nhật hồ sơ thành công.',
+        data: updatedAdmin,
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [PUT] /api/admin/auth/password
+   * Thay đổi mật khẩu cho Admin.
+   */
+  public async changePassword(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { oldPassword, newPassword } = req.body;
+      const adminId = req.userId!;
+
+      await adminService.changePassword(adminId, oldPassword, newPassword);
+
+      res.status(200).json({
+        status: 'OK',
+        message: 'Thay đổi mật khẩu thành công.',
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
 }
 
 export default new AdminController();
