@@ -111,10 +111,15 @@ class AuthService {
     await user.save();
 
     // Publish event: Thông báo profile đã được cập nhật
+    // Gửi kèm fullName (nếu có thay đổi) để course-service tự đồng bộ instructorName
     const updatedFields = Object.keys(data).filter(
       (key) => data[key as keyof typeof data] !== undefined
     );
-    await publishUserUpdated({ userId, updatedFields });
+    await publishUserUpdated({
+      userId,
+      updatedFields,
+      ...(data.fullName !== undefined && { fullName: user.fullName }),
+    });
 
     return user;
   }

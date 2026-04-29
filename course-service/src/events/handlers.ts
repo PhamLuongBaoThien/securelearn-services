@@ -23,14 +23,15 @@ export const registerEventHandlers = async (): Promise<void> => {
     RoutingKey.USER_UPDATED,
     'course-service.user-updated',
     async (payload) => {
-      console.log('[CourseEvent] User updated:', payload.userId);
+      console.log('[CourseEvent] User updated:', payload.userId, '| fields:', payload.updatedFields);
 
-      // Nếu user đổi tên → cập nhật instructorName trong tất cả khóa học của họ
-      if (payload.updatedFields.includes('fullName')) {
-        // Gọi API identity-service để lấy tên mới (tạm thời log)
-        // Sau này có thể gọi internal API hoặc cache
-        console.log(`[CourseEvent] Cần cập nhật instructorName cho user ${payload.userId}`);
-        // TODO: Implement khi có internal API hoặc payload chứa tên mới
+      // Nếu giảng viên đổi tên → đồng bộ instructorName trong tất cả khóa học của họ
+      if (payload.updatedFields.includes('fullName') && payload.fullName) {
+        const result = await Course.updateMany(
+          { instructorId: payload.userId },
+          { $set: { instructorName: payload.fullName } }
+        );
+        console.log(`[CourseEvent] Đã cập nhật instructorName thành "${payload.fullName}" cho ${result.modifiedCount} khóa học của user ${payload.userId}`);
       }
     }
   );

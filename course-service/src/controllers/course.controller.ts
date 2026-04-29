@@ -4,6 +4,7 @@
 import { Request, Response } from 'express';
 import courseService from '../services/course.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { getInstructorName } from '../config/identity.client';
 
 class CourseController {
   /**
@@ -19,6 +20,9 @@ class CourseController {
         return;
       }
 
+      // Lấy tên giảng viên từ identity-service qua Internal API (1 lần duy nhất lúc tạo)
+      const instructorName = await getInstructorName(req.userId!);
+
       const course = await courseService.createCourse({
         title,
         description,
@@ -26,7 +30,7 @@ class CourseController {
         level,
         price,
         instructorId: req.userId!,
-        instructorName: '', // Sẽ được cập nhật sau khi có API lấy tên instructor
+        instructorName,
       });
 
       res.status(201).json({
