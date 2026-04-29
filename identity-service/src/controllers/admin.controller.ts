@@ -7,6 +7,8 @@ import adminService from '../services/admin.service';
 import { generalAccessToken, generalRefreshToken, refreshTokenJwtService } from '../services/jwt.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
+const REFRESH_TOKEN_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 ngày
+
 class AdminController {
   /**
    * [POST] /api/admin/auth/setup
@@ -56,7 +58,11 @@ class AdminController {
       const admin = await adminService.login(email, password);
 
       // Sinh token từ jwt.service
-      const access_token = generalAccessToken({ id: admin._id.toString(), role: 'ADMIN' });
+      const access_token = generalAccessToken({
+        id: admin._id.toString(),
+        role: 'ADMIN',
+        fullName: admin.fullName,
+      });
       const refresh_token = generalRefreshToken({ id: admin._id.toString(), role: 'ADMIN' });
 
       // Lưu Refresh Token vào HttpOnly Cookie riêng cho admin
@@ -64,7 +70,7 @@ class AdminController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 365 * 24 * 60 * 60 * 1000, // 365 ngày
+        maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
       });
 
       res.status(200).json({
@@ -105,10 +111,17 @@ class AdminController {
         return;
       }
 
+      const admin = await adminService.getProfile(result.decoded!.id);
+      const access_token = generalAccessToken({
+        id: result.decoded!.id,
+        role: result.decoded!.role,
+        fullName: admin?.fullName ?? '',
+      });
+
       res.status(200).json({
         status: 'OK',
-        message: result.message,
-        access_token: result.access_token,
+        message: 'Cấp lại access token thành công.',
+        access_token,
       });
     } catch (error: any) {
       res.clearCookie('admin_refresh_token');

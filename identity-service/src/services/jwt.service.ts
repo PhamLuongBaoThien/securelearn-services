@@ -7,8 +7,9 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 dotenv.config();
 
-// ===== Sinh Access Token (ngắn hạn) =====
-const generalAccessToken = (payload: { id: string; role: string }) => {
+// ===== Sinh Access Token (ngắn hạn — 10 phút) =====
+// Chứa fullName để các service đọc tên mà không cần gọi DB
+const generalAccessToken = (payload: { id: string; role: string; fullName: string }) => {
   const access_token = jwt.sign(
     { ...payload, iss: 'securelearn' }, // iss claim để Kong JWT Plugin nhận diện
     process.env.ACCESS_TOKEN as string,
@@ -17,10 +18,11 @@ const generalAccessToken = (payload: { id: string; role: string }) => {
   return access_token;
 };
 
-// ===== Sinh Refresh Token =====
+// ===== Sinh Refresh Token (dài hạn — 7 ngày) =====
+// Chỉ chứa {id, role} — KHÔNG chứa fullName để tránh reset thời gian session khi đổi tên
 const generalRefreshToken = (payload: { id: string; role: string }) => {
   const refresh_token = jwt.sign(
-    { ...payload, iss: 'securelearn' }, // iss claim để Kong JWT Plugin nhận diện
+    { ...payload, iss: 'securelearn' },
     process.env.REFRESH_TOKEN as string,
     { expiresIn: '7d' }
   );
@@ -59,24 +61,19 @@ const verifyResetToken = (token: string): Promise<{ status: string; message?: st
   });
 };
 
-// ===== Refresh Token — Dùng refresh token cũ để cấp access token mới =====
-const refreshTokenJwtService = (token: string): Promise<{ status: string; message: string; access_token?: string }> => {
+// ===== Xác minh Refresh Token — chỉ verify, trả về decoded payload =====
+// Controller sẽ query DB lấy fullName mới nhất rồi mới gọi generalAccessToken
+const refreshTokenJwtService = (token: string): Promise<{ status: string; message: string; decoded?: { id: string; role: string } }> => {
   return new Promise((resolve, reject) => {
     try {
       jwt.verify(token, process.env.REFRESH_TOKEN as string, (err, user: any) => {
         if (err) {
           return resolve({ status: 'ERR', message: 'Token không hợp lệ hoặc đã hết hạn.' });
         }
-        // Sinh access token mới từ thông tin user trong refresh token
-        const access_token = generalAccessToken({
-          id: user?.id,
-          role: user?.role,
-        });
-
         resolve({
           status: 'OK',
-          message: 'Cấp lại access token thành công.',
-          access_token,
+          message: 'Token hợp lệ.',
+          decoded: { id: user?.id, role: user?.role },
         });
       });
     } catch (error) {

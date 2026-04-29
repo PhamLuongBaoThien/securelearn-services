@@ -6,6 +6,8 @@ import authService from '../services/auth.service';
 import { generalAccessToken, generalRefreshToken, refreshTokenJwtService } from '../services/jwt.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
+const REFRESH_TOKEN_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 ngày
+
 class AuthController {
   /**
    * [POST] /api/auth/register
@@ -69,7 +71,7 @@ class AuthController {
       const user = await authService.login(email, password);
 
       // Sinh token từ jwt.service
-      const access_token = generalAccessToken({ id: user._id.toString(), role: user.role });
+      const access_token = generalAccessToken({ id: user._id.toString(), role: user.role, fullName: user.fullName });
       const refresh_token = generalRefreshToken({ id: user._id.toString(), role: user.role });
 
       // Lưu Refresh Token vào HttpOnly Cookie (chống XSS — JS không đọc được)
@@ -77,7 +79,7 @@ class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 365 * 24 * 60 * 60 * 1000, // 365 ngày
+        maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
       });
 
       res.status(200).json({
@@ -120,10 +122,18 @@ class AuthController {
         return;
       }
 
+      // Query DB lấy fullName hiện tại — đảm bảo access token luôn có tên mới nhất
+      const user = await authService.getProfile(result.decoded!.id);
+      const access_token = generalAccessToken({
+        id: result.decoded!.id,
+        role: result.decoded!.role,
+        fullName: user?.fullName ?? '',
+      });
+
       res.status(200).json({
         status: 'OK',
-        message: result.message,
-        access_token: result.access_token,
+        message: 'Cấp lại access token thành công.',
+        access_token,
       });
     } catch (error: any) {
       res.clearCookie('refresh_token');
@@ -155,7 +165,7 @@ class AuthController {
   public async googleCallback(req: Request, res: Response): Promise<void> {
     try {
       const user: any = req.user;
-      const access_token = generalAccessToken({ id: user._id.toString(), role: user.role });
+      const access_token = generalAccessToken({ id: user._id.toString(), role: user.role, fullName: user.fullName });
       const refresh_token = generalRefreshToken({ id: user._id.toString(), role: user.role });
 
       // Gắn refresh token vào cookie
@@ -163,7 +173,7 @@ class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 365 * 24 * 60 * 60 * 1000,
+        maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
       });
 
       // Redirect về frontend kèm access token qua query param
@@ -200,7 +210,23 @@ class AuthController {
         avatarUrl,
       });
 
-      res.status(200).json({ status: 'OK', message: 'Cập nhật thành công', data: updatedUser });
+      // Nếu fullName thay đổi → chỉ cấp lại access token mới (không cấp lại refresh token — tránh reset thời gian session)
+      let new_access_token: string | undefined;
+      if (fullName !== undefined && updatedUser) {
+        new_access_token = generalAccessToken({
+          id: req.userId!,
+          role: req.userRole!,
+          fullName: updatedUser.fullName,
+        });
+      }
+
+      res.status(200).json({
+        status: 'OK',
+        message: 'Cập nhật thành công',
+        data: updatedUser,
+        // access_token mới chỉ được trả về khi fullName thay đổi
+        ...(new_access_token && { access_token: new_access_token }),
+      });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }
@@ -304,6 +330,7 @@ class AuthController {
       const access_token = generalAccessToken({
         id: updatedUser!._id.toString(),
         role: updatedUser!.role,
+        fullName: updatedUser!.fullName,
       });
       const refresh_token = generalRefreshToken({
         id: updatedUser!._id.toString(),
@@ -315,7 +342,7 @@ class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 365 * 24 * 60 * 60 * 1000, // 365 ngày
+        maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
       });
 
       res.status(200).json({

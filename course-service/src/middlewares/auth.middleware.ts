@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 export interface AuthRequest extends Request {
   userId?: string;
   userRole?: string;
+  userName?: string; // fullName của user, được giải mã từ JWT payload
 }
 
 /**
@@ -24,7 +25,7 @@ export const extractUser = (req: AuthRequest, res: Response, next: NextFunction)
     return;
   }
 
-  const decoded = jwt.decode(token) as { id: string; role: string } | null;
+  const decoded = jwt.decode(token) as { id: string; role: string; fullName?: string } | null;
 
   if (!decoded) {
     res.status(401).json({ status: 'ERR', message: 'Token không hợp lệ.' });
@@ -33,6 +34,7 @@ export const extractUser = (req: AuthRequest, res: Response, next: NextFunction)
 
   req.userId = decoded.id;
   req.userRole = decoded.role;
+  req.userName = decoded.fullName ?? '';
   next();
 };
 
