@@ -252,8 +252,12 @@ class AuthController {
   public async changePassword(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { oldPassword, newPassword } = req.body;
-      await authService.changePassword(req.userId!, oldPassword, newPassword);
-      res.status(200).json({ status: 'OK', message: 'Mật khẩu đã được cập nhật thành công.' });
+      const updatedUser = await authService.changePassword(req.userId!, oldPassword, newPassword);
+      res.status(200).json({
+        status: 'OK',
+        message: 'Mật khẩu đã được cập nhật thành công.',
+        data: updatedUser,
+      });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }

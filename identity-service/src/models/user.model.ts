@@ -13,6 +13,7 @@ export enum SubscriptionStatus {
 export interface IUser extends Document {
   email: string;
   password?: string;
+  hasPassword: boolean;
   fullName: string;
   role: Role;
   isVerified: boolean;
@@ -59,6 +60,11 @@ const userSchema: Schema = new Schema(
       default: SubscriptionStatus.INACTIVE,
     },
 
+    hasPassword: {
+      type: Boolean,
+      default: false,
+    },
+
     phone: {
       type: String,
       trim: true,
@@ -74,5 +80,10 @@ const userSchema: Schema = new Schema(
     timestamps: true, // Tự động thêm createdAt và updatedAt
   }
 );
+
+userSchema.pre('save', function (next) {
+  this.hasPassword = Boolean(this.password);
+  next();
+});
 
 export const User = mongoose.model<IUser>('User', userSchema);

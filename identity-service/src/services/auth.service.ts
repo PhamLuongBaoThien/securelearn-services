@@ -13,6 +13,12 @@ import {
 } from '../events/publishers';
 
 class AuthService {
+  private sanitizeUser(user: IUser): Omit<Record<string, any>, 'password'> { // Tức là không trả về password khi trả về user
+    const sanitizedUser = user.toObject() as Record<string, any>; // .toObject() là để convert Mongoose Document sang plain JavaScript object, chuyển như thế để giúp không xóa property password khỏi user (property là )
+    delete sanitizedUser.password;
+    return sanitizedUser;
+  }
+
   /**
    * Đăng ký tài khoản mới (email + mật khẩu).
    */
@@ -31,6 +37,7 @@ class AuthService {
     const newUser = new User({
       email,
       password: hashedPassword,
+      hasPassword: true,
       fullName,
       role: Role.STUDENT,
     });
@@ -78,11 +85,11 @@ class AuthService {
    * Lấy thông tin profile của user theo ID.
    */
   public async getProfile(userId: string): Promise<any> {
+    // Read-only path: dùng lean() để lấy plain object trực tiếp,
+    // tránh hydrate (hydrate là việc Mongoose tự động gán các method (giống như trong class) vào 1 object thông thường (plain object) để biến nó thành Mongoose document) thành Mongoose document rồi mới phải sanitizeUser().
     const user = await User.findById(userId).lean();
     if (user) {
-      // Trả về hasPassword để frontend biết user có mật khẩu cục bộ hay không
-      (user as any).hasPassword = !!user.password; // as any giúp bỏ qua lỗi type
-      delete (user as any).password; // Không trả password hash ra ngoài
+      delete (user as any).password;
     }
     return user;
   }
@@ -121,7 +128,7 @@ class AuthService {
       ...(data.fullName !== undefined && { fullName: user.fullName }),
     });
 
-    return user;
+    return this.sanitizeUser(user) as any;
   }
 
   /**
@@ -140,7 +147,7 @@ class AuthService {
   /**
    * Đổi mật khẩu
    */
-  public async changePassword(userId: string, oldPassword?: string, newPassword?: string): Promise<void> {
+  public async changePassword(userId: string, oldPassword?: string, newPassword?: string): Promise<any> {
     const user = await User.findById(userId);
     if (!user) throw new Error('Người dùng không tồn tại.');
 
@@ -159,7 +166,9 @@ class AuthService {
 
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
+    user.hasPassword = true;
     await user.save();
+    return this.sanitizeUser(user);
   }
 
   /**
@@ -224,6 +233,7 @@ class AuthService {
 
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
+    user.hasPassword = true;
     await user.save();
 
     // Xóa OTP khỏi Redis

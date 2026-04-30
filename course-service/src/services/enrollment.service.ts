@@ -58,7 +58,14 @@ class EnrollmentService {
    */
   public async getEnrolledCourses(userId: string): Promise<any[]> {
     const enrollments = await Enrollment.find({ userId, status: EnrollmentStatus.ACTIVE })
-      .populate('courseId', 'title slug thumbnail instructorName category level totalDuration totalLessons')
+      .populate({
+        path: 'courseId',
+        select: 'title slug thumbnail instructorName categoryId level totalDuration totalLessons enrollmentCount',
+        populate: {
+          path: 'categoryId',
+          select: 'name slug parentId',
+        },
+      })
       .sort({ enrolledAt: -1 });
 
     return enrollments;
