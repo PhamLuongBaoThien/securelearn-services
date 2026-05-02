@@ -89,6 +89,19 @@ class CategoryController {
       res.status(status).json({ status: 'ERR', message: error.message });
     }
   }
+
+  public async deleteCategory(req: Request, res: Response): Promise<void> {
+    try {
+      await categoryService.deleteCategory(req.params.id as string);
+      res.status(200).json({
+        status: 'OK',
+        message: 'Xóa danh mục thành công.',
+      });
+    } catch (error: any) {
+      const status = error.message.includes('không tồn tại') ? 404 : 400;
+      res.status(status).json({ status: 'ERR', message: error.message });
+    }
+  }
 }
 
 export default new CategoryController();

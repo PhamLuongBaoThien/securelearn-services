@@ -80,6 +80,9 @@ services:
           - /api/admin/auth/me
           - /api/admin/auth/profile
           - /api/admin/auth/password
+          - ~/api/admin/auth/staff
+          - ~/api/admin/auth/roles
+          - ~/api/admin/auth/users
         strip_path: false
         methods:
           - OPTIONS
@@ -90,10 +93,16 @@ services:
           - /api/admin/auth/me
           - /api/admin/auth/profile
           - /api/admin/auth/password
+          - ~/api/admin/auth/staff
+          - ~/api/admin/auth/roles
+          - ~/api/admin/auth/users
         strip_path: false
         methods:
           - GET
           - PUT
+          - POST
+          - DELETE
+          - PATCH
 
   # ----- Course Service -----
   - name: course-service

@@ -6,38 +6,11 @@ import { Request, Response } from 'express';
 import adminService from '../services/admin.service';
 import { generalAccessToken, generalRefreshToken, refreshTokenJwtService } from '../services/jwt.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { User } from '../models/user.model';
 
 const REFRESH_TOKEN_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 ngày
 
 class AdminController {
-  /**
-   * [POST] /api/admin/auth/setup
-   * Tạo tài khoản Admin cho việc test.
-   */
-  public async setupAdmin(req: Request, res: Response): Promise<void> {
-    try {
-      const { email, password, fullName, permissions } = req.body;
-      if (!email || !password || !fullName) {
-        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp đủ thông tin.' });
-        return;
-      }
-
-      const admin = await adminService.setupAdmin({ email, password, fullName, permissions: permissions || [] });
-      res.status(201).json({
-        status: 'OK',
-        message: 'Tạo tài khoản Admin thành công.',
-        data: {
-          _id: admin._id,
-          email: admin.email,
-          fullName: admin.fullName,
-          permissions: admin.permissions
-        }
-      });
-    } catch (error: any) {
-      res.status(400).json({ status: 'ERR', message: error.message });
-    }
-  }
-
   /**
    * [POST] /api/admin/auth/login
    * Đăng nhập vào hệ thống quản trị.
@@ -45,19 +18,13 @@ class AdminController {
   public async login(req: Request, res: Response): Promise<void> {
     try {
       const { email, password } = req.body;
-
       if (!email || !password) {
-        res.status(400).json({
-          status: 'ERR',
-          message: 'Vui lòng cung cấp email và mật khẩu.',
-        });
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp email và mật khẩu.' });
         return;
       }
 
-      // Service chỉ xác minh thông tin
       const admin = await adminService.login(email, password);
 
-      // Sinh token từ jwt.service
       const access_token = generalAccessToken({
         id: admin._id.toString(),
         role: 'ADMIN',
@@ -65,7 +32,6 @@ class AdminController {
       });
       const refresh_token = generalRefreshToken({ id: admin._id.toString(), role: 'ADMIN' });
 
-      // Lưu Refresh Token vào HttpOnly Cookie riêng cho admin
       res.cookie('admin_refresh_token', refresh_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -81,7 +47,11 @@ class AdminController {
             _id: admin._id,
             email: admin.email,
             fullName: admin.fullName,
-            permissions: admin.permissions,
+            adminRole: admin.adminRole,
+            status: admin.status,
+            phone: admin.phone,
+            department: admin.department,
+            avatarUrl: admin.avatarUrl,
           },
           access_token,
         },
@@ -104,7 +74,6 @@ class AdminController {
       }
 
       const result = await refreshTokenJwtService(token);
-
       if (result.status === 'ERR') {
         res.clearCookie('admin_refresh_token');
         res.status(401).json(result);
@@ -140,7 +109,6 @@ class AdminController {
         res.status(404).json({ status: 'ERR', message: 'Không tìm thấy tài khoản admin.' });
         return;
       }
-
       res.status(200).json({ status: 'OK', data: admin });
     } catch (error: any) {
       res.status(500).json({ status: 'ERR', message: error.message });
@@ -171,18 +139,12 @@ class AdminController {
       if (department !== undefined) updateData.department = department;
       if (bio !== undefined) updateData.bio = bio;
 
-      // Xử lý avatarUrl nếu có upload file
       if (req.file) {
-        updateData.avatarUrl = (req.file as any).path; // Lấy URL từ Cloudinary storage
+        updateData.avatarUrl = (req.file as any).path;
       }
 
       const updatedAdmin = await adminService.updateProfile(adminId, updateData);
-      
-      res.status(200).json({
-        status: 'OK',
-        message: 'Cập nhật hồ sơ thành công.',
-        data: updatedAdmin,
-      });
+      res.status(200).json({ status: 'OK', message: 'Cập nhật hồ sơ thành công.', data: updatedAdmin });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }
@@ -195,18 +157,223 @@ class AdminController {
   public async changePassword(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { oldPassword, newPassword } = req.body;
-      const adminId = req.userId!;
-
-      await adminService.changePassword(adminId, oldPassword, newPassword);
-
-      res.status(200).json({
-        status: 'OK',
-        message: 'Thay đổi mật khẩu thành công.',
-      });
+      await adminService.changePassword(req.userId!, oldPassword, newPassword);
+      res.status(200).json({ status: 'OK', message: 'Thay đổi mật khẩu thành công.' });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }
   }
+
+  // ─── Staff Management ──────────────────────────────────────────────────────
+
+  /**
+   * [GET] /api/admin/auth/staff
+   */
+  public async getStaff(_req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const admins = await adminService.getAdmins();
+      res.status(200).json({ status: 'OK', data: admins });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [POST] /api/admin/auth/staff
+   */
+  public async createStaff(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const admin = await adminService.createAdmin(req.body);
+      res.status(201).json({ status: 'OK', message: 'Tạo tài khoản thành công', data: admin });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [PUT] /api/admin/auth/staff/:id
+   */
+  public async updateStaff(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const admin = await adminService.updateAdminInfo(req.params.id as string, req.body);
+      res.status(200).json({ status: 'OK', message: 'Cập nhật thành công', data: admin });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [DELETE] /api/admin/auth/staff/:id
+   */
+  public async deleteStaff(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      await adminService.deleteAdmin(req.params.id as string);
+      res.status(200).json({ status: 'OK', message: 'Xóa tài khoản thành công' });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  // ─── Role Permissions ──────────────────────────────────────────────────────
+
+  /**
+   * [GET] /api/admin/auth/roles
+   */
+  public async getRolePermissions(_req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const roles = await adminService.getRolePermissions();
+      res.status(200).json({ status: 'OK', data: roles });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [POST] /api/admin/auth/roles — Tạo role mới
+   */
+  public async createRole(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { roleKey, label, color, permissions } = req.body;
+      const newRole = await adminService.createRole({ roleKey, label, color, permissions });
+      res.status(201).json({ status: 'OK', message: 'Tạo vai trò thành công.', data: newRole });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [PUT] /api/admin/auth/roles/:role — Cập nhật permissions/label/color
+   */
+  public async updateRolePermissions(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const roleKey = req.params.role as string;
+      const { permissions, label, color } = req.body;
+      const updated = await adminService.updateRolePermissions(roleKey, { permissions, label, color });
+      res.status(200).json({ status: 'OK', message: 'Cập nhật thành công.', data: updated });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [DELETE] /api/admin/auth/roles/:role — Xóa role
+   */
+  public async deleteRole(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      await adminService.deleteRole(req.params.role as string);
+      res.status(200).json({ status: 'OK', message: 'Đã xóa vai trò thành công.' });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+  // ─── User Management (Student & Instructor) ────────────────────────────────
+
+  /**
+   * [GET] /api/admin/auth/users
+   */
+  public async getUsers(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { role, status, search, page = 1, limit = 20 } = req.query;
+
+      const query: Record<string, any> = {};
+      if (role) query.role = role;
+      if (status) query.status = status;
+      if (search) {
+        query.$or = [
+          { fullName: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+        ];
+      }
+
+      // Map status filter
+      if (status === 'LOCKED') {
+        delete query.status;
+        query.isLocked = true;
+      } else if (status === 'ACTIVE') {
+        delete query.status;
+        query.isLocked = { $ne: true };
+      }
+
+      const skip = (Number(page) - 1) * Number(limit);
+      const [users, total] = await Promise.all([
+        User.find(query)
+          .select('-password')
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(Number(limit))
+          .lean(),
+        User.countDocuments(query),
+      ]);
+
+      const mapped = users.map((u: any) => ({
+        _id: u._id,
+        email: u.email,
+        fullName: u.fullName,
+        role: u.role,
+        status: u.isLocked ? 'LOCKED' : 'ACTIVE',
+        isLocked: !!u.isLocked,
+        subscriptionStatus: u.subscriptionStatus,
+        phone: u.phone,
+        profile: u.profile,
+        createdAt: u.createdAt,
+        updatedAt: u.updatedAt,
+        lastLoginAt: u.lastLoginAt,
+      }));
+
+      res.status(200).json({
+        status: 'OK',
+        data: {
+          users: mapped,
+          total,
+          page: Number(page),
+          totalPages: Math.ceil(total / Number(limit)),
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ status: 'ERR', message: err.message });
+    }
+  }
+
+  /**
+   * [PATCH] /api/admin/auth/users/:id/lock
+   */
+  public async lockUser(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const user = await User.findByIdAndUpdate(
+        req.params.id,
+        { isLocked: true },
+        { new: true }
+      ).select('-password');
+      if (!user) {
+        res.status(404).json({ status: 'ERR', message: 'Không tìm thấy người dùng.' });
+        return;
+      }
+      res.status(200).json({ status: 'OK', message: 'Đã khóa tài khoản.' });
+    } catch (err: any) {
+      res.status(500).json({ status: 'ERR', message: err.message });
+    }
+  }
+
+  /**
+   * [PATCH] /api/admin/auth/users/:id/unlock
+   */
+  public async unlockUser(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const user = await User.findByIdAndUpdate(
+        req.params.id,
+        { isLocked: false },
+        { new: true }
+      ).select('-password');
+      if (!user) {
+        res.status(404).json({ status: 'ERR', message: 'Không tìm thấy người dùng.' });
+        return;
+      }
+      res.status(200).json({ status: 'OK', message: 'Đã mở khóa tài khoản.' });
+    } catch (err: any) {
+      res.status(500).json({ status: 'ERR', message: err.message });
+    }
+  }
+
 }
 
 export default new AdminController();

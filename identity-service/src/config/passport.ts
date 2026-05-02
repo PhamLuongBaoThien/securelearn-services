@@ -42,7 +42,6 @@ passport.use(
             email,
             fullName: profile.displayName || 'Người dùng Google',
             role: Role.STUDENT,
-            isVerified: true, // Đã xác thực qua Google
             profile: {
               avatarUrl: profile.photos?.[0]?.value || '',
             },
@@ -62,13 +61,8 @@ passport.use(
           );
         } else {
           // Account Linking: User đã tồn tại (đăng ký bằng email/password)
-          // → Cập nhật isVerified và avatar nếu chưa có
+          // → Cập nhật avatar nếu chưa có
           let needSave = false;
-
-          if (!user.isVerified) {
-            user.isVerified = true; // Đã xác thực qua Google
-            needSave = true;
-          }
 
           if (!user.profile?.avatarUrl && profile.photos?.[0]?.value) {
             if (!user.profile) user.profile = {};

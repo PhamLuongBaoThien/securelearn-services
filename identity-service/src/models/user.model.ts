@@ -16,7 +16,7 @@ export interface IUser extends Document {
   hasPassword: boolean;
   fullName: string;
   role: Role;
-  isVerified: boolean;
+  isLocked: boolean;
   subscriptionStatus: SubscriptionStatus;
   phone?: string;
   profile?: {
@@ -24,6 +24,7 @@ export interface IUser extends Document {
     bio?: string;
     headline?: string;
   };
+  lastLoginAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,10 +51,6 @@ const userSchema: Schema = new Schema(
       enum: Object.values(Role),
       default: Role.STUDENT,
     },
-    isVerified: {
-      type: Boolean,
-      default: false,
-    },
     subscriptionStatus: {
       type: String,
       enum: Object.values(SubscriptionStatus),
@@ -65,9 +62,18 @@ const userSchema: Schema = new Schema(
       default: false,
     },
 
+    isLocked: {
+      type: Boolean,
+      default: false,
+    },
+
     phone: {
       type: String,
       trim: true,
+    },
+
+    lastLoginAt: {
+      type: Date,
     },
 
     profile: {

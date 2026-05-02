@@ -1,4 +1,5 @@
 import { Category, ICategory } from '../models/category.model';
+import { Course } from '../models/course.model';
 
 const MAX_CATEGORY_DEPTH = 4;
 
@@ -112,6 +113,26 @@ class CategoryService {
     category.isActive = isActive;
     await category.save();
     return category;
+  }
+
+  public async deleteCategory(categoryId: string): Promise<void> {
+    const [categoryExists, hasChildren, hasCourses] = await Promise.all([
+      Category.exists({ _id: categoryId }),
+      Category.exists({ parentId: categoryId }),
+      Course.exists({ categoryId: categoryId })
+    ]);
+
+    if (!categoryExists) {
+      throw new Error('Danh mục không tồn tại.');
+    }
+    if (hasChildren) {
+      throw new Error('Không thể xóa danh mục đang có danh mục con.');
+    }
+    if (hasCourses) {
+      throw new Error('Không thể xóa danh mục đang có khóa học.');
+    }
+
+    await Category.deleteOne({ _id: categoryId });
   }
 
   public async resolveActiveCategorySlug(slug: string): Promise<ICategory> {

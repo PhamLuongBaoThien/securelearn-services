@@ -1,14 +1,22 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+// ===== Admin Role Type =====
+export const SUPER_ADMIN_ROLE = 'SUPER_ADMIN' as const;
+export type AdminRole = string;
+export type AdminStatus = 'ACTIVE' | 'LOCKED';
+
 export interface IAdmin extends Document {
   email: string;
   password?: string;
   fullName: string;
-  permissions: string[]; // VD: ['MANAGE_USERS', 'MANAGE_COURSES']
+  // Role động, được validate theo RolePermission collection ở service/middleware
+  adminRole: AdminRole;
+  status: AdminStatus;
   phone?: string;
   department?: string;
   bio?: string;
   avatarUrl?: string;
+  lastLoginAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -31,11 +39,18 @@ const adminSchema: Schema = new Schema(
       required: true,
       trim: true,
     },
-    permissions: [
-      {
-        type: String,
-      },
-    ],
+    adminRole: {
+      type: String,
+      // Không dùng enum cứng — validate động theo RolePermission collection
+      default: 'SUPPORT_AGENT',
+      trim: true,
+      uppercase: true,
+    },
+    status: {
+      type: String,
+      enum: ['ACTIVE', 'LOCKED'],
+      default: 'ACTIVE',
+    },
     phone: {
       type: String,
       trim: true,
@@ -49,6 +64,9 @@ const adminSchema: Schema = new Schema(
     },
     avatarUrl: {
       type: String,
+    },
+    lastLoginAt: {
+      type: Date,
     },
   },
   {

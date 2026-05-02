@@ -9,5 +9,6 @@ router.get('/admin/all', extractUser, requireAdmin, categoryController.getAdminC
 router.post('/', extractUser, requireAdmin, categoryController.createCategory); // API này dùng khi admin cần thêm danh mục mới
 router.put('/:id', extractUser, requireAdmin, categoryController.updateCategory); // API này dùng khi admin cần chỉnh sửa danh mục
 router.patch('/:id/status', extractUser, requireAdmin, categoryController.setCategoryStatus); // API này dùng khi admin cần thay đổi trạng thái danh mục
+router.delete('/:id', extractUser, requireAdmin, categoryController.deleteCategory); // API này dùng khi admin cần xóa danh mục
 
 export default router;

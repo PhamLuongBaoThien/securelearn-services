@@ -67,16 +67,25 @@ class AuthService {
       throw new Error('Email không tồn tại trong hệ thống.');
     }
 
-    // 2. Nếu user đăng ký qua Google thì không có password cục bộ
+    // 2. Kiểm tra tài khoản bị khóa
+    if (user.isLocked) {
+      throw new Error('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.');
+    }
+
+    // 3. Nếu user đăng ký qua Google thì không có password cục bộ
     if (!user.password) {
       throw new Error('Tài khoản này dùng Google để đăng nhập. Vui lòng chọn "Đăng nhập bằng Google".');
     }
 
-    // 3. So sánh mật khẩu
+    // 4. So sánh mật khẩu
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       throw new Error('Mật khẩu không chính xác.');
     }
+
+    // 5. Cập nhật lastLoginAt
+    user.lastLoginAt = new Date();
+    await user.save();
 
     return user;
   }

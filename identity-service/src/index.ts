@@ -7,6 +7,7 @@ dotenv.config();
 import { connectDB } from './config/db';
 import { RabbitMQConnection } from '@securelearn/common';
 import app from './app';
+import { seedRolePermissions } from './models/rolePermission.model';
 
 const PORT = process.env.PORT || 5001;
 
@@ -16,6 +17,9 @@ const bootServer = async () => {
 
     // Kết nối MongoDB Atlas
     await connectDB();
+
+    // Seed RolePermission mặc định (chỉ chạy nếu collection rỗng)
+    await seedRolePermissions();
 
     // Kết nối RabbitMQ (Message Broker)
     const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
