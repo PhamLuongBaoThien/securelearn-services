@@ -11,6 +11,8 @@ import {
 } from '@securelearn/common';
 import { Course } from '../models/course.model';
 import { Enrollment } from '../models/enrollment.model';
+import { Lesson } from '../models/lesson.model';
+import { Section } from '../models/section.model';
 
 /**
  * Đăng ký lắng nghe tất cả events mà Course Service quan tâm.
@@ -44,9 +46,18 @@ export const registerEventHandlers = async (): Promise<void> => {
     async (payload) => {
       console.log(`[CourseEvent] User deleted: ${payload.userId} (${payload.email})`);
 
-      // Xóa tất cả khóa học của giảng viên
-      const deletedCourses = await Course.deleteMany({ instructorId: payload.userId });
-      console.log(`[CourseEvent] Đã xóa ${deletedCourses.deletedCount} khóa học của instructor ${payload.userId}`);
+      const instructorCourses = await Course.find({ instructorId: payload.userId }).select('_id').lean();
+      const courseIds = instructorCourses.map((course) => course._id);
+
+      if (courseIds.length > 0) {
+        await Promise.all([
+          Lesson.deleteMany({ courseId: { $in: courseIds } }),
+          Section.deleteMany({ courseId: { $in: courseIds } }),
+          Enrollment.deleteMany({ courseId: { $in: courseIds } }),
+          Course.deleteMany({ _id: { $in: courseIds } }),
+        ]);
+      }
+      console.log(`[CourseEvent] Đã xóa ${courseIds.length} khóa học của instructor ${payload.userId}`);
 
       // Xóa tất cả enrollment của học viên
       const deletedEnrollments = await Enrollment.deleteMany({ userId: payload.userId });
