@@ -68,7 +68,7 @@ const refreshTokenJwtService = (token: string): Promise<{ status: string; messag
     try {
       jwt.verify(token, process.env.REFRESH_TOKEN as string, (err, user: any) => {
         if (err) {
-          return resolve({ status: 'ERR', message: 'Token không hợp lệ hoặc đã hết hạn.' });
+          return resolve({ status: 'ERR', message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
         }
         resolve({
           status: 'OK',

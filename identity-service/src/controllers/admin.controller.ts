@@ -69,7 +69,7 @@ class AdminController {
     try {
       const token = req.cookies?.admin_refresh_token;
       if (!token) {
-        res.status(401).json({ status: 'ERR', message: 'Không tìm thấy refresh token.' });
+        res.status(401).json({ status: 'ERR', message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
         return;
       }
 
@@ -94,7 +94,7 @@ class AdminController {
       });
     } catch (error: any) {
       res.clearCookie('admin_refresh_token');
-      res.status(401).json({ status: 'ERR', message: error.message });
+      res.status(401).json({ status: 'ERR', message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
     }
   }
 

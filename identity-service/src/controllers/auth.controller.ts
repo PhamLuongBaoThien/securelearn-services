@@ -110,7 +110,7 @@ class AuthController {
     try {
       const token = req.cookies?.refresh_token;
       if (!token) {
-        res.status(401).json({ status: 'ERR', message: 'Không tìm thấy refresh token.' });
+        res.status(401).json({ status: 'ERR', message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
         return;
       }
 
@@ -137,7 +137,7 @@ class AuthController {
       });
     } catch (error: any) {
       res.clearCookie('refresh_token');
-      res.status(401).json({ status: 'ERR', message: error.message });
+      res.status(401).json({ status: 'ERR', message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
     }
   }
 
