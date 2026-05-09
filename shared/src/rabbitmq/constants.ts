@@ -10,6 +10,7 @@
 export enum Exchange {
   IDENTITY = 'identity.events',
   COURSE = 'course.events',
+  MEDIA = 'media.events',
 }
 
 /**
@@ -27,6 +28,12 @@ export enum RoutingKey {
   COURSE_UPDATED = 'course.course.updated',
   COURSE_PUBLISHED = 'course.course.published',
   ENROLLMENT_CREATED = 'course.enrollment.created',
+
+  // --- Media Events ---
+  VIDEO_ASSET_READY = 'media.video.ready',
+  VIDEO_ASSET_FAILED = 'media.video.failed',
+  DOCUMENT_ASSET_READY = 'media.document.ready',
+  DOCUMENT_ASSET_FAILED = 'media.document.failed',
 }
 
 // ==============================
@@ -67,4 +74,22 @@ export interface EnrollmentCreatedPayload {
   enrollmentId: string;
   userId: string;
   courseId: string;
+}
+
+export interface VideoAssetStatusPayload {
+  videoAssetId: string;
+  lessonId: string;
+  status: 'READY' | 'FAILED';
+  duration?: number;
+  manifestPath?: string;
+  errorMessage?: string;
+}
+
+export interface DocumentAssetStatusPayload {
+  documentAssetId: string;
+  lessonId: string;
+  status: 'READY' | 'FAILED';
+  fileUrl?: string;       // URL truy cập file sau khi xử lý xong
+  pageCount?: number;     // Số trang (nếu là PDF)
+  errorMessage?: string;
 }

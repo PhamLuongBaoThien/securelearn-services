@@ -1,3 +1,5 @@
+// File này là controller cho Category.
+// Category không trực tiếp thuộc flow create course, nhưng course editor phụ thuộc nó để chọn danh mục.
 import { Request, Response } from 'express';
 import categoryService from '../services/category.service';
 import { AuthRequest } from '../middlewares/auth.middleware';

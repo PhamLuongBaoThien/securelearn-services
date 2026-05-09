@@ -1,3 +1,5 @@
+// File này khai báo route cho Category.
+// Course editor dùng GET /api/categories để lấy cây danh mục public.
 import { Router } from 'express';
 import categoryController from '../controllers/category.controller';
 import { extractUser, requireAdmin } from '../middlewares/auth.middleware';

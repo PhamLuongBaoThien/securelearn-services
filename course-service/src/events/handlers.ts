@@ -1,6 +1,11 @@
 // ========================
-// Event Handlers: Xử lý events nhận từ các service khác
-// Course Service subscribe vào Identity events
+// File này đăng ký các event handler mà course-service cần lắng nghe.
+// Hiện tại có 2 nhóm chính:
+// - Identity events để đồng bộ/xóa dữ liệu course khi user thay đổi
+// - Media events để cập nhật trạng thái lesson video
+// Lưu ý:
+// - video asset events đã được consume
+// - document asset events hiện chưa được consume ở course-service
 // ========================
 import {
   subscribeMessage,
@@ -8,11 +13,14 @@ import {
   RoutingKey,
   type UserUpdatedPayload,
   type UserDeletedPayload,
+  type VideoAssetStatusPayload,
 } from '@securelearn/common';
 import { Course } from '../models/course.model';
+import { LessonStatus } from '../models/lesson.model';
 import { Enrollment } from '../models/enrollment.model';
 import { Lesson } from '../models/lesson.model';
 import { Section } from '../models/section.model';
+import lessonService from '../services/lesson.service';
 
 /**
  * Đăng ký lắng nghe tất cả events mà Course Service quan tâm.
@@ -62,6 +70,36 @@ export const registerEventHandlers = async (): Promise<void> => {
       // Xóa tất cả enrollment của học viên
       const deletedEnrollments = await Enrollment.deleteMany({ userId: payload.userId });
       console.log(`[CourseEvent] Đã xóa ${deletedEnrollments.deletedCount} enrollment của user ${payload.userId}`);
+    }
+  );
+
+  // ===== 3. Khi video asset xử lý xong hoặc lỗi =====
+  await subscribeMessage<VideoAssetStatusPayload>(
+    Exchange.MEDIA,
+    RoutingKey.VIDEO_ASSET_READY,
+    'course-service.video-asset-ready',
+    async (payload) => {
+      await lessonService.updateVideoLessonState({
+        lessonId: payload.lessonId,
+        videoAssetId: payload.videoAssetId,
+        status: LessonStatus.READY,
+        duration: payload.duration,
+      });
+      console.log(`[CourseEvent] Video asset READY cho lesson ${payload.lessonId}`);
+    }
+  );
+
+  await subscribeMessage<VideoAssetStatusPayload>(
+    Exchange.MEDIA,
+    RoutingKey.VIDEO_ASSET_FAILED,
+    'course-service.video-asset-failed',
+    async (payload) => {
+      await lessonService.updateVideoLessonState({
+        lessonId: payload.lessonId,
+        videoAssetId: payload.videoAssetId,
+        status: LessonStatus.FAILED,
+      });
+      console.log(`[CourseEvent] Video asset FAILED cho lesson ${payload.lessonId}`);
     }
   );
 

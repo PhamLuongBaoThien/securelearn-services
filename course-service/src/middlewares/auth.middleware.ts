@@ -11,6 +11,7 @@ export interface AuthRequest extends Request {
   userId?: string;
   userRole?: string;
   userName?: string; // fullName của user, được giải mã từ JWT payload
+  file?: any;
 }
 
 /**

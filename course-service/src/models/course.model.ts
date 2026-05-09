@@ -1,6 +1,7 @@
 // ========================
-// Model: Course — metadata của khóa học
-// Curriculum được tách sang Section và Lesson collections riêng
+// File này chứa model Course.
+// Course chỉ giữ metadata + số liệu tổng hợp.
+// Curriculum thật đã được tách sang Section và Lesson collections riêng.
 // ========================
 import mongoose, { Schema, Document, Types } from 'mongoose';
 import slugify from 'slugify';
@@ -76,7 +77,7 @@ const courseSchema = new Schema<ICourse>(
   }
 );
 
-// ===== Middleware: Tự động tạo slug từ title trước khi save =====
+// Slug được tạo từ title + _id để giảm khả năng trùng.
 courseSchema.pre('save', function (next) {
   if (this.isModified('title')) {
     this.slug = slugify(this.title, { lower: true, strict: true }) + '-' + this._id;

@@ -1,15 +1,72 @@
 // ========================
-// Controller Layer: Xử lý Request/Response cho Khóa học
+// File này là controller chính của course-service cho domain Course.
+// Vai trò:
+// - nhận request từ instructor/public
+// - gọi sang courseService
+// - trả response thống nhất cho course editor, list public và publish flow
+// Lưu ý:
+// - validate publish là endpoint riêng trước khi publish thật
+// - curriculum chi tiết hiện được tách sang section/lesson/quiz controllers
 // ========================
 import { Request, Response } from 'express';
+import { CourseLevel } from '../models/course.model';
 import courseService from '../services/course.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
+
+type UpdateCoursePayload = {
+  title?: string;
+  shortDescription?: string;
+  description?: string;
+  thumbnail?: string;
+  whatYouWillLearn?: string[];
+  requirements?: string[];
+  categoryId?: string;
+  level?: CourseLevel;
+  price?: number;
+};
+
+const normalizeStringArray = (value: unknown): string[] | undefined => {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).filter(Boolean);
+  }
+  const normalized = String(value).trim();
+  return normalized ? [normalized] : [];
+};
+
+const parseOptionalNumber = (value: unknown): number | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? undefined : parsed;
+};
+
+const parseCourseLevel = (value: unknown): CourseLevel | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  return value as CourseLevel;
+};
+
+const buildUpdateCoursePayload = (req: AuthRequest): UpdateCoursePayload => {
+  const { title, shortDescription, description, thumbnail, categoryId, category, level, price } = req.body;
+
+  return {
+    title,
+    shortDescription,
+    description,
+    thumbnail: req.file?.path ?? thumbnail,
+    whatYouWillLearn: normalizeStringArray(req.body.whatYouWillLearn),
+    requirements: normalizeStringArray(req.body.requirements),
+    categoryId: categoryId !== undefined ? categoryId : category,
+    level: parseCourseLevel(level),
+    price: parseOptionalNumber(price),
+  };
+};
 
 class CourseController {
   /**
    * [POST] /api/courses
    * Tạo khóa học mới (Instructor).
    */
+  // Tạo metadata khóa học ban đầu, chưa đi sâu vào curriculum.
   public async createCourse(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { title, description, categoryId, category, level, price } = req.body;
@@ -59,6 +116,7 @@ class CourseController {
    * [GET] /api/courses/:id/manage
    * Chi tiết khóa học để quản lý (Instructor owner).
    */
+  // Editor instructor dùng endpoint này để lấy full course kèm sections/lessons.
   public async getCourseForManage(req: AuthRequest, res: Response): Promise<void> {
     try {
       const course = await courseService.getCourseForManage(req.params.id as string, req.userId!);
@@ -75,20 +133,8 @@ class CourseController {
    */
   public async updateCourse(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { title, shortDescription, description, thumbnail, whatYouWillLearn, requirements, categoryId, category, level, price, sections } = req.body;
-
-      const course = await courseService.updateCourse(req.params.id as string, req.userId!, {
-        title,
-        shortDescription,
-        description,
-        thumbnail,
-        whatYouWillLearn,
-        requirements,
-        categoryId: categoryId !== undefined ? categoryId : category,
-        level,
-        price,
-        sections,
-      });
+      const payload = buildUpdateCoursePayload(req);
+      const course = await courseService.updateCourse(req.params.id as string, req.userId!, payload);
 
       res.status(200).json({
         status: 'OK',
@@ -129,6 +175,17 @@ class CourseController {
       });
     } catch (error: any) {
       const status = error.message.includes('không có quyền') ? 403 : 400;
+      res.status(status).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  // Giữ riêng endpoint validate để frontend kiểm tra trước khi bấm publish.
+  public async validatePublish(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const result = await courseService.validateCoursePublish(req.params.id as string, req.userId!);
+      res.status(200).json({ status: 'OK', data: result });
+    } catch (error: any) {
+      const status = error.message.includes('quyền') ? 403 : 400;
       res.status(status).json({ status: 'ERR', message: error.message });
     }
   }

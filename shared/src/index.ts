@@ -29,4 +29,5 @@ export {
   type UserDeletedPayload,
   type CourseCreatedPayload,
   type EnrollmentCreatedPayload,
+  type VideoAssetStatusPayload,
 } from './rabbitmq';

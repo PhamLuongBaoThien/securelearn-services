@@ -1,26 +1,37 @@
 // ========================
-// Service Layer: Logic nghiệp vụ Khóa học
+// File này chứa service trung tâm của course-service.
+// Vai trò chính:
+// - quản lý metadata khóa học
+// - dựng response course cho editor/public
+// - đồng bộ thống kê course
+// - kiểm tra điều kiện publish
+// Lưu ý:
+// - hướng mới là CRUD section/lesson riêng, không còn đặt nặng flow replace toàn bộ curriculum
+// - validate publish đang là chốt nghiệp vụ chính trước khi cho publish course
 // ========================
 import { Types } from 'mongoose';
 import { Course, ICourse, CourseStatus } from '../models/course.model';
-import { Lesson, LessonType } from '../models/lesson.model';
+import { Lesson, LessonStatus, LessonType } from '../models/lesson.model';
+import { Quiz } from '../models/quiz.model';
 import { Section } from '../models/section.model';
 import { publishCourseCreated } from '../events/publishers';
 import categoryService from './category.service';
 
-interface LessonInput {
+interface CourseLessonResponse {
+  _id: string;
   title: string;
-  type?: string;
-  content?: string;
-  duration?: number;
-  order?: number;
-  isFreePreview?: boolean;
-}
-
-interface SectionInput {
-  title: string;
-  order?: number;
-  lessons?: LessonInput[];
+  type: string;
+  status: string;
+  summary: string;
+  duration: number;
+  order: number;
+  isFreePreview: boolean;
+  videoAssetId: string | null;
+  documentAssetId: string | null;
+  quizId: string | null;
+  contentMeta: {
+    questionCount?: number;
+  } | null;
 }
 
 interface CourseResponse {
@@ -48,15 +59,7 @@ interface CourseResponse {
     _id: string;
     title: string;
     order: number;
-    lessons: Array<{
-      _id: string;
-      title: string;
-      type: string;
-      content: string;
-      duration: number;
-      order: number;
-      isFreePreview: boolean;
-    }>;
+    lessons: CourseLessonResponse[];
   }>;
   totalDuration: number;
   totalLessons: number;
@@ -98,9 +101,103 @@ type CourseDocumentLike = {
 };
 
 class CourseService {
-  /**
-   * Tạo khóa học mới (DRAFT).
-   */
+  // Rule publish hiện tại:
+  // - course phải có title, thumbnail, category
+  // - phải có ít nhất 1 section
+  // - mỗi section phải có ít nhất 1 lesson
+  // - lesson phải READY
+  // - VIDEO cần videoAssetId, DOCUMENT cần documentAssetId, QUIZ cần có quiz + ít nhất 1 câu hỏi
+  public async validateCoursePublish(courseId: string, instructorId: string) {
+    const course = await Course.findById(courseId).lean();
+    if (!course) throw new Error('Khóa học không tồn tại.');
+    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền truy cập khóa học này.');
+
+    const errors: Array<{ field: string; message: string; sectionId?: string; lessonId?: string }> = [];
+
+    if (!course.title?.trim()) errors.push({ field: 'title', message: 'Khóa học chưa có tiêu đề.' });
+    if (!course.thumbnail?.trim()) errors.push({ field: 'thumbnail', message: 'Khóa học chưa có ảnh đại diện.' });
+    if (!course.categoryId) errors.push({ field: 'categoryId', message: 'Khóa học chưa có danh mục.' });
+
+    const [sections, lessons] = await Promise.all([
+      Section.find({ courseId }).sort({ order: 1 }).lean(),
+      Lesson.find({ courseId }).sort({ order: 1 }).lean(),
+    ]);
+
+    if (sections.length === 0) {
+      errors.push({ field: 'sections', message: 'Khóa học phải có ít nhất 1 chương.' });
+    }
+
+    const lessonIds = lessons.map((lesson) => lesson._id);
+    const quizzes = lessonIds.length > 0
+      ? await Quiz.find({ courseId, lessonId: { $in: lessonIds } }).select('lessonId questions').lean()
+      : [];
+    const quizByLessonId = new Map(quizzes.map((quiz) => [quiz.lessonId.toString(), quiz]));
+
+    for (const section of sections) {
+      const sectionLessons = lessons.filter((lesson) => lesson.sectionId.toString() === section._id.toString());
+      if (sectionLessons.length === 0) {
+        errors.push({
+          field: 'section.lessons',
+          message: `Chương "${section.title}" chưa có bài học nào.`,
+          sectionId: section._id.toString(),
+        });
+      }
+
+      for (const lesson of sectionLessons) {
+        if (lesson.status !== LessonStatus.READY) {
+          errors.push({
+            field: 'lesson.status',
+            message: `Bài học "${lesson.title}" chưa sẵn sàng.`,
+            sectionId: section._id.toString(),
+            lessonId: lesson._id.toString(),
+          });
+        }
+
+        if (lesson.type === LessonType.VIDEO && !lesson.videoAssetId) {
+          errors.push({
+            field: 'lesson.videoAssetId',
+            message: `Bài học "${lesson.title}" chưa gắn video asset.`,
+            sectionId: section._id.toString(),
+            lessonId: lesson._id.toString(),
+          });
+        }
+
+        if (lesson.type === LessonType.DOCUMENT && !lesson.documentAssetId) {
+          errors.push({
+            field: 'lesson.documentAssetId',
+            message: `Bài học "${lesson.title}" chưa gắn tài liệu.`,
+            sectionId: section._id.toString(),
+            lessonId: lesson._id.toString(),
+          });
+        }
+
+        if (lesson.type === LessonType.QUIZ) {
+          const quiz = quizByLessonId.get(lesson._id.toString());
+          if (!quiz) {
+            errors.push({
+              field: 'quiz.lessonId',
+              message: `Bài học "${lesson.title}" chưa có quiz.`,
+              sectionId: section._id.toString(),
+              lessonId: lesson._id.toString(),
+            });
+          } else if (quiz.questions.length === 0) {
+            errors.push({
+              field: 'quiz.questions',
+              message: `Quiz của bài học "${lesson.title}" chưa có câu hỏi.`,
+              sectionId: section._id.toString(),
+              lessonId: lesson._id.toString(),
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      ok: errors.length === 0,
+      errors,
+    };
+  }
+
   public async createCourse(data: {
     title: string;
     description?: string;
@@ -130,12 +227,9 @@ class CourseService {
       instructorId: course.instructorId,
     });
 
-    return this.getCourseById(course._id.toString()) as Promise<CourseResponse>;
+    return (await this.getCourseById(course._id.toString())) as CourseResponse;
   }
 
-  /**
-   * Lấy danh sách khóa học của giảng viên (bao gồm DRAFT).
-   */
   public async getMyCourses(instructorId: string): Promise<CourseResponse[]> {
     const courses = await Course.find({ instructorId })
       .populate('categoryId', 'name slug parentId')
@@ -145,31 +239,17 @@ class CourseService {
     return courses.map((course) => this.mapCourseResponse(course as unknown as CourseDocumentLike, []));
   }
 
-  /**
-   * Lấy chi tiết khóa học (cho Instructor quản lý — bao gồm DRAFT).
-   * Kiểm tra quyền sở hữu.
-   */
   public async getCourseForManage(courseId: string, instructorId: string): Promise<CourseResponse> {
-    const course = await Course.findById(courseId)
-      .populate('categoryId', 'name slug parentId')
-      .lean();
-    if (!course) {
-      throw new Error('Khóa học không tồn tại.');
-    }
-    if (course.instructorId !== instructorId) {
-      throw new Error('Bạn không có quyền quản lý khóa học này.');
-    }
-
+    const course = await this.getOwnedCourseOrThrow(courseId, instructorId, true);
     return this.buildCourseResponse(course as unknown as CourseDocumentLike);
   }
 
-  /**
-   * Cập nhật khóa học (chỉ owner).
-   */
+  // File editor hiện tại chủ yếu gọi hàm này để cập nhật metadata course.
+  // Curriculum item-level đã được tách sang section.service và lesson.service.
   public async updateCourse(
     courseId: string,
     instructorId: string,
-    data: Partial<Pick<ICourse, 'title' | 'shortDescription' | 'description' | 'thumbnail' | 'whatYouWillLearn' | 'requirements' | 'level' | 'price'>> & { categoryId?: string; sections?: SectionInput[] }
+    data: Partial<Pick<ICourse, 'title' | 'shortDescription' | 'description' | 'thumbnail' | 'whatYouWillLearn' | 'requirements' | 'level' | 'price'>> & { categoryId?: string }
   ): Promise<CourseResponse> {
     const course = await Course.findById(courseId);
     if (!course) throw new Error('Khóa học không tồn tại.');
@@ -194,50 +274,37 @@ class CourseService {
 
     await course.save();
 
-    if (data.sections !== undefined) {
-      await this.replaceCurriculum(course._id as Types.ObjectId, data.sections);
-    }
-
-    return this.getCourseById(course._id.toString()) as Promise<CourseResponse>;
+    return (await this.getCourseById(course._id.toString())) as CourseResponse;
   }
 
-  /**
-   * Xóa khóa học (chỉ owner).
-   */
   public async deleteCourse(courseId: string, instructorId: string): Promise<void> {
     const course = await Course.findById(courseId);
-    if (!course) {
-      throw new Error('Khóa học không tồn tại.');
-    }
-    if (course.instructorId !== instructorId) {
-      throw new Error('Bạn không có quyền xóa khóa học này.');
-    }
+    if (!course) throw new Error('Khóa học không tồn tại.');
+    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền xóa khóa học này.');
+
+    const lessons = await Lesson.find({ courseId: course._id }).select('_id').lean();
+    const lessonIds = lessons.map((lesson) => lesson._id);
 
     await Promise.all([
+      lessonIds.length > 0 ? Quiz.deleteMany({ courseId: course._id, lessonId: { $in: lessonIds } }) : Promise.resolve(),
       Section.deleteMany({ courseId: course._id }),
       Lesson.deleteMany({ courseId: course._id }),
       Course.findByIdAndDelete(courseId),
     ]);
   }
 
-  /**
-   * Publish khóa học (chuyển DRAFT → PUBLISHED).
-   */
   public async publishCourse(courseId: string, instructorId: string): Promise<CourseResponse> {
     const course = await Course.findById(courseId);
-    if (!course) {
-      throw new Error('Khóa học không tồn tại.');
-    }
-    if (course.instructorId !== instructorId) {
-      throw new Error('Bạn không có quyền publish khóa học này.');
+    if (!course) throw new Error('Khóa học không tồn tại.');
+    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền publish khóa học này.');
+
+    const validation = await this.validateCoursePublish(courseId, instructorId);
+    if (!validation.ok) {
+      throw new Error(validation.errors[0].message);
     }
 
-    const sectionCount = await Section.countDocuments({ courseId: course._id });
-    if (sectionCount === 0) {
-      throw new Error('Khóa học phải có ít nhất 1 chương trước khi publish.');
-    }
     if (!course.categoryId) {
-      throw new Error('Khóa học phải có danh mục trước khi publish.');
+      throw new Error('Khóa học chưa có danh mục hợp lệ.');
     }
 
     await categoryService.resolveActiveCategoryById(course.categoryId.toString());
@@ -245,12 +312,9 @@ class CourseService {
     course.status = CourseStatus.PUBLISHED;
     await course.save();
 
-    return this.getCourseById(course._id.toString()) as Promise<CourseResponse>;
+    return (await this.getCourseById(course._id.toString())) as CourseResponse;
   }
 
-  /**
-   * Lấy danh sách khóa học đã PUBLISHED (Public — có search, filter, phân trang).
-   */
   public async getPublishedCourses(query: {
     page?: number;
     limit?: number;
@@ -275,9 +339,7 @@ class CourseService {
       const categoryIds = await categoryService.getDescendantAndSelfIds(category._id.toString());
       filter.categoryId = { $in: categoryIds };
     }
-    if (query.level) {
-      filter.level = query.level;
-    }
+    if (query.level) filter.level = query.level;
 
     const [courses, total] = await Promise.all([
       Course.find(filter)
@@ -297,21 +359,46 @@ class CourseService {
     };
   }
 
-  /**
-   * Lấy chi tiết khóa học theo slug (Public — chỉ PUBLISHED).
-   * Ẩn content của lesson không miễn phí (chỉ trả metadata).
-   */
   public async getCourseBySlug(slug: string): Promise<CourseResponse> {
     const course = await Course.findOne({ slug, status: CourseStatus.PUBLISHED })
       .populate('categoryId', 'name slug parentId')
       .lean();
-    if (!course) {
-      throw new Error('Khóa học không tồn tại hoặc chưa được xuất bản.');
-    }
-
+    if (!course) throw new Error('Khóa học không tồn tại hoặc chưa được xuất bản.');
     return this.buildCourseResponse(course as unknown as CourseDocumentLike);
   }
 
+  public async getOwnedCourseOrThrow(courseId: string, instructorId: string, populateCategory = false) {
+    const query = Course.findById(courseId);
+    if (populateCategory) {
+      query.populate('categoryId', 'name slug parentId');
+    }
+
+    const course = await query.lean();
+    if (!course) throw new Error('Khóa học không tồn tại.');
+    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền truy cập khóa học này.');
+    return course;
+  }
+
+  // update totalSections, totalLessons, totalDuration của course
+  public async syncCourseStats(courseId: Types.ObjectId | string): Promise<void> {
+    const normalizedCourseId = typeof courseId === 'string' ? new Types.ObjectId(courseId) : courseId; // dòng này để đảm bảo courseId là ObjectId
+    const [sections, lessons] = await Promise.all([
+      Section.find({ courseId: normalizedCourseId }).select('_id').lean(), // lấy tất cả section của course
+      Lesson.find({ courseId: normalizedCourseId }).select('duration').lean(), // lấy tất cả lesson của cours
+    ]);
+
+    const totalDuration = lessons.reduce((sum, lesson) => sum + (lesson.duration || 0), 0); // tính tổng duration của course
+
+    await Course.findByIdAndUpdate(normalizedCourseId, {
+      $set: {
+        totalSections: sections.length,
+        totalLessons: lessons.length,
+        totalDuration,
+      },
+    });
+  }
+
+  // Dựng response quản lý course theo shape mới: course -> sections -> lessons.
   private async getCourseById(courseId: string): Promise<CourseResponse | null> {
     const course = await Course.findById(courseId)
       .populate('categoryId', 'name slug parentId')
@@ -325,6 +412,7 @@ class CourseService {
     return this.mapCourseResponse(course, sections);
   }
 
+  // Tải toàn bộ section + lesson theo thứ tự để frontend editor render đúng curriculum.
   private async loadCourseSections(courseId: string): Promise<CourseResponse['sections']> {
     const courseObjectId = new Types.ObjectId(courseId);
     const [sections, lessons] = await Promise.all([
@@ -332,18 +420,37 @@ class CourseService {
       Lesson.find({ courseId: courseObjectId }).sort({ order: 1, createdAt: 1 }).lean(),
     ]);
 
-    const lessonsBySectionId = new Map<string, CourseResponse['sections'][number]['lessons']>();
+    const lessonIds = lessons.map((lesson) => lesson._id);
+    const quizzes = lessonIds.length > 0
+      ? await Quiz.find({ courseId: courseObjectId, lessonId: { $in: lessonIds } }).select('lessonId questions').lean()
+      : [];
+
+    const quizMetaByLessonId = new Map<string, { quizId: string; questionCount: number }>();
+    for (const quiz of quizzes) {
+      quizMetaByLessonId.set(quiz.lessonId.toString(), {
+        quizId: quiz._id.toString(),
+        questionCount: quiz.questions.length,
+      });
+    }
+
+    const lessonsBySectionId = new Map<string, CourseLessonResponse[]>();
     for (const lesson of lessons) {
       const sectionKey = lesson.sectionId.toString();
       const bucket = lessonsBySectionId.get(sectionKey) || [];
+      const quizMeta = quizMetaByLessonId.get(lesson._id.toString());
       bucket.push({
         _id: lesson._id.toString(),
         title: lesson.title,
         type: lesson.type,
-        content: lesson.content,
+        status: lesson.status,
+        summary: lesson.summary || '',
         duration: lesson.duration,
         order: lesson.order,
         isFreePreview: lesson.isFreePreview,
+        videoAssetId: lesson.videoAssetId ? lesson.videoAssetId.toString() : null,
+        documentAssetId: lesson.documentAssetId ? lesson.documentAssetId.toString() : null,
+        quizId: quizMeta?.quizId || null,
+        contentMeta: lesson.type === LessonType.QUIZ ? { questionCount: quizMeta?.questionCount || 0 } : null,
       });
       lessonsBySectionId.set(sectionKey, bucket);
     }
@@ -354,74 +461,6 @@ class CourseService {
       order: section.order,
       lessons: lessonsBySectionId.get(section._id.toString()) || [],
     }));
-  }
-
-  private async replaceCurriculum(courseId: Types.ObjectId, sections: SectionInput[]): Promise<void> {
-    const normalizedSections = sections.map((section, sectionIndex) => ({
-      title: section.title?.trim() || `Section ${sectionIndex + 1}`,
-      order: section.order ?? sectionIndex + 1,
-      lessons: (section.lessons || []).map((lesson, lessonIndex) => ({
-        title: lesson.title?.trim() || `Lesson ${lessonIndex + 1}`,
-        type: this.normalizeLessonType(lesson.type),
-        content: lesson.content || '',
-        duration: typeof lesson.duration === 'number' ? lesson.duration : 0,
-        order: lesson.order ?? lessonIndex + 1,
-        isFreePreview: Boolean(lesson.isFreePreview),
-      })),
-    }));
-
-    await Promise.all([
-      Lesson.deleteMany({ courseId }),
-      Section.deleteMany({ courseId }),
-    ]);
-
-    const createdSections = await Section.insertMany(
-      normalizedSections.map((section) => ({
-        courseId,
-        title: section.title,
-        order: section.order,
-      }))
-    );
-
-    const lessonsToInsert = createdSections.flatMap((section, index) =>
-      normalizedSections[index].lessons.map((lesson) => ({
-        courseId,
-        sectionId: section._id,
-        title: lesson.title,
-        type: lesson.type,
-        content: lesson.content,
-        duration: lesson.duration,
-        order: lesson.order,
-        isFreePreview: lesson.isFreePreview,
-      }))
-    );
-
-    if (lessonsToInsert.length > 0) {
-      await Lesson.insertMany(lessonsToInsert);
-    }
-
-    const totals = normalizedSections.reduce(
-      (acc, section) => {
-        acc.totalSections += 1;
-        acc.totalLessons += section.lessons.length;
-        acc.totalDuration += section.lessons.reduce((sum, lesson) => sum + lesson.duration, 0);
-        return acc;
-      },
-      { totalSections: 0, totalLessons: 0, totalDuration: 0 }
-    );
-
-    await Course.findByIdAndUpdate(courseId, {
-      $set: {
-        totalSections: totals.totalSections,
-        totalLessons: totals.totalLessons,
-        totalDuration: totals.totalDuration,
-      },
-    });
-  }
-
-  private normalizeLessonType(type?: string): LessonType {
-    if (!type) return LessonType.VIDEO;
-    return Object.values(LessonType).includes(type as LessonType) ? (type as LessonType) : LessonType.VIDEO;
   }
 
   private mapCourseResponse(course: CourseDocumentLike, sections: CourseResponse['sections']): CourseResponse {

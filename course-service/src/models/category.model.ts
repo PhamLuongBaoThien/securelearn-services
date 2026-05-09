@@ -1,3 +1,5 @@
+// File này chứa model Category.
+// Category được dùng để gắn metadata cho course và dựng cây danh mục cho editor/public.
 import mongoose, { Document, Schema } from 'mongoose';
 import slugify from 'slugify';
 
@@ -16,7 +18,7 @@ export interface ICategory extends Document {
 const categorySchema = new Schema<ICategory>(
   {
     name: { type: String, required: true, trim: true },
-    slug: { type: String, required: true, trim: true, index: true },
+    slug: { type: String, required: true, trim: true, unique: true },
     description: { type: String, default: '' },
     isActive: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 0 }, 
@@ -28,9 +30,9 @@ const categorySchema = new Schema<ICategory>(
   }
 );
 
-// Cho phép cùng tên/slug nếu khác danh mục cha, nhưng cấm trùng trong cùng cấp
+// Tên danh mục chỉ cần unique trong cùng cấp, nhưng slug phải unique toàn cục
+// vì public URL/filter hiện đang resolve category chỉ bằng slug.
 categorySchema.index({ name: 1, parentId: 1 }, { unique: true });
-categorySchema.index({ slug: 1, parentId: 1 }, { unique: true });
 
 categorySchema.pre('validate', function (next) {
   if (this.isModified('name')) {

@@ -1,5 +1,6 @@
 // ========================
-// Model: Enrollment — Ghi danh học viên vào khóa học
+// File này chứa model Enrollment.
+// Đây là lớp nối user với course ở phía học tập/ghi danh.
 // ========================
 import mongoose, { Schema, Document, Types } from 'mongoose';
 

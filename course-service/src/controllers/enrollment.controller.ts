@@ -1,5 +1,6 @@
 // ========================
-// Controller Layer: Xử lý Request/Response cho Ghi danh
+// File này là controller cho Enrollment.
+// Đây là phần learner-side/public-side của domain course, không thuộc curriculum editor nhưng vẫn là luồng course.
 // ========================
 import { Response } from 'express';
 import enrollmentService from '../services/enrollment.service';

@@ -10,4 +10,6 @@ export {
   type UserDeletedPayload,
   type CourseCreatedPayload,
   type EnrollmentCreatedPayload,
+  type VideoAssetStatusPayload,
+  type DocumentAssetStatusPayload,
 } from './constants';

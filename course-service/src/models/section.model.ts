@@ -1,3 +1,5 @@
+// File này chứa model Section.
+// Section chỉ là container sắp xếp lesson trong course.
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export interface ISection extends Document {

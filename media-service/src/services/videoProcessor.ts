@@ -52,12 +52,12 @@ export const processVideoToHLS = async (inputPath: string, outputDir: string, vi
 
         // 4. Chạy tiến trình FFmpeg
         ffmpeg(inputPath)
-            .videoCodec('libx264')   // Encode video H.264
-            .audioCodec('aac')       // Encode audio AAC
+            .videoCodec('libx264')   // Encode video H.264 - H.264 là 1 dạng nén video, giúp giảm dung lượng video nhưng vẫn giữ được chất lượng.
+            .audioCodec('aac')       // Encode audio AAC - AAC là 1 dạng nén âm thanh, giúp giảm dung lượng âm thanh nhưng vẫn giữ được chất lượng.
             .addOptions([
                 '-profile:v baseline',                      // Tương thích đa thiết bị
-                '-level 3.0',
-                '-start_number 0',                          // Bắt đầu đánh số chunk từ 0
+                '-level 3.0',                               // level là mức độ nén, level càng cao thì càng giảm dung lượng video nhưng vẫn giữ được chất lượng. lý do không làm cho số cao hơn là vì level càng cao thì thiết bị cần mạnh hơn để giải mã video, nếu làm số cao hơn thì nhiều thiết bị không giải mã được.
+                '-start_number 0',                          // Bắt đầu đánh số chunk từ 0 (chunk là các phân đoạn nhỏ của video)
                 '-hls_time 10',                             // Độ dài mỗi chunk: 10 giây
                 '-hls_list_size 0',                         // Trữ toàn bộ danh sách ở playlist
                 '-hls_key_info_file ' + keyInfoPath,        // Truyền file chứa thông tin mã hóa

@@ -1,10 +1,21 @@
 // ========================
-// Routes: API endpoints cho Course & Enrollment
+// File này là route chính của course-service cho domain course.
+// Nó mount:
+// - public course APIs
+// - enrollment APIs
+// - instructor APIs cho course, section, lesson, quiz
+// Lưu ý:
+// - slug route phải đặt cuối vì pattern rộng
+// - section/lesson/quiz được mount dưới :courseId
 // ========================
 import { Router } from 'express';
 import courseController from '../controllers/course.controller';
 import enrollmentController from '../controllers/enrollment.controller';
-import { extractUser, requireInstructor, requireStudent, requireStudentOrInstructor } from '../middlewares/auth.middleware';
+import lessonRoutes from './lesson.routes';
+import quizRoutes from './quiz.routes';
+import sectionRoutes from './section.routes';
+import { extractUser, requireInstructor, requireStudentOrInstructor } from '../middlewares/auth.middleware';
+import upload from '../middlewares/upload.middleware';
 
 const router = Router();
 
@@ -29,14 +40,21 @@ router.get('/my-courses', extractUser, requireInstructor, courseController.getMy
 // [POST] /api/courses — Tạo khóa học mới
 router.post('/', extractUser, requireInstructor, courseController.createCourse);
 
+router.use('/:courseId', extractUser, requireInstructor, sectionRoutes);
+router.use('/:courseId', extractUser, requireInstructor, lessonRoutes);
+router.use('/:courseId', extractUser, requireInstructor, quizRoutes);
+
 // [GET] /api/courses/:id/manage — Chi tiết khóa học (quản lý)
 router.get('/:id/manage', extractUser, requireInstructor, courseController.getCourseForManage);
 
-// [PUT] /api/courses/:id — Cập nhật khóa học
-router.put('/:id', extractUser, requireInstructor, courseController.updateCourse);
+// [PUT] /api/courses/:id — Cập nhật khóa học, hỗ trợ cả metadata và thumbnail file
+router.put('/:id', extractUser, requireInstructor, upload.single('thumbnail'), courseController.updateCourse);
 
 // [PATCH] /api/courses/:id/publish — Publish khóa học
 router.patch('/:id/publish', extractUser, requireInstructor, courseController.publishCourse);
+
+// [POST] /api/courses/:id/publish/validate — Validate publish - check điều kiện publish
+router.post('/:id/publish/validate', extractUser, requireInstructor, courseController.validatePublish);
 
 // [DELETE] /api/courses/:id — Xóa khóa học
 router.delete('/:id', extractUser, requireInstructor, courseController.deleteCourse);
