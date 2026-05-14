@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 
 export interface AuthRequest extends Request {
   userId?: string;
+  userRole?: string;
 }
 
 export const extractUser = (req: AuthRequest, res: Response, next: NextFunction): void => {
@@ -12,12 +13,13 @@ export const extractUser = (req: AuthRequest, res: Response, next: NextFunction)
     return;
   }
 
-  const decoded = jwt.decode(token) as { id: string } | null;
+  const decoded = jwt.decode(token) as { id: string; role?: string } | null;
   if (!decoded?.id) {
     res.status(401).json({ status: 'ERR', message: 'Token không hợp lệ.' });
     return;
   }
 
   req.userId = decoded.id;
+  req.userRole = decoded.role;
   next();
 };

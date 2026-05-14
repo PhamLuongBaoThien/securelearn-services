@@ -14,7 +14,7 @@ import { Course, ICourse, CourseStatus } from '../models/course.model';
 import { Lesson, LessonStatus, LessonType } from '../models/lesson.model';
 import { Quiz } from '../models/quiz.model';
 import { Section } from '../models/section.model';
-import { publishCourseCreated } from '../events/publishers';
+import { publishCourseCreated, publishVideoAssetCleanup, publishDocumentAssetCleanup } from '../events/publishers';
 import categoryService from './category.service';
 
 interface CourseLessonResponse {
@@ -282,9 +282,38 @@ class CourseService {
     if (!course) throw new Error('Khóa học không tồn tại.');
     if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền xóa khóa học này.');
 
-    const lessons = await Lesson.find({ courseId: course._id }).select('_id').lean();
+    // Load đầy đủ asset fields để phát cleanup events
+    const lessons = await Lesson.find({ courseId: course._id })
+      .select('_id videoAssetId documentAssetId')
+      .lean();
     const lessonIds = lessons.map((lesson) => lesson._id);
 
+    // Phát cleanup events cho toàn bộ media assets song song TRƯỚC khi xoá DB
+    // media-service sẽ xoá file vật lý trên R2/S3 + xoá record trong media DB
+    const cleanupPromises: Promise<void>[] = [];
+    for (const lesson of lessons) {
+      if (lesson.videoAssetId) {
+        cleanupPromises.push(
+          publishVideoAssetCleanup({
+            assetId: lesson.videoAssetId.toString(),
+            courseId,
+            lessonId: lesson._id.toString(),
+          })
+        );
+      }
+      if (lesson.documentAssetId) {
+        cleanupPromises.push(
+          publishDocumentAssetCleanup({
+            assetId: lesson.documentAssetId.toString(),
+            courseId,
+            lessonId: lesson._id.toString(),
+          })
+        );
+      }
+    }
+    await Promise.all(cleanupPromises);
+
+    // Xoá toàn bộ DB records sau khi đã phát events
     await Promise.all([
       lessonIds.length > 0 ? Quiz.deleteMany({ courseId: course._id, lessonId: { $in: lessonIds } }) : Promise.resolve(),
       Section.deleteMany({ courseId: course._id }),

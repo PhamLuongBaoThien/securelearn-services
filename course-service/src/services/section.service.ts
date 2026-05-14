@@ -9,6 +9,7 @@ import { Lesson } from '../models/lesson.model';
 import { Section } from '../models/section.model';
 import { Quiz } from '../models/quiz.model';
 import courseService from './course.service';
+import { publishVideoAssetCleanup, publishDocumentAssetCleanup } from '../events/publishers';
 
 class SectionService {
   // Tạo section mới theo thứ tự trong course.
@@ -53,8 +54,35 @@ class SectionService {
     const section = await Section.findOne({ _id: sectionId, courseId });
     if (!section) throw new Error('Chương không tồn tại.');
 
-    const lessons = await Lesson.find({ sectionId: section._id }).select('_id').lean();
+    // Load đầy đủ asset fields để phát cleanup events
+    const lessons = await Lesson.find({ sectionId: section._id })
+      .select('_id videoAssetId documentAssetId')
+      .lean();
     const lessonIds = lessons.map(lesson => lesson._id);
+
+    // Phát cleanup event cho từng media asset TRƯỚC khi xoá DB
+    const cleanupPromises: Promise<void>[] = [];
+    for (const lesson of lessons) {
+      if (lesson.videoAssetId) {
+        cleanupPromises.push(
+          publishVideoAssetCleanup({
+            assetId: lesson.videoAssetId.toString(),
+            courseId,
+            lessonId: lesson._id.toString(),
+          })
+        );
+      }
+      if (lesson.documentAssetId) {
+        cleanupPromises.push(
+          publishDocumentAssetCleanup({
+            assetId: lesson.documentAssetId.toString(),
+            courseId,
+            lessonId: lesson._id.toString(),
+          })
+        );
+      }
+    }
+    await Promise.all(cleanupPromises);
 
     if (lessonIds.length > 0) {
       await Quiz.deleteMany({ lessonId: { $in: lessonIds }, courseId });

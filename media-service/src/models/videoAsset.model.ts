@@ -4,7 +4,6 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export enum VideoAssetStatus {
   INITIATED = 'INITIATED',
-  UPLOADING = 'UPLOADING',
   PROCESSING = 'PROCESSING',
   READY = 'READY',
   FAILED = 'FAILED',
@@ -22,8 +21,12 @@ export interface IVideoAsset extends Document {
   manifestKey: string; // khóa object logical của manifest HLS
   rawFilePath: string; // đường dẫn file gốc
   manifestPath: string; // đường dẫn file HLS manifest
+  encryptionKey?: string | null; // Khoá AES-128
   processingProgress: number; // tiến độ xử lý
   status: VideoAssetStatus;
+  isAttached: boolean;
+  attachedLessonId?: string | null;
+  attachedAt?: Date | null;
   errorMessage?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -42,8 +45,12 @@ const videoAssetSchema = new Schema<IVideoAsset>(
     manifestKey: { type: String, default: '' },
     rawFilePath: { type: String, default: '' },
     manifestPath: { type: String, default: '' },
+    encryptionKey: { type: String, default: null }, // Khoá AES-128 dạng Hex
     processingProgress: { type: Number, default: 0, min: 0, max: 100 },
     status: { type: String, enum: Object.values(VideoAssetStatus), default: VideoAssetStatus.INITIATED, index: true },
+    isAttached: { type: Boolean, default: false, index: true },
+    attachedLessonId: { type: String, default: null, index: true },
+    attachedAt: { type: Date, default: null },
     errorMessage: { type: String, default: null },
   },
   { timestamps: true }

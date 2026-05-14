@@ -32,8 +32,12 @@ export enum RoutingKey {
   // --- Media Events ---
   VIDEO_ASSET_READY = 'media.video.ready',
   VIDEO_ASSET_FAILED = 'media.video.failed',
-  DOCUMENT_ASSET_READY = 'media.document.ready',
-  DOCUMENT_ASSET_FAILED = 'media.document.failed',
+  VIDEO_ASSET_ATTACHED = 'media.video.attached',
+  DOCUMENT_ASSET_ATTACHED = 'media.document.attached',
+
+  // --- Asset Cleanup Events (course-service → media-service) ---
+  VIDEO_ASSET_CLEANUP = 'media.video.cleanup',
+  DOCUMENT_ASSET_CLEANUP = 'media.document.cleanup',
 }
 
 // ==============================
@@ -85,11 +89,16 @@ export interface VideoAssetStatusPayload {
   errorMessage?: string;
 }
 
-export interface DocumentAssetStatusPayload {
-  documentAssetId: string;
+/** Payload yêu cầu media-service xoá asset vật lý (S3 + DB) */
+export interface AssetCleanupPayload {
+  assetId: string;
+  courseId: string;
   lessonId: string;
-  status: 'READY' | 'FAILED';
-  fileUrl?: string;       // URL truy cập file sau khi xử lý xong
-  pageCount?: number;     // Số trang (nếu là PDF)
-  errorMessage?: string;
+}
+
+/** Payload xác nhận asset đã được bind thành công vào lesson */
+export interface AssetAttachedPayload {
+  assetId: string;
+  courseId: string;
+  lessonId: string;
 }

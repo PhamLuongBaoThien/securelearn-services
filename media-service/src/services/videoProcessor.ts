@@ -3,109 +3,141 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
+export type ProgressCallback = (percent: number) => Promise<void>;
+
 /**
- * Xử lý video: Chuyển đổi file video sang định dạng HLS chia nhỏ (.ts) 
- * và mã hoá AES-128 trên từng phân đoạn.
- * 
- * @param inputPath Đường dẫn tới file video gốc
- * @param outputDir Thư mục chứa các file đầu ra (.m3u8 và .ts)
- * @param videoId ID định danh của video
+ * Probe codec của video để quyết định copy hay re-encode.
  */
-export const processVideoToHLS = async (inputPath: string, outputDir: string, videoId: string): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        // 1. Khởi tạo thư mục đầu ra nếu chưa có
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
-
-        // 2. Sinh khóa mã hoá AES-128 (16 bytes)
-        const key = crypto.randomBytes(16);
-        const keyHex = key.toString('hex');
-        
-        // CẢNH BÁO MẬT MÃ: Trong ứng dụng thực tế, khóa này cực kỳ quan trọng. 
-        // Phải lưu keyHex vào MongoDB/Redis cùng với videoId và KHÔNG được để lộ.
-        // Chỉ cấp phát khóa thông qua một endpoint an toàn kiểm tra JWT & quyền truy cập.
-        console.log(`[MediaService] Generated Encryption Key for ${videoId}: ${keyHex}`);
-
-        // Lưu key tạm vào file để FFmpeg sử dụng trong quá trình mã hoá
-        const keyFilePath = path.join(outputDir, `${videoId}.key`);
-        fs.writeFileSync(keyFilePath, key);
-
-        // 3. Tạo file thiết lập thông tin key (key_info) cho FFmpeg
-        /* Định dạng của file key_info:
-           - Dòng 1: Key URI (Đường dẫn để Video Player gọi lên backend lấy khóa giải mã)
-           - Dòng 2: Đường dẫn file key vật lý để FFmpeg đọc và mã hoá
-           - Dòng 3: IV - Initialization Vector (Tùy chọn, dùng custom IV cho bảo mật)
-        */
-        const keyInfoPath = path.join(outputDir, 'key_info.txt');
-        
-        // Dòng 1: Endpoint nội bộ/public để lấy khóa giải mã dựa trên videoId (Yêu cầu Token)
-        const keyUri = `https://api.securelearn.com/media/keys/${videoId}`;
-        
-        // Dòng 3: Custom IV
-        const ivHex = crypto.randomBytes(16).toString('hex');
-        fs.writeFileSync(keyInfoPath, `${keyUri}\n${keyFilePath}\n${ivHex}`);
-
-        const m3u8OutputPath = path.join(outputDir, `${videoId}_playlist.m3u8`);
-
-        console.log(`[MediaService] Bắt đầu xử lý HLS AES-128 cho video: ${videoId}...`);
-
-        // 4. Chạy tiến trình FFmpeg
-        ffmpeg(inputPath)
-            .videoCodec('libx264')   // Encode video H.264 - H.264 là 1 dạng nén video, giúp giảm dung lượng video nhưng vẫn giữ được chất lượng.
-            .audioCodec('aac')       // Encode audio AAC - AAC là 1 dạng nén âm thanh, giúp giảm dung lượng âm thanh nhưng vẫn giữ được chất lượng.
-            .addOptions([
-                '-profile:v baseline',                      // Tương thích đa thiết bị
-                '-level 3.0',                               // level là mức độ nén, level càng cao thì càng giảm dung lượng video nhưng vẫn giữ được chất lượng. lý do không làm cho số cao hơn là vì level càng cao thì thiết bị cần mạnh hơn để giải mã video, nếu làm số cao hơn thì nhiều thiết bị không giải mã được.
-                '-start_number 0',                          // Bắt đầu đánh số chunk từ 0 (chunk là các phân đoạn nhỏ của video)
-                '-hls_time 10',                             // Độ dài mỗi chunk: 10 giây
-                '-hls_list_size 0',                         // Trữ toàn bộ danh sách ở playlist
-                '-hls_key_info_file ' + keyInfoPath,        // Truyền file chứa thông tin mã hóa
-                '-hls_segment_filename ' + path.join(outputDir, `${videoId}_segment_%03d.ts`) // Format tên file chunk
-            ])
-            .output(m3u8OutputPath)
-            .on('end', () => {
-                console.log(`[MediaService] Hoàn tất HLS processing cho ${videoId}`);
-                
-                // DỌN DẸP BẢO MẬT (Security Cleanup):
-                // Xóa file key local và key_info vì nó không được public ra bên ngoài (trên S3/MinIO)
-                // Chỉ upload file .m3u8 và các file .ts lên Object Storage
-                try {
-                    if (fs.existsSync(keyInfoPath)) fs.unlinkSync(keyInfoPath);
-                    if (fs.existsSync(keyFilePath)) fs.unlinkSync(keyFilePath);
-                } catch (cleanupErr) {
-                    console.error('[MediaService] Lỗi khi dọn dẹp file bảo mật:', cleanupErr);
-                }
-                
-                resolve(m3u8OutputPath);
-            })
-            .on('error', (err) => {
-                console.error(`[MediaService] Lỗi khi xử lý video ${videoId}:`, err);
-                
-                // Dọn dẹp nếu có lỗi
-                if (fs.existsSync(keyInfoPath)) fs.unlinkSync(keyInfoPath);
-                if (fs.existsSync(keyFilePath)) fs.unlinkSync(keyFilePath);
-                
-                reject(err);
-            })
-            .run();
+const probeVideoMetadata = (inputPath: string): Promise<{ video: string; audio: string; durationSec: number }> =>
+  new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(inputPath, (err: any, metadata: any) => {
+      if (err) return reject(err);
+      const streams: any[] = metadata.streams || [];
+      const video = streams.find((s) => s.codec_type === 'video')?.codec_name ?? '';
+      const audio = streams.find((s) => s.codec_type === 'audio')?.codec_name ?? '';
+      const rawDuration =
+        Number(metadata?.format?.duration) ||
+        Number(streams.find((s) => s.codec_type === 'video')?.duration) ||
+        0;
+      const durationSec = Math.max(0, Math.round(rawDuration));
+      resolve({ video, audio, durationSec });
     });
-};
+  });
 
-/*
- * Ví dụ cách chạy:
- * 
- * async function runWorker() {
- *     try {
- *         const filePath = './temp/raw_lesson_1.mp4';
- *         const outputDir = './temp/hls_output/lesson_1';
- *         const videoId = 'lesson_1_uid_99x';
- *         
- *         await processVideoToHLS(filePath, outputDir, videoId);
- *         
- *         // -> Bước tiếp theo: Upload toàn bộ thư mục outputDir (m3u8, .ts) lên MinIO / S3
- *     } catch (e) {
- *         console.error('Processing failed');
- *     }
- * }
+/**
+ * Xử lý video: Chuyển đổi file video sang định dạng HLS chia nhỏ (.ts)
+ * và mã hoá AES-128 trên từng phân đoạn.
+ *
+ * Tối ưu #1: Nếu video đã là H.264+AAC → dùng copy mode (không re-encode) → cực nhanh.
+ * Tối ưu #1: Nếu cần encode → dùng preset ultrafast + threads 0 (nhanh hơn 5-10x so với medium).
+ * Tối ưu #3: Báo cáo progress thực qua callback mỗi 5%.
+ *
+ * @param inputPath   Đường dẫn tới file video gốc (local)
+ * @param outputDir   Thư mục chứa các file đầu ra (.m3u8 và .ts)
+ * @param videoId     ID định danh của video (dùng đặt tên file và key)
+ * @param onProgress  Callback nhận % tiến trình (0-99), được gọi mỗi 5%
  */
+export const processVideoToHLS = async (
+  inputPath: string,
+  outputDir: string,
+  videoId: string,
+  onProgress?: ProgressCallback,
+): Promise<{ m3u8OutputPath: string; encryptionKeyHex: string; durationSec: number }> => {
+  // --- Probe codec TRƯỚC khi tạo Promise (tránh unhandled rejection trong executor) ---
+  let canCopyVideo = false;
+  let canCopyAudio = false;
+  let durationSec = 0;
+  try {
+    const metadata = await probeVideoMetadata(inputPath);
+    canCopyVideo = metadata.video === 'h264';
+    canCopyAudio = ['aac', 'mp3'].includes(metadata.audio);
+    durationSec = metadata.durationSec;
+    console.log(`[MediaService] Codec probe: video=${metadata.video}, audio=${metadata.audio}, duration=${durationSec}s`);
+    console.log(`[MediaService] Chế độ xử lý: ${canCopyVideo && canCopyAudio ? '⚡ COPY (không encode)' : '🔄 ENCODE (libx264+ultrafast)'}`);
+  } catch (e) {
+    console.warn('[MediaService] Probe codec thất bại, fallback sang encode mode:', e);
+  }
+
+  // --- Setup mã hoá AES-128 ---
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const key = crypto.randomBytes(16);
+  const keyHex = key.toString('hex');
+  const keyFilePath = path.join(outputDir, `${videoId}.key`);
+  fs.writeFileSync(keyFilePath, key);
+
+  const keyInfoPath = path.join(outputDir, 'key_info.txt');
+  const apiUrl = process.env.API_URL || 'http://localhost:8000';
+  const keyUri = `${apiUrl}/api/media/videos/${videoId}/key`;
+  const ivHex = crypto.randomBytes(16).toString('hex');
+  fs.writeFileSync(keyInfoPath, `${keyUri}\n${keyFilePath}\n${ivHex}`);
+
+  const m3u8OutputPath = path.join(outputDir, `${videoId}_playlist.m3u8`);
+  const segmentPattern = path.join(outputDir, `${videoId}_segment_%03d.ts`);
+
+  console.log(`[MediaService] Bắt đầu HLS processing cho video: ${videoId}...`);
+
+  // --- Chạy FFmpeg ---
+  return new Promise((resolve, reject) => {
+    let lastReported = 0;
+
+    const cmd = ffmpeg(inputPath);
+
+    // #1 — Copy stream nếu codec tương thích, ngược lại encode với ultrafast
+    if (canCopyVideo && canCopyAudio) {
+      cmd.videoCodec('copy').audioCodec('copy');
+    } else {
+      cmd
+        .videoCodec('libx264')
+        .audioCodec('aac')
+        .addOptions([
+          '-preset ultrafast', // #1 — Nhanh hơn 5-10x so với preset mặc định "medium"
+          '-crf 26',           // Chất lượng tốt, giảm kích thước file
+          '-threads 0',        // Dùng tất cả CPU cores
+          '-profile:v baseline',
+          '-level 3.0',
+        ]);
+    }
+
+    cmd
+      .addOptions([
+        '-start_number 0',
+        '-hls_time 10',
+        '-hls_list_size 0',
+        '-hls_key_info_file ' + keyInfoPath,
+        '-hls_segment_filename ' + segmentPattern,
+      ])
+      .output(m3u8OutputPath)
+      .on('progress', (progress: any) => {
+        // #3 — Real progress: gọi callback mỗi 5% thay vì giả lập
+        if (!onProgress) return;
+        const pct = Math.min(Math.round(progress.percent || 0), 99);
+        if (pct - lastReported >= 5) {
+          lastReported = pct;
+          void onProgress(pct);
+        }
+      })
+      .on('end', () => {
+        console.log(`[MediaService] ✅ Hoàn tất HLS processing cho ${videoId}`);
+        // Dọn dẹp file bảo mật — không upload lên storage
+        try {
+          if (fs.existsSync(keyInfoPath)) fs.unlinkSync(keyInfoPath);
+          if (fs.existsSync(keyFilePath)) fs.unlinkSync(keyFilePath);
+        } catch (cleanupErr) {
+          console.error('[MediaService] Lỗi khi dọn dẹp file bảo mật:', cleanupErr);
+        }
+        resolve({ m3u8OutputPath, encryptionKeyHex: keyHex, durationSec });
+      })
+      .on('error', (err: any) => {
+        console.error(`[MediaService] Lỗi khi xử lý video ${videoId}:`, err);
+        try {
+          if (fs.existsSync(keyInfoPath)) fs.unlinkSync(keyInfoPath);
+          if (fs.existsSync(keyFilePath)) fs.unlinkSync(keyFilePath);
+        } catch (_) { /* ignore */ }
+        reject(err);
+      })
+      .run();
+  });
+};

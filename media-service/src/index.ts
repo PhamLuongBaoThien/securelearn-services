@@ -4,6 +4,9 @@ dotenv.config();
 import app from './app';
 import { connectDB } from './config/db';
 import { RabbitMQConnection } from '@securelearn/common';
+import { registerEventHandlers } from './events/handlers';
+import videoAssetService from './services/videoAsset.service';
+import documentAssetService from './services/documentAsset.service';
 
 const PORT = process.env.PORT || 5003;
 
@@ -14,6 +17,10 @@ const bootServer = async () => {
 
     const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
     await RabbitMQConnection.getInstance().connect(rabbitmqUrl);
+    await registerEventHandlers();
+    videoAssetService.startOrphanCleanupJob();
+    videoAssetService.startProcessingTimeoutJob();
+    documentAssetService.startOrphanCleanupJob();
 
     app.listen(PORT, () => {
       console.log(`Media Service đang chạy tại http://localhost:${PORT}`);

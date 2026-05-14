@@ -9,6 +9,21 @@ import { ILesson, Lesson, LessonStatus, LessonType } from '../models/lesson.mode
 import { Quiz } from '../models/quiz.model';
 import { Section } from '../models/section.model';
 import courseService from './course.service';
+import {
+  publishVideoAssetCleanup,
+  publishDocumentAssetCleanup,
+  publishVideoAssetAttached,
+  publishDocumentAssetAttached,
+} from '../events/publishers';
+
+interface MediaAssetBindingSnapshot {
+  _id: string;
+  ownerUserId: string;
+  courseId: string;
+  lessonId: string;
+}
+
+const MEDIA_SERVICE_URL = process.env.MEDIA_SERVICE_URL || 'http://media-service:5003';
 
 class LessonService {
   // Lesson mới mặc định là VIDEO và status DRAFT cho tới khi được bind nội dung hợp lệ.
@@ -97,14 +112,31 @@ class LessonService {
     return lesson;
   }
 
-  // Khi xóa lesson quiz thì xóa luôn quiz domain đi kèm.
+  // Khi xóa lesson: dọn quiz + phát cleanup event cho media asset trước khi xoá DB.
   public async deleteLesson(courseId: string, lessonId: string, instructorId: string): Promise<void> {
     await this.assertCourseOwnership(courseId, instructorId);
+    // Load đầy đủ để kiểm tra asset (không dùng .lean() vì cần document methods)
     const lesson = await Lesson.findOne({ _id: lessonId, courseId });
     if (!lesson) throw new Error('Bài học không tồn tại.');
 
-    await Quiz.deleteOne({ lessonId: lesson._id, courseId });
+    // Phát cleanup event cho media asset TRƯỚC khi xoá DB
+    // media-service sẽ xoá file vật lý trên R2/S3 + xoá record trong media DB
+    if (lesson.videoAssetId) {
+      await publishVideoAssetCleanup({
+        assetId: lesson.videoAssetId.toString(),
+        courseId,
+        lessonId,
+      });
+    }
+    if (lesson.documentAssetId) {
+      await publishDocumentAssetCleanup({
+        assetId: lesson.documentAssetId.toString(),
+        courseId,
+        lessonId,
+      });
+    }
 
+    await Quiz.deleteOne({ lessonId: lesson._id, courseId });
     await Lesson.deleteOne({ _id: lesson._id });
     await this.resequenceLessons(courseId, lesson.sectionId.toString());
     await courseService.syncCourseStats(courseId);
@@ -154,11 +186,21 @@ class LessonService {
   }
 
   // Video được bind trước, nhưng chỉ READY sau khi media-service xử lý xong và bắn event về.
-  public async bindVideoAsset(courseId: string, lessonId: string, instructorId: string, videoAssetId: string) {
+  public async bindVideoAsset(
+    courseId: string,
+    lessonId: string,
+    instructorId: string,
+    videoAssetId: string,
+    authorizationHeader?: string,
+  ) {
     await this.assertCourseOwnership(courseId, instructorId);
     const lesson = await Lesson.findOne({ _id: lessonId, courseId });
     if (!lesson) throw new Error('Bài học không tồn tại.');
     if (lesson.type !== LessonType.VIDEO) throw new Error('Chỉ bài học video mới được gắn video asset.');
+    await this.assertVideoAssetBinding(videoAssetId, courseId, lessonId, instructorId, authorizationHeader);
+
+    const previousVideoAssetId = lesson.videoAssetId?.toString() || null;
+    const previousDocumentAssetId = lesson.documentAssetId?.toString() || null;
 
     lesson.videoAssetId = new Types.ObjectId(videoAssetId);
     lesson.documentAssetId = null;
@@ -166,21 +208,75 @@ class LessonService {
     await Quiz.deleteOne({ lessonId: lesson._id, courseId });
     await lesson.save();
 
+    await publishVideoAssetAttached({
+      assetId: videoAssetId,
+      courseId,
+      lessonId,
+    });
+
+    if (previousVideoAssetId && previousVideoAssetId !== videoAssetId) {
+      await publishVideoAssetCleanup({
+        assetId: previousVideoAssetId,
+        courseId,
+        lessonId,
+      });
+    }
+
+    if (previousDocumentAssetId) {
+      await publishDocumentAssetCleanup({
+        assetId: previousDocumentAssetId,
+        courseId,
+        lessonId,
+      });
+    }
+
     return lesson;
   }
 
   // Document hiện được xem là sẵn sàng ngay sau khi upload + bind xong.
-  public async bindDocumentAsset(courseId: string, lessonId: string, instructorId: string, documentAssetId: string) {
+  public async bindDocumentAsset(
+    courseId: string,
+    lessonId: string,
+    instructorId: string,
+    documentAssetId: string,
+    authorizationHeader?: string,
+  ) {
     await this.assertCourseOwnership(courseId, instructorId);
     const lesson = await Lesson.findOne({ _id: lessonId, courseId });
     if (!lesson) throw new Error('Bài học không tồn tại.');
     if (lesson.type !== LessonType.DOCUMENT) throw new Error('Chỉ bài học tài liệu mới được gắn document asset.');
+    await this.assertDocumentAssetBinding(documentAssetId, courseId, lessonId, instructorId, authorizationHeader);
+
+    const previousDocumentAssetId = lesson.documentAssetId?.toString() || null;
+    const previousVideoAssetId = lesson.videoAssetId?.toString() || null;
 
     lesson.documentAssetId = new Types.ObjectId(documentAssetId);
     lesson.videoAssetId = null;
     lesson.status = LessonStatus.READY;
     await Quiz.deleteOne({ lessonId: lesson._id, courseId });
     await lesson.save();
+
+    await publishDocumentAssetAttached({
+      assetId: documentAssetId,
+      courseId,
+      lessonId,
+    });
+
+    if (previousDocumentAssetId && previousDocumentAssetId !== documentAssetId) {
+      await publishDocumentAssetCleanup({
+        assetId: previousDocumentAssetId,
+        courseId,
+        lessonId,
+      });
+    }
+
+    if (previousVideoAssetId) {
+      await publishVideoAssetCleanup({
+        assetId: previousVideoAssetId,
+        courseId,
+        lessonId,
+      });
+    }
 
     return lesson;
   }
@@ -190,6 +286,15 @@ class LessonService {
     const lesson = await Lesson.findOne({ _id: lessonId, courseId });
     if (!lesson) throw new Error('Bài học không tồn tại.');
     if (lesson.type !== LessonType.VIDEO) throw new Error('Chỉ bài học video mới được gỡ video asset.');
+
+    // Phát event cleanup để media-service xoá file vật lý (S3 + DB)
+    if (lesson.videoAssetId) {
+      await publishVideoAssetCleanup({
+        assetId: lesson.videoAssetId.toString(),
+        courseId,
+        lessonId,
+      });
+    }
 
     lesson.videoAssetId = null;
     lesson.status = LessonStatus.DRAFT;
@@ -206,10 +311,20 @@ class LessonService {
     if (!lesson) throw new Error('Bài học không tồn tại.');
     if (lesson.type !== LessonType.DOCUMENT) throw new Error('Chỉ bài học tài liệu mới được gỡ document asset.');
 
+    // Phát event cleanup để media-service xoá file vật lý (S3 + DB)
+    if (lesson.documentAssetId) {
+      await publishDocumentAssetCleanup({
+        assetId: lesson.documentAssetId.toString(),
+        courseId,
+        lessonId,
+      });
+    }
+
     lesson.documentAssetId = null;
     lesson.status = LessonStatus.DRAFT;
     await lesson.save();
 
+    await courseService.syncCourseStats(courseId);
     return lesson;
   }
 
@@ -280,8 +395,30 @@ class LessonService {
   }
 
   // Rule quan trọng: đổi type thì dọn reference cũ để không giữ video/document/quiz sai loại.
+  // Phát cleanup events để media-service xoá file vật lý trên S3.
   private async cleanupLessonReferencesForTypeChange(lesson: ILesson) {
     await Quiz.deleteOne({ lessonId: lesson._id, courseId: lesson.courseId });
+
+    const courseId = lesson.courseId.toString();
+    const lessonId = lesson._id.toString();
+
+    // Phát event cleanup cho video asset cũ nếu có
+    if (lesson.videoAssetId) {
+      await publishVideoAssetCleanup({
+        assetId: lesson.videoAssetId.toString(),
+        courseId,
+        lessonId,
+      });
+    }
+
+    // Phát event cleanup cho document asset cũ nếu có
+    if (lesson.documentAssetId) {
+      await publishDocumentAssetCleanup({
+        assetId: lesson.documentAssetId.toString(),
+        courseId,
+        lessonId,
+      });
+    }
 
     lesson.videoAssetId = null;
     lesson.documentAssetId = null;
@@ -297,6 +434,71 @@ class LessonService {
   private normalizeLessonStatus(status: LessonStatus): LessonStatus {
     if (!Object.values(LessonStatus).includes(status)) throw new Error('Trạng thái bài học không hợp lệ.');
     return status;
+  }
+
+  private async assertVideoAssetBinding(
+    videoAssetId: string,
+    courseId: string,
+    lessonId: string,
+    instructorId: string,
+    authorizationHeader?: string,
+  ): Promise<void> {
+    const asset = await this.fetchMediaAsset<MediaAssetBindingSnapshot>(
+      `/api/media/videos/${videoAssetId}`,
+      authorizationHeader,
+    );
+    this.assertMediaAssetContext(asset, courseId, lessonId, instructorId, 'Video asset');
+  }
+
+  private async assertDocumentAssetBinding(
+    documentAssetId: string,
+    courseId: string,
+    lessonId: string,
+    instructorId: string,
+    authorizationHeader?: string,
+  ): Promise<void> {
+    const asset = await this.fetchMediaAsset<MediaAssetBindingSnapshot>(
+      `/api/media/documents/${documentAssetId}`,
+      authorizationHeader,
+    );
+    this.assertMediaAssetContext(asset, courseId, lessonId, instructorId, 'Document asset');
+  }
+
+  private async fetchMediaAsset<T>(path: string, authorizationHeader?: string): Promise<T> {
+    if (!authorizationHeader) {
+      throw new Error('Thiếu Authorization header để xác minh media asset.');
+    }
+
+    const response = await fetch(`${MEDIA_SERVICE_URL}${path}`, {
+      headers: {
+        Authorization: authorizationHeader,
+      },
+    });
+
+    const payload = (await response.json()) as { status: string; message?: string; data?: T };
+    if (!response.ok || payload.status === 'ERR' || !payload.data) {
+      throw new Error(payload.message || 'Không thể xác minh media asset.');
+    }
+
+    return payload.data;
+  }
+
+  private assertMediaAssetContext(
+    asset: MediaAssetBindingSnapshot,
+    courseId: string,
+    lessonId: string,
+    instructorId: string,
+    label: string,
+  ): void {
+    if (asset.ownerUserId !== instructorId) {
+      throw new Error(`${label} không thuộc quyền sở hữu của giảng viên hiện tại.`);
+    }
+    if (asset.courseId !== courseId) {
+      throw new Error(`${label} không thuộc khóa học hiện tại.`);
+    }
+    if (asset.lessonId !== lessonId) {
+      throw new Error(`${label} không thuộc bài học hiện tại.`);
+    }
   }
 }
 

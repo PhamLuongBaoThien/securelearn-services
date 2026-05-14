@@ -11,5 +11,6 @@ export {
   type CourseCreatedPayload,
   type EnrollmentCreatedPayload,
   type VideoAssetStatusPayload,
-  type DocumentAssetStatusPayload,
+  type AssetCleanupPayload,
+  type AssetAttachedPayload,
 } from './constants';

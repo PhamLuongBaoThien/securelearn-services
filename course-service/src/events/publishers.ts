@@ -8,6 +8,8 @@ import {
   RoutingKey,
   type CourseCreatedPayload,
   type EnrollmentCreatedPayload,
+  type AssetCleanupPayload,
+  type AssetAttachedPayload,
 } from '@securelearn/common';
 
 /**
@@ -28,6 +30,46 @@ export const publishEnrollmentCreated = async (payload: EnrollmentCreatedPayload
   await publishMessage<EnrollmentCreatedPayload>(
     Exchange.COURSE,
     RoutingKey.ENROLLMENT_CREATED,
+    payload
+  );
+};
+
+/**
+ * Phát event: Yêu cầu media-service xoá video asset (S3 + DB).
+ * Gọi khi unbind video khỏi lesson hoặc đổi type lesson.
+ */
+export const publishVideoAssetCleanup = async (payload: AssetCleanupPayload): Promise<void> => {
+  await publishMessage<AssetCleanupPayload>(
+    Exchange.COURSE,
+    RoutingKey.VIDEO_ASSET_CLEANUP,
+    payload
+  );
+};
+
+/**
+ * Phát event: Yêu cầu media-service xoá document asset (S3 + DB).
+ * Gọi khi unbind document khỏi lesson hoặc đổi type lesson.
+ */
+export const publishDocumentAssetCleanup = async (payload: AssetCleanupPayload): Promise<void> => {
+  await publishMessage<AssetCleanupPayload>(
+    Exchange.COURSE,
+    RoutingKey.DOCUMENT_ASSET_CLEANUP,
+    payload
+  );
+};
+
+export const publishVideoAssetAttached = async (payload: AssetAttachedPayload): Promise<void> => {
+  await publishMessage<AssetAttachedPayload>(
+    Exchange.COURSE,
+    RoutingKey.VIDEO_ASSET_ATTACHED,
+    payload
+  );
+};
+
+export const publishDocumentAssetAttached = async (payload: AssetAttachedPayload): Promise<void> => {
+  await publishMessage<AssetAttachedPayload>(
+    Exchange.COURSE,
+    RoutingKey.DOCUMENT_ASSET_ATTACHED,
     payload
   );
 };
