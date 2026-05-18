@@ -22,12 +22,12 @@ interface CourseLessonResponse {
   title: string;
   type: string;
   status: string;
-  summary: string;
+  content: string;
   duration: number;
   order: number;
   isFreePreview: boolean;
   videoAssetId: string | null;
-  documentAssetId: string | null;
+  attachments: string[];           // Tài liệu đính kèm
   quizId: string | null;
   contentMeta: {
     questionCount?: number;
@@ -106,7 +106,7 @@ class CourseService {
   // - phải có ít nhất 1 section
   // - mỗi section phải có ít nhất 1 lesson
   // - lesson phải READY
-  // - VIDEO cần videoAssetId, DOCUMENT cần documentAssetId, QUIZ cần có quiz + ít nhất 1 câu hỏi
+  // - VIDEO cần videoAssetId, QUIZ cần có quiz + ít nhất 1 câu hỏi
   public async validateCoursePublish(courseId: string, instructorId: string) {
     const course = await Course.findById(courseId).lean();
     if (!course) throw new Error('Khóa học không tồn tại.');
@@ -157,15 +157,6 @@ class CourseService {
           errors.push({
             field: 'lesson.videoAssetId',
             message: `Bài học "${lesson.title}" chưa gắn video asset.`,
-            sectionId: section._id.toString(),
-            lessonId: lesson._id.toString(),
-          });
-        }
-
-        if (lesson.type === LessonType.DOCUMENT && !lesson.documentAssetId) {
-          errors.push({
-            field: 'lesson.documentAssetId',
-            message: `Bài học "${lesson.title}" chưa gắn tài liệu.`,
             sectionId: section._id.toString(),
             lessonId: lesson._id.toString(),
           });
@@ -284,12 +275,11 @@ class CourseService {
 
     // Load đầy đủ asset fields để phát cleanup events
     const lessons = await Lesson.find({ courseId: course._id })
-      .select('_id videoAssetId documentAssetId')
+      .select('_id videoAssetId attachments')
       .lean();
     const lessonIds = lessons.map((lesson) => lesson._id);
 
     // Phát cleanup events cho toàn bộ media assets song song TRƯỚC khi xoá DB
-    // media-service sẽ xoá file vật lý trên R2/S3 + xoá record trong media DB
     const cleanupPromises: Promise<void>[] = [];
     for (const lesson of lessons) {
       if (lesson.videoAssetId) {
@@ -301,10 +291,11 @@ class CourseService {
           })
         );
       }
-      if (lesson.documentAssetId) {
+      // Cleanup toàn bộ attachments
+      for (const attachmentId of (lesson.attachments || [])) {
         cleanupPromises.push(
           publishDocumentAssetCleanup({
-            assetId: lesson.documentAssetId.toString(),
+            assetId: attachmentId.toString(),
             courseId,
             lessonId: lesson._id.toString(),
           })
@@ -472,12 +463,12 @@ class CourseService {
         title: lesson.title,
         type: lesson.type,
         status: lesson.status,
-        summary: lesson.summary || '',
+        content: lesson.content || '',
         duration: lesson.duration,
         order: lesson.order,
         isFreePreview: lesson.isFreePreview,
         videoAssetId: lesson.videoAssetId ? lesson.videoAssetId.toString() : null,
-        documentAssetId: lesson.documentAssetId ? lesson.documentAssetId.toString() : null,
+        attachments: (lesson.attachments || []).map((id) => id.toString()),
         quizId: quizMeta?.quizId || null,
         contentMeta: lesson.type === LessonType.QUIZ ? { questionCount: quizMeta?.questionCount || 0 } : null,
       });

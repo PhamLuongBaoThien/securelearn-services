@@ -48,7 +48,7 @@ export const publishVideoAssetCleanup = async (payload: AssetCleanupPayload): Pr
 
 /**
  * Phát event: Yêu cầu media-service xoá document asset (S3 + DB).
- * Gọi khi unbind document khỏi lesson hoặc đổi type lesson.
+ * Gọi khi gỡ attachment khỏi lesson hoặc xóa lesson/section/course.
  */
 export const publishDocumentAssetCleanup = async (payload: AssetCleanupPayload): Promise<void> => {
   await publishMessage<AssetCleanupPayload>(

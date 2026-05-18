@@ -1,4 +1,4 @@
-// Controller cho video asset — flow 2 bước: initiate → upload-complete.
+// Controller cho video asset direct multipart upload.
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import videoAssetService from '../services/videoAsset.service';
@@ -7,35 +7,20 @@ class VideoAssetController {
   // [POST] /api/media/videos/initiate-upload
   public async initiateUpload(req: AuthRequest, res: Response): Promise<void> {
     try {
+      const { courseId, lessonId, fileName, mimeType, sizeBytes } = req.body;
+      if (!fileName || !mimeType || !sizeBytes) {
+        res.status(400).json({ status: 'ERR', message: 'Thiếu thông tin file: fileName, mimeType, sizeBytes.' });
+        return;
+      }
       const data = await videoAssetService.initiateUpload({
         ownerUserId: req.userId!,
-        courseId: req.body.courseId,
-        lessonId: req.body.lessonId,
+        courseId,
+        lessonId,
+        fileName,
+        mimeType,
+        sizeBytes: Number(sizeBytes),
       });
       res.status(201).json({ status: 'OK', data });
-    } catch (error: any) {
-      res.status(400).json({ status: 'ERR', message: error.message });
-    }
-  }
-
-  // [POST] /api/media/videos/:videoAssetId/upload-complete
-  public async completeUpload(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      if (!req.file) {
-        res.status(400).json({ status: 'ERR', message: 'Vui lòng tải file video.' });
-        return;
-      }
-      if (!req.file.mimetype.startsWith('video/')) {
-        res
-          .status(400)
-          .json({ status: 'ERR', message: 'File không phải định dạng video hợp lệ.' });
-        return;
-      }
-      const asset = await videoAssetService.completeUpload(
-        req.params.videoAssetId as string,
-        req.file,
-      );
-      res.status(200).json({ status: 'OK', message: 'Đã nhận file video, đang xử lý.', data: asset });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }
@@ -64,6 +49,57 @@ class VideoAssetController {
       res.send(keyBuffer);
     } catch (error: any) {
       res.status(404).send('Asset not found');
+    }
+  }
+
+  // [GET] /api/media/videos/:videoAssetId/batch-part-urls?totalParts=N
+  // Tạo toàn bộ presigned URLs cho 1 file trong 1 request duy nhất.
+  public async getBatchPartUrls(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const totalParts = parseInt(req.query.totalParts as string, 10);
+      if (!totalParts || totalParts < 1 || totalParts > 10000) {
+        res.status(400).json({ status: 'ERR', message: 'totalParts không hợp lệ.' });
+        return;
+      }
+      const urls = await videoAssetService.getBatchPartPresignedUrls(
+        req.params.videoAssetId as string,
+        totalParts,
+      );
+      res.status(200).json({ status: 'OK', data: { urls } });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  // [POST] /api/media/videos/:videoAssetId/confirm-upload
+  public async confirmUpload(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { parts } = req.body as { parts: { ETag: string; PartNumber: number }[] };
+      if (!Array.isArray(parts) || parts.length === 0) {
+        res.status(400).json({ status: 'ERR', message: 'Danh sách parts không hợp lệ.' });
+        return;
+      }
+      const hasInvalidPart = parts.some(
+        (part) => !part?.ETag || !Number.isInteger(part.PartNumber) || part.PartNumber < 1,
+      );
+      if (hasInvalidPart) {
+        res.status(400).json({ status: 'ERR', message: 'Thông tin ETag/PartNumber không hợp lệ.' });
+        return;
+      }
+      const asset = await videoAssetService.confirmUpload(req.params.videoAssetId as string, parts);
+      res.status(200).json({ status: 'OK', message: 'Đang xử lý video.', data: asset });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  // [POST] /api/media/videos/:videoAssetId/abort-upload
+  public async abortUpload(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      await videoAssetService.abortUpload(req.params.videoAssetId as string);
+      res.status(200).json({ status: 'OK', message: 'Đã hủy upload.' });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
     }
   }
 }

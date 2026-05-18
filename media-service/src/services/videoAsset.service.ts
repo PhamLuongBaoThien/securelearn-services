@@ -1,6 +1,6 @@
 // Flow upload video:
-// 1. initiateUpload  → tạo DB record, trả về _id
-// 2. completeUpload  → nhận file từ frontend qua backend, lưu disk, trigger FFmpeg
+// 1. initiateUpload  → tạo DB record + multipart session
+// 2. confirmUpload   → complete multipart trên storage, trigger FFmpeg
 // 3. processVideoInBackground (async):
 //    #1 — FFmpeg probe codec → copy hoặc encode ultrafast
 //    #3 — Cập nhật progress thực vào DB mỗi 5%
@@ -19,56 +19,121 @@ const PROCESSING_TIMEOUT_MS = Number(process.env.MEDIA_PROCESSING_TIMEOUT_MS || 
 const HLS_UPLOAD_CONCURRENCY = Number(process.env.HLS_UPLOAD_CONCURRENCY || 10);
 
 class VideoAssetService {
-  /** Bước 1: Khởi tạo asset record trong DB. */
+  /**
+   * Bước 1: Khởi tạo asset record + tạo multipart upload session trên MinIO.
+   * Trả về presigned info để FE upload thẳng lên storage, không qua backend.
+   */
   public async initiateUpload(data: {
     ownerUserId: string;
     courseId: string;
     lessonId: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
   }) {
     const asset = await VideoAsset.create({
       ownerUserId: data.ownerUserId,
       courseId: data.courseId,
       lessonId: data.lessonId,
-      status: VideoAssetStatus.INITIATED,
+      originalFileName: data.fileName,
+      mimeType: data.mimeType,
+      sourceSizeBytes: data.sizeBytes,
+      status: VideoAssetStatus.UPLOADING,
       processingProgress: 0,
       isAttached: false,
       attachedLessonId: null,
       attachedAt: null,
     });
-    return { _id: asset._id.toString() };
+
+    const rawObjectKey = `videos/raw/${asset._id}/${Date.now()}_${data.fileName}`;
+    asset.rawObjectKey = rawObjectKey;
+    const multipartUploadId = await s3Service.createMultipartUpload(rawObjectKey, data.mimeType);
+    asset.multipartUploadId = multipartUploadId;
+
+    await asset.save();
+
+    return {
+      _id: asset._id.toString(),
+      rawObjectKey,
+      multipartUploadId,
+    };
   }
 
   /**
-   * Bước 2: Nhận file từ frontend (qua backend), lưu disk, trigger FFmpeg.
-   * TODO #4: Khi migrate lên R2, thay bằng presigned URL flow để bỏ qua bước này.
+   * Lấy tất cả presigned URLs cho toàn bộ parts trong 1 lần gọi — giảm N API calls xuống 1.
+   * FE sẽ dùng batch này để cải thiện tốc độ upload.
    */
-  public async completeUpload(videoAssetId: string, file: Express.Multer.File) {
+  public async getBatchPartPresignedUrls(videoAssetId: string, totalParts: number): Promise<string[]> {
     const asset = await VideoAsset.findById(videoAssetId);
-    if (!asset) throw new Error('Video asset không tồn tại.');
+    if (!asset) throw new Error(`Video asset không tồn tại khi lấy batch part-urls: ${videoAssetId}.`);
+    if (!asset.rawObjectKey || !asset.multipartUploadId) {
+      throw new Error('Upload session không hợp lệ hoặc đã kết thúc.');
+    }
+    // Sinh tất cả presigned URLs song song
+    const urls = await Promise.all(
+      Array.from({ length: totalParts }, (_, i) =>
+        s3Service.getPartPresignedUrl(asset.rawObjectKey!, asset.multipartUploadId!, i + 1)
+      )
+    );
+    return urls;
+  }
 
-    const assetDir = path.join(MEDIA_ROOT, 'videos', asset._id.toString());
-    fs.mkdirSync(assetDir, { recursive: true });
+  /**
+   * Xác nhận tất cả parts đã upload xong, complete multipart trên MinIO,
+   * kiểm tra object tồn tại rồi trigger FFmpeg processing.
+   */
+  public async confirmUpload(
+    videoAssetId: string,
+    parts: { ETag: string; PartNumber: number }[],
+  ) {
+    const asset = await VideoAsset.findById(videoAssetId);
+    if (!asset) throw new Error(`Video asset không tồn tại khi confirm upload: ${videoAssetId}.`);
+    if (asset.status === VideoAssetStatus.UPLOADED) {
+      void this.processVideoInBackground(asset._id.toString());
+      return asset;
+    }
+    if ([VideoAssetStatus.PROCESSING, VideoAssetStatus.READY].includes(asset.status)) {
+      return asset;
+    }
+    if (!asset.rawObjectKey || !asset.multipartUploadId) {
+      throw new Error('Upload session không hợp lệ.');
+    }
 
-    const rawFilePath = path.join(assetDir, file.originalname);
-    fs.renameSync(file.path, rawFilePath);
+    // S3 yêu cầu danh sách parts đúng thứ tự tăng dần theo PartNumber.
+    const completedParts = [...parts].sort((a, b) => a.PartNumber - b.PartNumber);
+    await s3Service.completeMultipartUpload(asset.rawObjectKey, asset.multipartUploadId, completedParts);
 
-    asset.originalFileName = file.originalname;
-    asset.mimeType = file.mimetype;
-    asset.sizeBytes = file.size;
-    asset.rawFilePath = rawFilePath;
-    asset.status = VideoAssetStatus.PROCESSING;
-    asset.processingProgress = 10;
-    asset.errorMessage = null;
+    const exists = await s3Service.objectExists(asset.rawObjectKey);
+    if (!exists) throw new Error('File không tìm thấy trên storage sau khi complete.');
+
+    asset.status = VideoAssetStatus.UPLOADED;
+    asset.uploadCompletedAt = new Date();
+    asset.multipartUploadId = null;
+    asset.processingProgress = 5;
     await asset.save();
 
     void this.processVideoInBackground(asset._id.toString());
     return asset;
   }
 
+  /** Hủy multipart upload session khi user cancel. */
+  public async abortUpload(videoAssetId: string): Promise<void> {
+    const asset = await VideoAsset.findById(videoAssetId);
+    if (!asset) return;
+    if (asset.rawObjectKey && asset.multipartUploadId) {
+      await s3Service.abortMultipartUpload(asset.rawObjectKey, asset.multipartUploadId).catch(() => {});
+    }
+    await VideoAsset.deleteOne({ _id: videoAssetId });
+    console.log(`[VideoAssetService] Đã hủy upload session ${videoAssetId}`);
+  }
+
   public async getAsset(videoAssetId: string) {
     const asset = await VideoAsset.findById(videoAssetId).lean();
-    if (!asset) throw new Error('Video asset không tồn tại.');
-    return asset;
+    if (!asset) throw new Error(`Video asset không tồn tại khi đọc trạng thái: ${videoAssetId}.`);
+    return {
+      ...asset,
+      manifestPath: asset.manifestKey ? s3Service.getFileUrl(asset.manifestKey) : undefined,
+    };
   }
 
   public async markAssetAttached(videoAssetId: string, lessonId: string): Promise<void> {
@@ -89,9 +154,22 @@ class VideoAssetService {
     if (!asset) return;
 
     try {
-      const s3Folder = `courses/${asset.courseId}/lessons/${asset.lessonId}/videos/${asset._id}`;
-      await s3Service.deleteFolder(s3Folder);
+      // Abort multipart session nếu còn treo (tránh để garbage trên MinIO)
+      if (asset.rawObjectKey && asset.multipartUploadId) {
+        await s3Service.abortMultipartUpload(asset.rawObjectKey, asset.multipartUploadId).catch(() => {});
+      }
 
+      // Xóa raw video (videos/raw/<assetId>/...)
+      if (asset.rawObjectKey) {
+        const rawPrefix = `videos/raw/${asset._id}/`;
+        await s3Service.deleteFolder(rawPrefix).catch(() => {});
+      }
+
+      // Xóa HLS segments (courses/<courseId>/lessons/<lessonId>/videos/<assetId>/...)
+      const hlsFolder = `courses/${asset.courseId}/lessons/${asset.lessonId}/videos/${asset._id}`;
+      await s3Service.deleteFolder(hlsFolder);
+
+      // Xóa file local temp nếu còn sót
       const assetDir = path.join(MEDIA_ROOT, 'videos', asset._id.toString());
       if (fs.existsSync(assetDir)) {
         fs.rmSync(assetDir, { recursive: true, force: true });
@@ -113,10 +191,26 @@ class VideoAssetService {
   private async processVideoInBackground(videoAssetId: string): Promise<void> {
     const asset = await VideoAsset.findById(videoAssetId);
     if (!asset) return;
+    if (asset.status === VideoAssetStatus.PROCESSING || asset.status === VideoAssetStatus.READY) {
+      console.log(`[VideoAssetService] Bỏ qua xử lý lại video ${videoAssetId} vì status=${asset.status}`);
+      return;
+    }
 
     try {
       const assetDir = path.join(MEDIA_ROOT, 'videos', asset._id.toString());
+      fs.mkdirSync(assetDir, { recursive: true });
       const outputDir = path.join(assetDir, 'hls');
+
+      if (!asset.rawObjectKey) {
+        throw new Error('Không tìm thấy file video để xử lý.');
+      }
+      const rawFilePath = path.join(assetDir, 'raw_input');
+      console.log(`[VideoAssetService] Downloading raw video từ storage: ${asset.rawObjectKey}`);
+      await s3Service.downloadFile(asset.rawObjectKey, rawFilePath);
+
+      // Đánh dấu PROCESSING ngay khi bắt đầu FFmpeg
+      asset.status = VideoAssetStatus.PROCESSING;
+      await asset.save();
 
       // #3 — Real progress callback: update DB mỗi khi FFmpeg báo cáo ~5%
       const onProgress = async (percent: number) => {
@@ -128,7 +222,7 @@ class VideoAssetService {
 
       // #1 — FFmpeg: tự probe codec, copy nếu H.264, ngược lại encode ultrafast
       const { encryptionKeyHex, durationSec } = await processVideoToHLS(
-        asset.rawFilePath,
+        rawFilePath,
         outputDir,
         asset._id.toString(),
         onProgress,
@@ -146,7 +240,7 @@ class VideoAssetService {
         const filePath = path.join(outputDir, file);
         const objectKey = `courses/${asset.courseId}/lessons/${asset.lessonId}/videos/${asset._id}/hls/${file}`;
         const mimeType = file.endsWith('.m3u8') ? 'application/x-mpegURL' : 'video/MP2T';
-        await s3Service.uploadFile(filePath, objectKey, mimeType, true);
+        await s3Service.uploadFile(filePath, objectKey, mimeType);
       };
 
       for (let i = 0; i < files.length; i += HLS_UPLOAD_CONCURRENCY) {
@@ -157,11 +251,16 @@ class VideoAssetService {
       const manifestFileName = `${asset._id.toString()}_playlist.m3u8`;
       const manifestKey = `courses/${asset.courseId}/lessons/${asset.lessonId}/videos/${asset._id}/hls/${manifestFileName}`;
       asset.manifestKey = manifestKey;
-      asset.manifestPath = s3Service.getFileUrl(manifestKey);
       asset.processingProgress = 100;
       asset.status = VideoAssetStatus.READY;
       asset.durationSec = durationSec;
       await asset.save();
+
+      // Raw video chỉ là file tạm cho pipeline encode.
+      // Sau khi HLS đã upload xong và asset READY, xóa raw để tránh tốn storage/R2.
+      await s3Service.deleteFile(asset.rawObjectKey).catch((cleanupError) => {
+        console.error(`[VideoAssetService] Không thể xóa raw video ${asset.rawObjectKey}:`, cleanupError);
+      });
 
       // Dọn dẹp file local temp
       if (fs.existsSync(assetDir)) {
@@ -175,7 +274,7 @@ class VideoAssetService {
         lessonId: asset.lessonId,
         status: 'READY',
         duration: asset.durationSec,
-        manifestPath: asset.manifestPath,
+        manifestKey: asset.manifestKey,
       });
     } catch (error: any) {
       asset.status = VideoAssetStatus.FAILED;
@@ -214,6 +313,8 @@ class VideoAssetService {
       status: {
         $in: [
           VideoAssetStatus.INITIATED,
+          VideoAssetStatus.UPLOADING,  // upload multipart dở dang
+          VideoAssetStatus.UPLOADED,   // upload xong nhưng không confirm
           VideoAssetStatus.READY,
           VideoAssetStatus.FAILED,
         ],

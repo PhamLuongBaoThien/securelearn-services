@@ -3,10 +3,12 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 export enum VideoAssetStatus {
-  INITIATED = 'INITIATED',
-  PROCESSING = 'PROCESSING',
-  READY = 'READY',
-  FAILED = 'FAILED',
+  INITIATED  = 'INITIATED',   // Asset vừa được tạo, chưa upload
+  UPLOADING  = 'UPLOADING',   // Đang upload multipart lên storage
+  UPLOADED   = 'UPLOADED',    // Upload xong storage, chờ FFmpeg xử lý
+  PROCESSING = 'PROCESSING',  // FFmpeg đang encode HLS
+  READY      = 'READY',       // Hoàn tất, sẵn sàng phát
+  FAILED     = 'FAILED',      // Thất bại
 }
 
 export interface IVideoAsset extends Document {
@@ -15,13 +17,13 @@ export interface IVideoAsset extends Document {
   lessonId: string; // id của lesson mà video này thuộc về
   originalFileName: string; // tên file gốc
   mimeType: string; // loại file
-  sizeBytes: number; // kích thước file
   durationSec: number; // thời lượng video
   rawObjectKey: string; // khóa object logical của file gốc
   manifestKey: string; // khóa object logical của manifest HLS
-  rawFilePath: string; // đường dẫn file gốc
-  manifestPath: string; // đường dẫn file HLS manifest
-  encryptionKey?: string | null; // Khoá AES-128
+  multipartUploadId?: string | null;  // S3 Multipart UploadId (null khi đã complete/abort)
+  uploadCompletedAt?: Date | null;     // Thời điểm storage confirm upload xong
+  sourceSizeBytes: number;             // Kích thước file gốc FE báo lên (bytes)
+  encryptionKey?: string | null;       // Khoá AES-128
   processingProgress: number; // tiến độ xử lý
   status: VideoAssetStatus;
   isAttached: boolean;
@@ -38,13 +40,13 @@ const videoAssetSchema = new Schema<IVideoAsset>(
     courseId: { type: String, required: true, index: true },
     lessonId: { type: String, required: true, index: true },
     originalFileName: { type: String, default: '' },
-    mimeType: { type: String, default: '' },
-    sizeBytes: { type: Number, default: 0 },
+    mimeType: { type: String, default: '' }, // mimiType là
     durationSec: { type: Number, default: 0 },
     rawObjectKey: { type: String, default: '' },
     manifestKey: { type: String, default: '' },
-    rawFilePath: { type: String, default: '' },
-    manifestPath: { type: String, default: '' },
+    multipartUploadId: { type: String, default: null },
+    uploadCompletedAt: { type: Date, default: null },
+    sourceSizeBytes: { type: Number, default: 0 },
     encryptionKey: { type: String, default: null }, // Khoá AES-128 dạng Hex
     processingProgress: { type: Number, default: 0, min: 0, max: 100 },
     status: { type: String, enum: Object.values(VideoAssetStatus), default: VideoAssetStatus.INITIATED, index: true },

@@ -17,8 +17,8 @@
 #   POST/PUT/PATCH/DELETE /api/courses/...
 #   GET /api/categories/admin/all
 #   POST/PUT/PATCH/DELETE /api/categories/...
-#   ALL /api/media/videos...
-#   ALL /api/media/documents...
+#   GET/POST /api/media/videos...
+#   GET/POST /api/media/documents...
 # ========================
 _format_version: "3.0"
 
@@ -168,9 +168,6 @@ services:
         methods:
           - GET
           - POST
-          - PUT
-          - PATCH
-          - DELETE
 
 plugins:
   - name: cors

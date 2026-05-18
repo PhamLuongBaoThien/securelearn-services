@@ -1,7 +1,5 @@
 // ========================
-// Event Handlers: Media Service lắng nghe cleanup events từ Course Service.
-// Khi course-service unbind hoặc đổi type lesson, nó phát event cleanup
-// để media-service xoá file vật lý trên S3 và record trong DB.
+// Event Handlers: Media Service lắng nghe cleanup/attached events từ Course Service.
 // ========================
 import {
   subscribeMessage,
@@ -29,7 +27,7 @@ export const registerEventHandlers = async (): Promise<void> => {
     }
   );
 
-  // ===== 2. Xoá document asset khi course-service unbind hoặc đổi type lesson =====
+  // ===== 2. Xoá document asset (attachment) khi course-service remove attachment khỏi lesson =====
   await subscribeMessage<AssetCleanupPayload>(
     Exchange.COURSE,
     RoutingKey.DOCUMENT_ASSET_CLEANUP,
@@ -40,6 +38,7 @@ export const registerEventHandlers = async (): Promise<void> => {
     }
   );
 
+  // ===== 3. Đánh dấu video asset đã được attach vào lesson =====
   await subscribeMessage<AssetAttachedPayload>(
     Exchange.COURSE,
     RoutingKey.VIDEO_ASSET_ATTACHED,
@@ -50,6 +49,7 @@ export const registerEventHandlers = async (): Promise<void> => {
     }
   );
 
+  // ===== 4. Đánh dấu document asset đã được attach vào lesson =====
   await subscribeMessage<AssetAttachedPayload>(
     Exchange.COURSE,
     RoutingKey.DOCUMENT_ASSET_ATTACHED,

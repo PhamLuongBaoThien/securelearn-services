@@ -1,7 +1,6 @@
-// File này chứa flow upload document asset.
-// Lưu ý:
-// - document hiện đơn giản hơn video, chưa có bước xử lý hậu kỳ riêng
-// - upload xong là đánh READY, sau đó frontend bind trực tiếp vào lesson
+// File này chứa flow upload document asset (tài liệu đính kèm).
+// Không có bước xử lý hậu kỳ — upload xong là đánh READY ngay.
+// isAttached dùng cho orphan cleanup job (lọc asset chưa được bind vào bài học).
 import fs from 'fs';
 import path from 'path';
 import { DocumentAsset, DocumentAssetStatus } from '../models/documentAsset.model';
@@ -19,7 +18,7 @@ class DocumentAssetService {
     const objectKey = path.posix.join('courses', data.courseId, 'lessons', data.lessonId, 'documents', Date.now() + '_' + file.originalname);
     
     // Upload thẳng lên S3/MinIO từ file tạm
-    await s3Service.uploadFile(file.path, objectKey, file.mimetype, true);
+    await s3Service.uploadFile(file.path, objectKey, file.mimetype);
     
     // Xóa file tạm
     if (fs.existsSync(file.path)) {
@@ -66,7 +65,7 @@ class DocumentAssetService {
 
   /**
    * Xoá document asset hoàn toàn: file trên S3 + record trong DB.
-   * Gọi từ RabbitMQ cleanup event khi course-service unbind document khỏi lesson.
+   * Gọi từ RabbitMQ cleanup event khi course-service gỡ attachment khỏi lesson.
    */
   public async deleteAsset(documentAssetId: string): Promise<void> {
     const asset = await DocumentAsset.findById(documentAssetId);

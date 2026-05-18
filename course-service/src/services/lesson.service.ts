@@ -1,8 +1,10 @@
 // File này chứa nghiệp vụ chính cho Lesson.
 // Ghi nhớ:
-// - lesson hỗ trợ 3 type: VIDEO, DOCUMENT, QUIZ
+// - lesson hỗ trợ 2 type: VIDEO, QUIZ
+// - tài liệu đính kèm (attachments) dùng chung cho cả 2 type, không phụ thuộc vào type
 // - lesson.status đi qua DRAFT -> PROCESSING/READY/FAILED tùy loại nội dung
-// - đổi lesson.type phải cleanup reference cũ để tránh dữ liệu mồ côi
+// - đổi lesson.type phải cleanup reference cũ (video/quiz) để tránh dữ liệu mồ côi
+// - attachments không bị xóa khi đổi type
 import { Types } from 'mongoose';
 import { Course } from '../models/course.model';
 import { ILesson, Lesson, LessonStatus, LessonType } from '../models/lesson.model';
@@ -34,7 +36,7 @@ class LessonService {
     data: {
       title: string;
       type?: LessonType;
-      summary?: string;
+      content?: string;
       order?: number;
       duration?: number;
       isFreePreview?: boolean;
@@ -46,32 +48,33 @@ class LessonService {
     if (!title) throw new Error('Vui lòng nhập tên bài học.');
 
     // Kiểm tra thứ tự bài học
-    const order = data.order ?? (await Lesson.countDocuments({ sectionId: section._id })) + 1; // Nếu không có order thì lấy số lượng bài học + 1
-    const existing = await Lesson.findOne({ sectionId: section._id, order }); // kiểm tra thứ tự có tồn tại không
+    const order = data.order ?? (await Lesson.countDocuments({ sectionId: section._id })) + 1;
+    const existing = await Lesson.findOne({ sectionId: section._id, order });
     if (existing) {
       throw new Error('Thứ tự bài học đã tồn tại trong chương này.');
     }
 
-    const lessonType = this.normalizeLessonType(data.type); // chuẩn hóa loại bài học
+    const lessonType = this.normalizeLessonType(data.type);
     const lesson = await Lesson.create({
       courseId: course._id,
       sectionId: section._id,
       title,
       type: lessonType,
       status: LessonStatus.DRAFT,
-      summary: data.summary?.trim() || '',
+      content: data.content || '',
       duration: data.duration ?? 0,
       order,
       isFreePreview: Boolean(data.isFreePreview),
       videoAssetId: null,
-      documentAssetId: null,
+      attachments: [],
     });
 
-    await courseService.syncCourseStats(course._id); // syncCourseStats để update totalLessons và totalDuration của course
+    await courseService.syncCourseStats(course._id);
     return lesson;
   }
 
-  // Nếu đổi type, hệ thống sẽ reset asset/quiz cũ và đưa lesson về DRAFT.
+  // Nếu đổi type, hệ thống sẽ reset video/quiz cũ và đưa lesson về DRAFT.
+  // Attachments được GIỮ NGUYÊN khi đổi type.
   public async updateLesson(
     courseId: string,
     lessonId: string,
@@ -79,14 +82,14 @@ class LessonService {
     data: {
       title?: string;
       type?: LessonType;
-      summary?: string;
+      content?: string;
       duration?: number;
       isFreePreview?: boolean;
       status?: LessonStatus;
     }
   ) {
     await this.assertCourseOwnership(courseId, instructorId);
-    const lesson = await Lesson.findOne({ _id: lessonId, courseId }); // tìm lesson theo lessonId và courseId
+    const lesson = await Lesson.findOne({ _id: lessonId, courseId });
     if (!lesson) throw new Error('Bài học không tồn tại.');
 
     if (data.title !== undefined) {
@@ -95,16 +98,16 @@ class LessonService {
       lesson.title = title;
     }
 
-    if (data.summary !== undefined) lesson.summary = data.summary.trim();
+    if (data.content !== undefined) lesson.content = data.content;
     if (data.duration !== undefined) lesson.duration = data.duration;
     if (data.isFreePreview !== undefined) lesson.isFreePreview = Boolean(data.isFreePreview);
 
     if (data.type !== undefined && data.type !== lesson.type) {
-      await this.cleanupLessonReferencesForTypeChange(lesson); // clear asset và quiz cũ nếu đổi type
-      lesson.type = this.normalizeLessonType(data.type); // chuẩn hóa type
-      lesson.status = LessonStatus.DRAFT; // reset status về DRAFT
+      await this.cleanupLessonMediaForTypeChange(lesson); // clear video/quiz cũ nếu đổi type
+      lesson.type = this.normalizeLessonType(data.type);
+      lesson.status = LessonStatus.DRAFT;
     } else if (data.status !== undefined) {
-      lesson.status = this.normalizeLessonStatus(data.status); // 
+      lesson.status = this.normalizeLessonStatus(data.status);
     }
 
     await lesson.save();
@@ -112,15 +115,13 @@ class LessonService {
     return lesson;
   }
 
-  // Khi xóa lesson: dọn quiz + phát cleanup event cho media asset trước khi xoá DB.
+  // Khi xóa lesson: dọn quiz + video + toàn bộ attachments trước khi xoá DB.
   public async deleteLesson(courseId: string, lessonId: string, instructorId: string): Promise<void> {
     await this.assertCourseOwnership(courseId, instructorId);
-    // Load đầy đủ để kiểm tra asset (không dùng .lean() vì cần document methods)
     const lesson = await Lesson.findOne({ _id: lessonId, courseId });
     if (!lesson) throw new Error('Bài học không tồn tại.');
 
-    // Phát cleanup event cho media asset TRƯỚC khi xoá DB
-    // media-service sẽ xoá file vật lý trên R2/S3 + xoá record trong media DB
+    // Phát cleanup event cho video asset
     if (lesson.videoAssetId) {
       await publishVideoAssetCleanup({
         assetId: lesson.videoAssetId.toString(),
@@ -128,9 +129,11 @@ class LessonService {
         lessonId,
       });
     }
-    if (lesson.documentAssetId) {
+
+    // Phát cleanup event cho toàn bộ attachments
+    for (const attachmentId of lesson.attachments) {
       await publishDocumentAssetCleanup({
-        assetId: lesson.documentAssetId.toString(),
+        assetId: attachmentId.toString(),
         courseId,
         lessonId,
       });
@@ -154,13 +157,13 @@ class LessonService {
     }
 
     await this.assertCourseAndSectionOwnership(courseId, sectionId, instructorId);
-    const lessonIds = items.map((item) => item.lessonId); // lấy danh sách bài học id từ items
-    const lessons = await Lesson.find({ courseId, sectionId, _id: { $in: lessonIds } }).select('_id').lean(); // tìm các bài học thuộc chương này có id trong lessonIds
-    if (lessons.length !== items.length) { // nếu số lượng bài học tìm được không bằng số lượng bài học trong items thì ném lỗi
+    const lessonIds = items.map((item) => item.lessonId);
+    const lessons = await Lesson.find({ courseId, sectionId, _id: { $in: lessonIds } }).select('_id').lean();
+    if (lessons.length !== items.length) {
       throw new Error('Có bài học không tồn tại hoặc không thuộc chương này.');
     }
 
-    const uniqueOrders = new Set(items.map((item) => item.order)); // lấy danh sách thứ tự bài học và kiểm tra trùng lặp
+    const uniqueOrders = new Set(items.map((item) => item.order));
     if (uniqueOrders.size !== items.length) {
       throw new Error('Thứ tự bài học bị trùng.');
     }
@@ -200,10 +203,8 @@ class LessonService {
     await this.assertVideoAssetBinding(videoAssetId, courseId, lessonId, instructorId, authorizationHeader);
 
     const previousVideoAssetId = lesson.videoAssetId?.toString() || null;
-    const previousDocumentAssetId = lesson.documentAssetId?.toString() || null;
 
     lesson.videoAssetId = new Types.ObjectId(videoAssetId);
-    lesson.documentAssetId = null;
     lesson.status = LessonStatus.PROCESSING;
     await Quiz.deleteOne({ lessonId: lesson._id, courseId });
     await lesson.save();
@@ -222,62 +223,6 @@ class LessonService {
       });
     }
 
-    if (previousDocumentAssetId) {
-      await publishDocumentAssetCleanup({
-        assetId: previousDocumentAssetId,
-        courseId,
-        lessonId,
-      });
-    }
-
-    return lesson;
-  }
-
-  // Document hiện được xem là sẵn sàng ngay sau khi upload + bind xong.
-  public async bindDocumentAsset(
-    courseId: string,
-    lessonId: string,
-    instructorId: string,
-    documentAssetId: string,
-    authorizationHeader?: string,
-  ) {
-    await this.assertCourseOwnership(courseId, instructorId);
-    const lesson = await Lesson.findOne({ _id: lessonId, courseId });
-    if (!lesson) throw new Error('Bài học không tồn tại.');
-    if (lesson.type !== LessonType.DOCUMENT) throw new Error('Chỉ bài học tài liệu mới được gắn document asset.');
-    await this.assertDocumentAssetBinding(documentAssetId, courseId, lessonId, instructorId, authorizationHeader);
-
-    const previousDocumentAssetId = lesson.documentAssetId?.toString() || null;
-    const previousVideoAssetId = lesson.videoAssetId?.toString() || null;
-
-    lesson.documentAssetId = new Types.ObjectId(documentAssetId);
-    lesson.videoAssetId = null;
-    lesson.status = LessonStatus.READY;
-    await Quiz.deleteOne({ lessonId: lesson._id, courseId });
-    await lesson.save();
-
-    await publishDocumentAssetAttached({
-      assetId: documentAssetId,
-      courseId,
-      lessonId,
-    });
-
-    if (previousDocumentAssetId && previousDocumentAssetId !== documentAssetId) {
-      await publishDocumentAssetCleanup({
-        assetId: previousDocumentAssetId,
-        courseId,
-        lessonId,
-      });
-    }
-
-    if (previousVideoAssetId) {
-      await publishVideoAssetCleanup({
-        assetId: previousVideoAssetId,
-        courseId,
-        lessonId,
-      });
-    }
-
     return lesson;
   }
 
@@ -287,7 +232,6 @@ class LessonService {
     if (!lesson) throw new Error('Bài học không tồn tại.');
     if (lesson.type !== LessonType.VIDEO) throw new Error('Chỉ bài học video mới được gỡ video asset.');
 
-    // Phát event cleanup để media-service xoá file vật lý (S3 + DB)
     if (lesson.videoAssetId) {
       await publishVideoAssetCleanup({
         assetId: lesson.videoAssetId.toString(),
@@ -305,29 +249,6 @@ class LessonService {
     return lesson;
   }
 
-  public async unbindDocumentAsset(courseId: string, lessonId: string, instructorId: string) {
-    await this.assertCourseOwnership(courseId, instructorId);
-    const lesson = await Lesson.findOne({ _id: lessonId, courseId });
-    if (!lesson) throw new Error('Bài học không tồn tại.');
-    if (lesson.type !== LessonType.DOCUMENT) throw new Error('Chỉ bài học tài liệu mới được gỡ document asset.');
-
-    // Phát event cleanup để media-service xoá file vật lý (S3 + DB)
-    if (lesson.documentAssetId) {
-      await publishDocumentAssetCleanup({
-        assetId: lesson.documentAssetId.toString(),
-        courseId,
-        lessonId,
-      });
-    }
-
-    lesson.documentAssetId = null;
-    lesson.status = LessonStatus.DRAFT;
-    await lesson.save();
-
-    await courseService.syncCourseStats(courseId);
-    return lesson;
-  }
-
   // Quiz bind xong sẽ đưa lesson sang READY.
   public async bindQuiz(courseId: string, lessonId: string, instructorId: string) {
     await this.assertCourseOwnership(courseId, instructorId);
@@ -336,9 +257,68 @@ class LessonService {
     if (lesson.type !== LessonType.QUIZ) throw new Error('Chỉ bài học quiz mới được gắn quiz.');
 
     lesson.videoAssetId = null;
-    lesson.documentAssetId = null;
     lesson.status = LessonStatus.READY;
     await lesson.save();
+
+    return lesson;
+  }
+
+  // Thêm 1 tài liệu đính kèm vào lesson — áp dụng cho cả VIDEO lẫn QUIZ.
+  public async addAttachment(
+    courseId: string,
+    lessonId: string,
+    instructorId: string,
+    documentAssetId: string,
+    authorizationHeader?: string,
+  ) {
+    await this.assertCourseOwnership(courseId, instructorId);
+    const lesson = await Lesson.findOne({ _id: lessonId, courseId });
+    if (!lesson) throw new Error('Bài học không tồn tại.');
+
+    // Xác minh document asset hợp lệ và thuộc về giảng viên/khóa học/bài học này
+    await this.assertDocumentAssetBinding(documentAssetId, courseId, lessonId, instructorId, authorizationHeader);
+
+    // Tránh thêm trùng
+    const assetObjectId = new Types.ObjectId(documentAssetId);
+    const alreadyExists = lesson.attachments.some((id) => id.equals(assetObjectId));
+    if (alreadyExists) throw new Error('Tài liệu này đã được đính kèm vào bài học.');
+
+    lesson.attachments.push(assetObjectId);
+    await lesson.save();
+
+    await publishDocumentAssetAttached({
+      assetId: documentAssetId,
+      courseId,
+      lessonId,
+    });
+
+    return lesson;
+  }
+
+  // Xóa 1 tài liệu đính kèm khỏi lesson và phát cleanup event.
+  public async removeAttachment(
+    courseId: string,
+    lessonId: string,
+    instructorId: string,
+    documentAssetId: string,
+  ) {
+    await this.assertCourseOwnership(courseId, instructorId);
+    const lesson = await Lesson.findOne({ _id: lessonId, courseId });
+    if (!lesson) throw new Error('Bài học không tồn tại.');
+
+    const assetObjectId = new Types.ObjectId(documentAssetId);
+    const index = lesson.attachments.findIndex((id) => id.equals(assetObjectId));
+    if (index === -1) throw new Error('Tài liệu không thuộc bài học này.');
+
+    lesson.attachments.splice(index, 1);
+    await lesson.save();
+
+    // Phát cleanup event để media-service xóa file vật lý + record DB
+    await publishDocumentAssetCleanup({
+      assetId: documentAssetId,
+      courseId,
+      lessonId,
+    });
 
     return lesson;
   }
@@ -358,7 +338,7 @@ class LessonService {
     const update: Record<string, unknown> = {
       videoAssetId: new Types.ObjectId(data.videoAssetId),
       status: data.status,
-    }; // nghĩa là tạo ra một object chứa videoAssetId và status.
+    };
 
     if (typeof data.duration === 'number') {
       update.duration = data.duration;
@@ -385,24 +365,22 @@ class LessonService {
   }
   // dùng để sắp xếp lại thứ tự bài học sau khi xóa hoặc di chuyển
   private async resequenceLessons(courseId: string, sectionId: string): Promise<void> {
-    const lessons = await Lesson.find({ courseId, sectionId }).sort({ order: 1, createdAt: 1 }); // sắp xếp theo thứ tự order và thời gian tạo
+    const lessons = await Lesson.find({ courseId, sectionId }).sort({ order: 1, createdAt: 1 });
     await Promise.all(
       lessons.map((lesson, index) => {
-        lesson.order = index + 1; // gán lại order cho bài học
-        return lesson.save(); // lưu lại bài học
+        lesson.order = index + 1;
+        return lesson.save();
       })
     );
   }
 
-  // Rule quan trọng: đổi type thì dọn reference cũ để không giữ video/document/quiz sai loại.
-  // Phát cleanup events để media-service xoá file vật lý trên S3.
-  private async cleanupLessonReferencesForTypeChange(lesson: ILesson) {
+  // Khi đổi type: chỉ dọn video/quiz — attachments được GIỮ NGUYÊN.
+  private async cleanupLessonMediaForTypeChange(lesson: ILesson) {
     await Quiz.deleteOne({ lessonId: lesson._id, courseId: lesson.courseId });
 
     const courseId = lesson.courseId.toString();
     const lessonId = lesson._id.toString();
 
-    // Phát event cleanup cho video asset cũ nếu có
     if (lesson.videoAssetId) {
       await publishVideoAssetCleanup({
         assetId: lesson.videoAssetId.toString(),
@@ -411,26 +389,17 @@ class LessonService {
       });
     }
 
-    // Phát event cleanup cho document asset cũ nếu có
-    if (lesson.documentAssetId) {
-      await publishDocumentAssetCleanup({
-        assetId: lesson.documentAssetId.toString(),
-        courseId,
-        lessonId,
-      });
-    }
-
     lesson.videoAssetId = null;
-    lesson.documentAssetId = null;
     lesson.duration = 0;
   }
+
   // dùng để chuẩn hóa loại bài học
   private normalizeLessonType(type?: LessonType): LessonType {
     if (!type) return LessonType.VIDEO;
-    if (!Object.values(LessonType).includes(type)) throw new Error('Loại bài học không hợp lệ.'); 
+    if (!Object.values(LessonType).includes(type)) throw new Error('Loại bài học không hợp lệ.');
     return type;
   }
-  // dùng để chuẩn hóa trạng thái bài học 
+  // dùng để chuẩn hóa trạng thái bài học
   private normalizeLessonStatus(status: LessonStatus): LessonStatus {
     if (!Object.values(LessonStatus).includes(status)) throw new Error('Trạng thái bài học không hợp lệ.');
     return status;

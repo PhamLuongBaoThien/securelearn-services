@@ -85,7 +85,7 @@ export interface VideoAssetStatusPayload {
   lessonId: string;
   status: 'READY' | 'FAILED';
   duration?: number;
-  manifestPath?: string;
+  manifestKey?: string;
   errorMessage?: string;
 }
 

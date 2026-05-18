@@ -56,7 +56,7 @@ class SectionService {
 
     // Load đầy đủ asset fields để phát cleanup events
     const lessons = await Lesson.find({ sectionId: section._id })
-      .select('_id videoAssetId documentAssetId')
+      .select('_id videoAssetId attachments')
       .lean();
     const lessonIds = lessons.map(lesson => lesson._id);
 
@@ -72,10 +72,11 @@ class SectionService {
           })
         );
       }
-      if (lesson.documentAssetId) {
+      // Cleanup toàn bộ attachments
+      for (const attachmentId of (lesson.attachments || [])) {
         cleanupPromises.push(
           publishDocumentAssetCleanup({
-            assetId: lesson.documentAssetId.toString(),
+            assetId: attachmentId.toString(),
             courseId,
             lessonId: lesson._id.toString(),
           })
