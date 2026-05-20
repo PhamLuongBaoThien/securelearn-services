@@ -4,6 +4,7 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import multer from 'multer';
 
 import routes from './routes/index.routes';
 
@@ -33,9 +34,18 @@ app.use((err: Error & { status?: number; code?: string }, _req: Request, res: Re
     code: err.code,
     stack: err.stack,
   });
+
+  if (err instanceof multer.MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? 'Ảnh khóa học tối đa 5MB.'
+      : 'Không thể tải ảnh khóa học. Vui lòng kiểm tra file và thử lại.';
+    res.status(400).json({ success: false, message });
+    return;
+  }
+
   res.status(err.status || 500).json({
     success: false,
-    message: err.message || 'Lỗi hệ thống máy chủ.',
+    message: err.status ? err.message : 'Lỗi hệ thống máy chủ.',
   });
 });
 

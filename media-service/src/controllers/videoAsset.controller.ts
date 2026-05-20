@@ -3,6 +3,20 @@ import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import videoAssetService from '../services/videoAsset.service';
 
+const ALLOWED_VIDEO_MIME_TYPES = new Set([
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/x-matroska',
+  'video/webm',
+]);
+const ALLOWED_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm']);
+
+const isSupportedVideo = (fileName: string, mimeType: string) => {
+  const extension = fileName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  return ALLOWED_VIDEO_MIME_TYPES.has(mimeType.toLowerCase()) || ALLOWED_VIDEO_EXTENSIONS.has(extension);
+};
+
 class VideoAssetController {
   // [POST] /api/media/videos/initiate-upload
   public async initiateUpload(req: AuthRequest, res: Response): Promise<void> {
@@ -10,6 +24,10 @@ class VideoAssetController {
       const { courseId, lessonId, fileName, mimeType, sizeBytes } = req.body;
       if (!fileName || !mimeType || !sizeBytes) {
         res.status(400).json({ status: 'ERR', message: 'Thiếu thông tin file: fileName, mimeType, sizeBytes.' });
+        return;
+      }
+      if (!isSupportedVideo(fileName, mimeType)) {
+        res.status(400).json({ status: 'ERR', message: 'Định dạng video không được hỗ trợ. Vui lòng chọn MP4, MOV, AVI, MKV hoặc WebM.' });
         return;
       }
       const data = await videoAssetService.initiateUpload({
