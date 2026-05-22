@@ -131,7 +131,7 @@ class S3Service {
   public async createMultipartUpload(objectKey: string, mimeType: string): Promise<string> {
     const result = await s3Client.send(
       new CreateMultipartUploadCommand({ Bucket: BUCKET_NAME, Key: objectKey, ContentType: mimeType }),
-    );
+    ); // CreateMultipartUploadCommand là hàm của AWS SDK v3 để bắt đầu một multipart upload mới. Nó trả về một UploadId duy nhất đại diện cho phiên upload này. Bucket là tên bucket S3 nơi bạn muốn lưu trữ file, Key là đường dẫn và tên file trên S3, ContentType là loại MIME của file (ví dụ: video/mp4). UploadId này sẽ được sử dụng trong các bước tiếp theo để xác định multipart upload session khi bạn upload từng phần (part) của file.
     if (!result.UploadId) throw new Error('Không nhận được UploadId từ storage.');
     return result.UploadId;
   }

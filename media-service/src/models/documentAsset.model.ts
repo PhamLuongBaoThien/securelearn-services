@@ -20,9 +20,6 @@ export interface IDocumentAsset extends Document {
   filePath: string;               // Đường dẫn file
   status: DocumentAssetStatus;    // Trạng thái file
   isAttached: boolean;
-  attachedLessonId?: string | null;
-  attachedAt?: Date | null;
-  errorMessage?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,9 +37,6 @@ const documentAssetSchema = new Schema<IDocumentAsset>(
     filePath: { type: String, default: '' },
     status: { type: String, enum: Object.values(DocumentAssetStatus), default: DocumentAssetStatus.INITIATED, index: true },
     isAttached: { type: Boolean, default: false, index: true },
-    attachedLessonId: { type: String, default: null, index: true },
-    attachedAt: { type: Date, default: null },
-    errorMessage: { type: String, default: null },
   },
   { timestamps: true }
 );

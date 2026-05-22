@@ -31,7 +31,7 @@ class VideoAssetController {
         return;
       }
       const data = await videoAssetService.initiateUpload({
-        ownerUserId: req.userId!,
+        ownerUserId: req.userId!, // ! cuối cùng để khẳng định userId đã được gán bởi middleware auth
         courseId,
         lessonId,
         fileName,

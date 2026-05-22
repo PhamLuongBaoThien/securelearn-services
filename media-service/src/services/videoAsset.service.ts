@@ -38,16 +38,15 @@ class VideoAssetService {
       originalFileName: data.fileName,
       mimeType: data.mimeType,
       sourceSizeBytes: data.sizeBytes,
-      status: VideoAssetStatus.UPLOADING,
+      status: VideoAssetStatus.UPLOADING, // upload multipart đang diễn ra
       processingProgress: 0,
       isAttached: false,
-      attachedLessonId: null,
-      attachedAt: null,
     });
 
-    const rawObjectKey = `videos/raw/${asset._id}/${Date.now()}_${data.fileName}`;
+    //object key là đường dẫn logic để lưu file trên storage, không phải URL hay file path thực tế
+    const rawObjectKey = `videos/raw/${asset._id}/${Date.now()}_${data.fileName}`; // objectKey tạm cho file gốc khi upload, sẽ xóa sau khi xử lý xong
     asset.rawObjectKey = rawObjectKey;
-    const multipartUploadId = await s3Service.createMultipartUpload(rawObjectKey, data.mimeType);
+    const multipartUploadId = await s3Service.createMultipartUpload(rawObjectKey, data.mimeType); // Tạo multipart upload session trên MinIO, trả về uploadId để FE upload từng part sau đó confirm hoàn tất
     asset.multipartUploadId = multipartUploadId;
 
     await asset.save();
@@ -128,7 +127,7 @@ class VideoAssetService {
   }
 
   public async getAsset(videoAssetId: string) {
-    const asset = await VideoAsset.findById(videoAssetId).lean();
+    const asset = await VideoAsset.findById(videoAssetId).select('-attachedLessonId -attachedAt').lean();
     if (!asset) throw new Error(`Video asset không tồn tại khi đọc trạng thái: ${videoAssetId}.`);
     return {
       ...asset,
@@ -136,14 +135,16 @@ class VideoAssetService {
     };
   }
 
-  public async markAssetAttached(videoAssetId: string, lessonId: string): Promise<void> {
+  public async markAssetAttached(videoAssetId: string, _lessonId: string): Promise<void> {
     await VideoAsset.updateOne(
       { _id: videoAssetId },
       {
         $set: {
           isAttached: true,
-          attachedLessonId: lessonId,
-          attachedAt: new Date(),
+        },
+        $unset: {
+          attachedLessonId: '',
+          attachedAt: '',
         },
       },
     );
@@ -258,7 +259,7 @@ class VideoAssetService {
 
       // Raw video chỉ là file tạm cho pipeline encode.
       // Sau khi HLS đã upload xong và asset READY, xóa raw để tránh tốn storage/R2.
-      await s3Service.deleteFile(asset.rawObjectKey).catch((cleanupError) => {
+      await s3Service.deleteFile(asset.rawObjectKey!).catch((cleanupError) => {
         console.error(`[VideoAssetService] Không thể xóa raw video ${asset.rawObjectKey}:`, cleanupError);
       });
 

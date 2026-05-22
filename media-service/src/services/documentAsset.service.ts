@@ -37,27 +37,27 @@ class DocumentAssetService {
       filePath: s3Service.getFileUrl(objectKey), // Lưu URL thay vì local path
       status: DocumentAssetStatus.READY,
       isAttached: false,
-      attachedLessonId: null,
-      attachedAt: null,
     });
 
     return asset;
   }
 
   public async getAsset(documentAssetId: string) {
-    const asset = await DocumentAsset.findById(documentAssetId).lean();
+    const asset = await DocumentAsset.findById(documentAssetId).select('-attachedLessonId -attachedAt').lean();
     if (!asset) throw new Error('Document asset không tồn tại.');
     return asset;
   }
 
-  public async markAssetAttached(documentAssetId: string, lessonId: string): Promise<void> {
+  public async markAssetAttached(documentAssetId: string, _lessonId: string): Promise<void> {
     await DocumentAsset.updateOne(
       { _id: documentAssetId },
       {
         $set: {
           isAttached: true,
-          attachedLessonId: lessonId,
-          attachedAt: new Date(),
+        },
+        $unset: {
+          attachedLessonId: '',
+          attachedAt: '',
         },
       }
     );

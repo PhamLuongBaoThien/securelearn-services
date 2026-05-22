@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
+// Kong đã verify JWT trước khi request đi vào media-service.
+// Middleware này chỉ decode token để lấy userId/userRole phục vụ nghiệp vụ.
 export interface AuthRequest extends Request {
   userId?: string;
   userRole?: string;

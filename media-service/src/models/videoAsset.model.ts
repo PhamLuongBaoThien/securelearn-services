@@ -27,8 +27,6 @@ export interface IVideoAsset extends Document {
   processingProgress: number; // tiến độ xử lý
   status: VideoAssetStatus;
   isAttached: boolean;
-  attachedLessonId?: string | null;
-  attachedAt?: Date | null;
   errorMessage?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -51,8 +49,6 @@ const videoAssetSchema = new Schema<IVideoAsset>(
     processingProgress: { type: Number, default: 0, min: 0, max: 100 },
     status: { type: String, enum: Object.values(VideoAssetStatus), default: VideoAssetStatus.INITIATED, index: true },
     isAttached: { type: Boolean, default: false, index: true },
-    attachedLessonId: { type: String, default: null, index: true },
-    attachedAt: { type: Date, default: null },
     errorMessage: { type: String, default: null },
   },
   { timestamps: true }
