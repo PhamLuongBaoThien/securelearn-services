@@ -160,6 +160,25 @@ services:
         methods:
           - OPTIONS
 
+      # Route riêng cho các API upload — áp rate limit chặt hơn route thông thường.
+      # Lý do: API này sinh presigned URLs (cho phép PUT file lên storage),
+      # nếu bị spam có thể tạo hàng nghìn URL → chiếm bandwidth MinIO.
+      # Tách ra để gắn rate-limiting riêng: 10 req/phút (thay vì 100 req/phút toàn cục).
+      - name: media-upload
+        paths:
+          - /api/media/videos/initiate-upload
+          - ~/api/media/videos/[^/]+/batch-part-urls
+          # Confirm/abort cũng thuộc upload surface:
+          # confirm ghép multipart và trigger processing, abort hủy asset/session.
+          # Đưa chung vào route này để cùng chịu JWT + rate limit theo tài khoản.
+          - ~/api/media/videos/[^/]+/confirm-upload
+          - ~/api/media/videos/[^/]+/abort-upload
+        regex_priority: 300
+        strip_path: false
+        methods:
+          - GET
+          - POST
+
       - name: media-protected
         paths:
           - /api/media/videos
@@ -168,6 +187,36 @@ services:
         methods:
           - GET
           - POST
+
+  # ===== MINIO STORAGE PROXY =====
+  # FE upload video qua presigned URL sẽ đi qua Kong thay vì gọi trực tiếp MinIO.
+  # Mục đích: GIẤU MinIO endpoint thật (minio:9000) khỏi client.
+  #
+  # ⚠️ QUAN TRỌNG — Tại sao dùng /securelearn-media thay vì /storage?
+  # Presigned URL S3v4 ký cả host + path vào chữ ký (X-Amz-Signature).
+  # Nếu dùng /storage rồi strip_path → path thay đổi → signature mismatch → MinIO reject 403.
+  # Dùng /securelearn-media (chính là tên bucket) + strip_path: false → Kong forward nguyên path
+  # → MinIO nhận đúng path đã ký → signature khớp → OK.
+  #
+  # preserve_host: true → Kong giữ nguyên Host header (localhost:8000) khi forward về MinIO.
+  # S3 signature bao gồm Host header — nếu Kong đổi thành minio:9000 → signature sai.
+  #
+  # Route này KHÔNG gắn JWT plugin vì:
+  # - Presigned URL đã chứa chữ ký S3 (X-Amz-Signature) bên trong query string.
+  # - Browser PUT chunk không gửi header Authorization → nếu bật JWT sẽ bị reject.
+  - name: minio-storage
+    url: http://minio:9000
+    routes:
+      - name: minio-proxy
+        paths:
+          - /securelearn-media
+        preserve_host: true
+        strip_path: false
+        methods:
+          - PUT
+          - GET
+          - HEAD
+          - OPTIONS
 
 plugins:
   - name: cors
@@ -184,12 +233,30 @@ plugins:
       headers:
         - Authorization
         - Content-Type
+      # exposed_headers cho phép browser JS đọc các header này từ response.
+      # FE cần đọc ETag sau mỗi PUT chunk để gửi về backend khi confirm upload.
+      # Nếu không expose, xhr.getResponseHeader('etag') trả về null → upload fail.
+      exposed_headers:
+        - ETag
+        - etag
       credentials: true
       max_age: 3600
 
   - name: rate-limiting
     config:
       minute: 100
+      policy: local
+
+  # Rate limiting RIÊNG cho route upload — chặt hơn rate limit toàn cục.
+  # Tối đa 10 lần gọi initiate-upload hoặc batch-part-urls mỗi phút CHO MỖI TÀI KHOẢN (Đếm theo Header Authorization).
+  # Instructor thông thường chỉ upload 1-2 video/phút, nên 10 là dư giả.
+  # Nếu vượt → Kong trả HTTP 429 Too Many Requests.
+  - name: rate-limiting
+    route: media-upload
+    config:
+      minute: 10
+      limit_by: header
+      header_name: Authorization
       policy: local
 
   - name: jwt
@@ -215,6 +282,14 @@ plugins:
 
   - name: jwt
     route: media-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  # JWT cho route upload — đảm bảo chỉ user đã đăng nhập mới xin được presigned URL.
+  - name: jwt
+    route: media-upload
     config:
       key_claim_name: iss
       claims_to_verify:

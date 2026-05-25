@@ -45,7 +45,7 @@ export const registerEventHandlers = async (): Promise<void> => {
     'media-service.video-asset-attached',
     async (payload) => {
       console.log(`[MediaEvent] Video attached confirmed: asset ${payload.assetId} -> lesson ${payload.lessonId}`);
-      await videoAssetService.markAssetAttached(payload.assetId, payload.lessonId);
+      await videoAssetService.markAssetAttached(payload.assetId);
     }
   );
 
@@ -56,7 +56,7 @@ export const registerEventHandlers = async (): Promise<void> => {
     'media-service.document-asset-attached',
     async (payload) => {
       console.log(`[MediaEvent] Document attached confirmed: asset ${payload.assetId} -> lesson ${payload.lessonId}`);
-      await documentAssetService.markAssetAttached(payload.assetId, payload.lessonId);
+      await documentAssetService.markAssetAttached(payload.assetId);
     }
   );
 

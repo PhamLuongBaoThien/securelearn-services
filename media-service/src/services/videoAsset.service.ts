@@ -1,13 +1,11 @@
 // Flow upload video:
-// 1. initiateUpload  → tạo DB record + multipart session
-// 2. confirmUpload   → complete multipart trên storage, trigger FFmpeg
-// 3. processVideoInBackground (async):
-//    #1 — FFmpeg probe codec → copy hoặc encode ultrafast
-//    #3 — Cập nhật progress thực vào DB mỗi 5%
-//    #2 — Upload HLS segments song song lên storage
+// 1. initiateUpload: validate sớm, tạo VideoAsset + multipart session.
+// 2. getBatchPartPresignedUrls: cấp URL để FE PUT từng chunk lên storage.
+// 3. confirmUpload: complete multipart, chuyển sang background processing.
+// 4. processVideoInBackground: validate file thật, convert HLS, upload segments, publish event.
 import fs from 'fs';
 import path from 'path';
-import { processVideoToHLS } from './videoProcessor';
+import { processVideoToHLS, probeVideoMetadata } from './videoProcessor';
 import { VideoAsset, VideoAssetStatus } from '../models/videoAsset.model';
 import { publishVideoFailed, publishVideoReady } from '../events/publishers';
 import s3Service from './s3.service';
@@ -17,6 +15,45 @@ const ORPHAN_TTL_MS = Number(process.env.MEDIA_ORPHAN_TTL_MS || 30 * 60 * 1000);
 const PROCESSING_TIMEOUT_MS = Number(process.env.MEDIA_PROCESSING_TIMEOUT_MS || 45 * 60 * 1000);
 // #2 — Tăng lên 20 khi migrate lên Cloudflare R2
 const HLS_UPLOAD_CONCURRENCY = Number(process.env.HLS_UPLOAD_CONCURRENCY || 10);
+
+// ===== GIỚI HẠN BẢO MẬT =====
+
+// Số lượng video tối đa 1 user được upload cùng lúc.
+// Ngăn attacker spam tạo hàng trăm multipart session để lấp đầy storage.
+// Instructor thông thường upload tuần tự từng bài, nên 3 là đủ.
+const MAX_CONCURRENT_UPLOADS = 3;
+
+// Kích thước file video tối đa cho phép (10GB).
+// Video khóa học thường 100MB–2GB, 10GB là biên an toàn cho video 4K dài.
+const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024;
+const ALLOWED_VIDEO_MIME_TYPES = new Set([
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/x-matroska',
+  'video/webm',
+]);
+const ALLOWED_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm']);
+const MAX_SAFE_FILE_NAME_LENGTH = 180;
+
+// Cấu hình thời hạn Presigned URL CỐ ĐỊNH.
+// Áp dụng chung một thời hạn đủ lớn (6 tiếng) cho mọi file (dù nhỏ hay to)
+// để code đơn giản hơn, đảm bảo người dùng mạng chậm luôn có đủ thời gian upload.
+const PRESIGN_FIXED_EXPIRY = 6 * 3600; // 6 giờ (tính bằng giây)
+
+const getVideoExtension = (fileName: string): string =>
+  fileName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+
+// Dùng trước khi tạo objectKey lưu raw video.
+// Tác dụng: tránh path traversal/control chars và giữ object key gọn, an toàn khi lưu trên S3/MinIO/R2.
+const sanitizeFileName = (fileName: string): string => {
+  const safeName = fileName
+    .replace(/[\\/]/g, '_')
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return safeName.slice(0, MAX_SAFE_FILE_NAME_LENGTH);
+};
 
 class VideoAssetService {
   /**
@@ -31,22 +68,55 @@ class VideoAssetService {
     mimeType: string;
     sizeBytes: number;
   }) {
+    // Validation sớm chạy trước khi tạo DB record và multipart session.
+    // Tác dụng: reject file sai định dạng/quá lớn ngay từ đầu, không để chiếm upload slot hoặc storage tạm.
+    const sizeBytes = Number(data.sizeBytes);
+    const fileName = sanitizeFileName(String(data.fileName || ''));
+    const mimeType = String(data.mimeType || '').toLowerCase().trim();
+    const extension = getVideoExtension(fileName);
+
+    if (!fileName || !mimeType || !Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+      throw new Error('Thông tin file không hợp lệ.');
+    }
+    if (!ALLOWED_VIDEO_MIME_TYPES.has(mimeType) || !ALLOWED_VIDEO_EXTENSIONS.has(extension)) {
+      throw new Error('Định dạng video không được hỗ trợ. Vui lòng chọn MP4, MOV, AVI, MKV hoặc WebM.');
+    }
+    if (sizeBytes > MAX_FILE_SIZE) {
+      throw new Error(`File vượt quá giới hạn ${(MAX_FILE_SIZE / (1024 ** 3)).toFixed(0)}GB cho phép.`);
+    }
+
+    // ===== CHỐNG SPAM: Giới hạn số upload đồng thời per user =====
+    // Đếm các asset đang ở trạng thái upload (INITIATED hoặc UPLOADING).
+    // Nếu user đã có 3 upload đang chạy → từ chối tạo thêm.
+    // Mục đích: ngăn attacker dùng 1 account tạo hàng trăm multipart session
+    // để chiếm bandwidth và storage trên MinIO.
+    const activeUploads = await VideoAsset.countDocuments({
+      ownerUserId: data.ownerUserId,
+      status: { $in: [VideoAssetStatus.INITIATED, VideoAssetStatus.UPLOADING] },
+    });
+    if (activeUploads >= MAX_CONCURRENT_UPLOADS) {
+      throw new Error(
+        `Bạn đang có ${activeUploads} video đang tải lên. ` +
+        `Vui lòng chờ hoàn tất trước khi tải thêm (tối đa ${MAX_CONCURRENT_UPLOADS} cùng lúc).`
+      );
+    }
+
     const asset = await VideoAsset.create({
       ownerUserId: data.ownerUserId,
       courseId: data.courseId,
       lessonId: data.lessonId,
-      originalFileName: data.fileName,
-      mimeType: data.mimeType,
-      sourceSizeBytes: data.sizeBytes,
+      originalFileName: fileName,
+      mimeType,
+      sourceSizeBytes: sizeBytes,
       status: VideoAssetStatus.UPLOADING, // upload multipart đang diễn ra
       processingProgress: 0,
       isAttached: false,
     });
 
-    //object key là đường dẫn logic để lưu file trên storage, không phải URL hay file path thực tế
-    const rawObjectKey = `videos/raw/${asset._id}/${Date.now()}_${data.fileName}`; // objectKey tạm cho file gốc khi upload, sẽ xóa sau khi xử lý xong
+    // objectKey là đường dẫn logic trên storage. Raw file chỉ là đầu vào tạm cho FFmpeg.
+    const rawObjectKey = `videos/raw/${asset._id}/${Date.now()}_${fileName}`;
     asset.rawObjectKey = rawObjectKey;
-    const multipartUploadId = await s3Service.createMultipartUpload(rawObjectKey, data.mimeType); // Tạo multipart upload session trên MinIO, trả về uploadId để FE upload từng part sau đó confirm hoàn tất
+    const multipartUploadId = await s3Service.createMultipartUpload(rawObjectKey, mimeType);
     asset.multipartUploadId = multipartUploadId;
 
     await asset.save();
@@ -68,10 +138,15 @@ class VideoAssetService {
     if (!asset.rawObjectKey || !asset.multipartUploadId) {
       throw new Error('Upload session không hợp lệ hoặc đã kết thúc.');
     }
-    // Sinh tất cả presigned URLs song song
+
+    // ===== THỜI HẠN PRESIGNED URL CỐ ĐỊNH =====
+    // Dùng chung 1 thời hạn cố định, đủ dài để bất kỳ ai dù mạng yếu cũng tải kịp.
+    const expiresIn = PRESIGN_FIXED_EXPIRY;
+
+    // Sinh tất cả presigned URLs song song, mỗi URL có cùng thời hạn
     const urls = await Promise.all(
       Array.from({ length: totalParts }, (_, i) =>
-        s3Service.getPartPresignedUrl(asset.rawObjectKey!, asset.multipartUploadId!, i + 1)
+        s3Service.getPartPresignedUrl(asset.rawObjectKey!, asset.multipartUploadId!, i + 1, expiresIn)
       )
     );
     return urls;
@@ -127,7 +202,7 @@ class VideoAssetService {
   }
 
   public async getAsset(videoAssetId: string) {
-    const asset = await VideoAsset.findById(videoAssetId).select('-attachedLessonId -attachedAt').lean();
+    const asset = await VideoAsset.findById(videoAssetId).lean();
     if (!asset) throw new Error(`Video asset không tồn tại khi đọc trạng thái: ${videoAssetId}.`);
     return {
       ...asset,
@@ -135,16 +210,12 @@ class VideoAssetService {
     };
   }
 
-  public async markAssetAttached(videoAssetId: string, _lessonId: string): Promise<void> {
+  public async markAssetAttached(videoAssetId: string): Promise<void> {
     await VideoAsset.updateOne(
       { _id: videoAssetId },
       {
         $set: {
           isAttached: true,
-        },
-        $unset: {
-          attachedLessonId: '',
-          attachedAt: '',
         },
       },
     );
@@ -209,6 +280,65 @@ class VideoAssetService {
       console.log(`[VideoAssetService] Downloading raw video từ storage: ${asset.rawObjectKey}`);
       await s3Service.downloadFile(asset.rawObjectKey, rawFilePath);
 
+      // VALIDATION SAU UPLOAD — Kiểm tra file THẬT SỰ trước khi chạy FFmpeg
+      // Tại sao cần bước này?
+      // Khi FE gọi initiate-upload, nó tự khai báo fileName, mimeType, sizeBytes.
+      // Attacker có thể khai "video/mp4" nhưng upload 1 file .exe hoặc file rác.
+      // Nếu không validate, FFmpeg sẽ vẫn cố xử lý → tốn CPU vô ích.
+      // Bước validation này chạy SAU khi download raw file, TRƯỚC khi chạy FFmpeg.
+
+      // --- Check 1: Kiểm tra kích thước file thực tế ---
+      // So sánh dung lượng file trên disk vs con số FE khai báo.
+      // Cho phép sai lệch 10% (do overhead encoding, padding...).
+      // Nếu FE khai 100MB nhưng file thật 1GB → có dấu hiệu bất thường → reject.
+      const actualSize = fs.statSync(rawFilePath).size;
+      const declaredSize = asset.sourceSizeBytes;
+      if (declaredSize > 0) {
+        const deviation = Math.abs(actualSize - declaredSize) / declaredSize;
+        if (deviation > 0.1) {
+          throw new Error(
+            `Kích thước file thực tế (${(actualSize / 1024 / 1024).toFixed(1)}MB) ` +
+            `khác biệt quá lớn so với khai báo (${(declaredSize / 1024 / 1024).toFixed(1)}MB).`
+          );
+        }
+      }
+
+      // --- Check 2: Giới hạn dung lượng tối đa ---
+      // Video khóa học thường 100MB–2GB. 10GB là biên an toàn cho video 4K dài.
+      // Ngăn user upload file quá lớn chiếm hết storage.
+      if (actualSize > MAX_FILE_SIZE) {
+        throw new Error(
+          `File vượt quá giới hạn ${(MAX_FILE_SIZE / (1024 ** 3)).toFixed(0)}GB cho phép.`
+        );
+      }
+
+      // --- Check 3: Probe codec — file có phải video thật không? ---
+      // probeVideoMetadata dùng FFmpeg ffprobe để đọc header file (rất nhanh, <100ms).
+      // Nếu file không phải video (ví dụ file .txt đổi tên thành .mp4):
+      //   → ffprobe sẽ throw error hoặc trả về video codec rỗng → reject ngay.
+      // Nếu video hợp lệ → lưu kết quả probe để truyền vào processVideoToHLS (tránh probe 2 lần).
+      let probeResult: { video: string; audio: string; durationSec: number };
+      try {
+        probeResult = await probeVideoMetadata(rawFilePath);
+        if (!probeResult.video) {
+          throw new Error('Không tìm thấy video stream trong file.');
+        }
+        if (probeResult.durationSec <= 0) {
+          throw new Error('Video không có thời lượng (duration = 0). File có thể bị hỏng.');
+        }
+        console.log(
+          `[VideoAssetService] Validation OK: codec=${probeResult.video}/${probeResult.audio}, ` +
+          `duration=${probeResult.durationSec}s, size=${(actualSize / 1024 / 1024).toFixed(1)}MB`
+        );
+      } catch (probeError: any) {
+        // Log chi tiết lỗi (stderr của FFprobe) ra console để admin dễ debug
+        console.error(`[VideoAssetService] FFprobe quét lỗi (Có thể do file giả mạo/hỏng): ${probeError.message}`);
+        
+        // Trả về thông báo thân thiện, ngắn gọn cho Frontend (không hiển thị mã lỗi kỹ thuật)
+        throw new Error(`Tệp tải lên bị hỏng, sai định dạng hoặc không phải là một video hợp lệ. Vui lòng kiểm tra lại!`);
+      }
+      // KẾT THÚC VALIDATION — File đã được xác nhận là video hợp lệ
+
       // Đánh dấu PROCESSING ngay khi bắt đầu FFmpeg
       asset.status = VideoAssetStatus.PROCESSING;
       await asset.save();
@@ -221,12 +351,14 @@ class VideoAssetService {
         );
       };
 
-      // #1 — FFmpeg: tự probe codec, copy nếu H.264, ngược lại encode ultrafast
+      // #1 — FFmpeg: copy nếu H.264, ngược lại encode ultrafast
+      // Truyền probeResult đã có sẵn từ bước validation → tránh probe lại file lần 2.
       const { encryptionKeyHex, durationSec } = await processVideoToHLS(
         rawFilePath,
         outputDir,
         asset._id.toString(),
         onProgress,
+        probeResult, // ← kết quả probe từ validation, không cần probe lại
       );
 
       asset.encryptionKey = encryptionKeyHex;
@@ -278,6 +410,16 @@ class VideoAssetService {
         manifestKey: asset.manifestKey,
       });
     } catch (error: any) {
+      // ===== DỌN DẸP KHI THẤT BẠI =====
+      // Nếu validation hoặc FFmpeg fail → xóa raw video trên storage NGAY LẬP TỨC.
+      // Không chờ orphan cleanup (mặc định 30 phút) → giảm storage bị chiếm bởi file rác.
+      // Đặc biệt quan trọng khi attacker upload file giả: file bị xóa ngay thay vì nằm trên MinIO 30 phút.
+      if (asset.rawObjectKey) {
+        await s3Service.deleteFile(asset.rawObjectKey).catch((cleanupErr) => {
+          console.error(`[VideoAssetService] Không thể xóa raw file ${asset.rawObjectKey}:`, cleanupErr);
+        });
+      }
+
       asset.status = VideoAssetStatus.FAILED;
       asset.processingProgress = 0;
       asset.errorMessage = error.message;

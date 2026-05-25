@@ -7,8 +7,15 @@ export type ProgressCallback = (percent: number) => Promise<void>;
 
 /**
  * Probe codec của video để quyết định copy hay re-encode.
+ *
+ * Hàm này được dùng ở 2 nơi:
+ * 1. videoAsset.service — Validate file có phải video thật không (trước khi chạy FFmpeg).
+ *    Nếu probe thất bại hoặc không tìm thấy video stream → reject file ngay, không tốn CPU encode.
+ * 2. processVideoToHLS — Quyết định copy stream (nhanh) hay re-encode (chậm hơn).
+ *
+ * Được export ra ngoài để videoAsset.service dùng chung, tránh duplicate logic.
  */
-const probeVideoMetadata = (inputPath: string): Promise<{ video: string; audio: string; durationSec: number }> =>
+export const probeVideoMetadata = (inputPath: string): Promise<{ video: string; audio: string; durationSec: number }> =>
   new Promise((resolve, reject) => {
     ffmpeg.ffprobe(inputPath, (err: any, metadata: any) => {
       if (err) return reject(err);
@@ -42,13 +49,20 @@ export const processVideoToHLS = async (
   outputDir: string,
   videoId: string,
   onProgress?: ProgressCallback,
+  /**
+   * Kết quả probe đã chạy sẵn từ bước validation (videoAsset.service).
+   * Nếu có → dùng luôn, KHÔNG probe lại → tiết kiệm I/O.
+   * Nếu không truyền → tự probe bên trong (giữ tương thích ngược).
+   */
+  preProbed?: { video: string; audio: string; durationSec: number },
 ): Promise<{ m3u8OutputPath: string; encryptionKeyHex: string; durationSec: number }> => {
-  // --- Probe codec TRƯỚC khi tạo Promise (tránh unhandled rejection trong executor) ---
+  // --- Xác định codec để chọn chế độ xử lý (copy vs encode) ---
   let canCopyVideo = false;
   let canCopyAudio = false;
   let durationSec = 0;
   try {
-    const metadata = await probeVideoMetadata(inputPath);
+    // Dùng kết quả probe sẵn nếu có, tránh đọc file lần thứ 2
+    const metadata = preProbed ?? await probeVideoMetadata(inputPath);
     canCopyVideo = metadata.video === 'h264';
     canCopyAudio = ['aac', 'mp3'].includes(metadata.audio);
     durationSec = metadata.durationSec;

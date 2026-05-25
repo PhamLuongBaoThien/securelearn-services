@@ -66,17 +66,6 @@ class S3Service {
     await s3Client.send(command);
   }
 
-  /** Upload buffer từ bộ nhớ lên storage. */
-  public async uploadBuffer(buffer: Buffer, objectKey: string, mimeType: string): Promise<void> {
-    const command = new PutObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: objectKey,
-      Body: buffer,
-      ContentType: mimeType,
-    });
-    await s3Client.send(command);
-  }
-
   /** Xóa 1 file. */
   public async deleteFile(objectKey: string): Promise<void> {
     const command = new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: objectKey });
@@ -131,7 +120,7 @@ class S3Service {
   public async createMultipartUpload(objectKey: string, mimeType: string): Promise<string> {
     const result = await s3Client.send(
       new CreateMultipartUploadCommand({ Bucket: BUCKET_NAME, Key: objectKey, ContentType: mimeType }),
-    ); // CreateMultipartUploadCommand là hàm của AWS SDK v3 để bắt đầu một multipart upload mới. Nó trả về một UploadId duy nhất đại diện cho phiên upload này. Bucket là tên bucket S3 nơi bạn muốn lưu trữ file, Key là đường dẫn và tên file trên S3, ContentType là loại MIME của file (ví dụ: video/mp4). UploadId này sẽ được sử dụng trong các bước tiếp theo để xác định multipart upload session khi bạn upload từng phần (part) của file.
+    );
     if (!result.UploadId) throw new Error('Không nhận được UploadId từ storage.');
     return result.UploadId;
   }
@@ -139,11 +128,15 @@ class S3Service {
   /**
    * Sinh presigned URL để browser PUT 1 part trực tiếp lên storage.
    * Dùng presignClient (S3_PUBLIC_ENDPOINT) để chữ ký khớp với host mà browser gửi request.
+   *
+   * @param expiresIn Thời gian URL có hiệu lực (giây).
+   * Media-service hiện truyền 6 giờ cố định để giảm rủi ro hết hạn giữa chừng trên mạng chậm.
    */
   public async getPartPresignedUrl(
     objectKey: string,
     uploadId: string,
     partNumber: number,
+    expiresIn: number = 3600,
   ): Promise<string> {
     const cmd = new UploadPartCommand({
       Bucket: BUCKET_NAME,
@@ -155,7 +148,7 @@ class S3Service {
     });
     // presignClient dùng S3_PUBLIC_ENDPOINT nên URL chứa host public browser gọi được.
     // Host này phải khớp với request thật, nếu không S3 signature sẽ sai.
-    const url = await getSignedUrl(presignClient, cmd, { expiresIn: 3600 });
+    const url = await getSignedUrl(presignClient, cmd, { expiresIn });
     return url;
   }
 

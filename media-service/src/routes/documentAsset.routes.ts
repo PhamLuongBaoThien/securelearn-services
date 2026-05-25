@@ -3,10 +3,11 @@
 import { Router } from 'express';
 import documentAssetController from '../controllers/documentAsset.controller';
 import { uploadDocument } from '../middlewares/upload.middleware';
+import { requireDocumentAssetOwner } from '../middlewares/documentAssetOwnership.middleware';
 
 const router = Router();
 
 router.post('/upload', uploadDocument.single('file'), documentAssetController.uploadDocument);
-router.get('/:documentAssetId', documentAssetController.getAsset);
+router.get('/:documentAssetId', requireDocumentAssetOwner, documentAssetController.getAsset);
 
 export default router;
