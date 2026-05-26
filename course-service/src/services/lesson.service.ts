@@ -202,9 +202,9 @@ class LessonService {
     if (lesson.type !== LessonType.VIDEO) throw new Error('Chỉ bài học video mới được gắn video asset.');
     await this.assertVideoAssetBinding(videoAssetId, courseId, lessonId, instructorId, authorizationHeader);
 
-    const previousVideoAssetId = lesson.videoAssetId?.toString() || null;
+    const previousVideoAssetId = lesson.videoAssetId?.toString() || null; // Lưu lại videoAssetId cũ để nếu có đổi video thì sẽ phát event cleanup cho video cũ
 
-    lesson.videoAssetId = new Types.ObjectId(videoAssetId);
+    lesson.videoAssetId = new Types.ObjectId(videoAssetId); //Types.ObjectId là để convert string sang ObjectId, vì videoAssetId trong lesson là kiểu ObjectId
     lesson.status = LessonStatus.PROCESSING;
     await Quiz.deleteOne({ lessonId: lesson._id, courseId });
     await lesson.save();

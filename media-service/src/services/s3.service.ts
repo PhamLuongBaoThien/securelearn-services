@@ -1,15 +1,15 @@
 import {
-  S3Client,
-  PutObjectCommand,
-  DeleteObjectCommand,
-  ListObjectsV2Command,
-  DeleteObjectsCommand,
-  CreateMultipartUploadCommand,
-  UploadPartCommand,
-  CompleteMultipartUploadCommand,
-  AbortMultipartUploadCommand,
-  HeadObjectCommand,
-  GetObjectCommand,
+  S3Client, // lớp chính để tương tác với S3/R2/MinIO, cung cấp phương thức send() để gửi các lệnh (command) mô tả thao tác muốn thực hiện.
+  PutObjectCommand, // command để upload một file lên storage.
+  DeleteObjectCommand, // command để xóa một file trên storage.
+  ListObjectsV2Command, // command để liệt kê các file trong bucket, hỗ trợ phân trang với ContinuationToken.
+  DeleteObjectsCommand, // command để xóa nhiều file cùng lúc trên storage.
+  CreateMultipartUploadCommand, // command để khởi tạo một multipart upload session, trả về UploadId dùng cho các bước tiếp theo.
+  UploadPartCommand, // command để upload một phần (part) của file trong multipart upload, cần UploadId và PartNumber.
+  CompleteMultipartUploadCommand, // command để hoàn tất multipart upload sau khi đã upload tất cả parts, cần UploadId và danh sách parts đã upload (ETag và PartNumber).
+  AbortMultipartUploadCommand, // command để hủy multipart upload session nếu user cancel, cần UploadId.
+  HeadObjectCommand, // command để kiểm tra sự tồn tại của một object trên storage, trả về metadata nếu tồn tại hoặc lỗi nếu không.
+  GetObjectCommand, // command để download một file từ storage, trả về stream dữ liệu nếu thành công.
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import fs from 'fs';
@@ -130,7 +130,7 @@ class S3Service {
    * Dùng presignClient (S3_PUBLIC_ENDPOINT) để chữ ký khớp với host mà browser gửi request.
    *
    * @param expiresIn Thời gian URL có hiệu lực (giây).
-   * Media-service hiện truyền 6 giờ cố định để giảm rủi ro hết hạn giữa chừng trên mạng chậm.
+   * Mặc định 3600 giây = 1 giờ, đủ cho đa số lượt upload video theo từng part.
    */
   public async getPartPresignedUrl(
     objectKey: string,
@@ -138,12 +138,31 @@ class S3Service {
     partNumber: number,
     expiresIn: number = 3600,
   ): Promise<string> {
+
+    // Command (lệnh/yêu cầu thao tác) là object mô tả "muốn gọi API nào của S3 và với tham số gì".
+    // Ở đây command này mô tả thao tác UploadPart (upload một phần/chunk của file lớn)
+    // trong Multipart Upload (upload nhiều phần rồi ghép lại).
+    // Sau khi tạo command, ta đưa nó vào getSignedUrl để sinh presigned URL
+    // (URL tạm thời đã được ký) cho browser upload đúng part này lên storage.
     const cmd = new UploadPartCommand({
       Bucket: BUCKET_NAME,
       Key: objectKey,
       UploadId: uploadId,
       PartNumber: partNumber,
-      // Không ký kèm checksum — browser không thể tự tính CRC32 khi PUT raw Blob
+      // Checksum (mã kiểm tra toàn vẹn dữ liệu) là giá trị hash/tổng kiểm giúp storage
+      // biết dữ liệu nhận được có bị sai trong lúc truyền hay không.
+      //
+      // AWS SDK v3 đôi khi tự thêm checksum như CRC32 (một thuật toán checksum phổ biến)
+      // vào chữ ký của presigned URL (URL tạm thời đã được backend ký để browser được phép upload).
+      // Khi đó, browser cũng phải gửi đúng checksum header (header = metadata đi kèm HTTP request).
+      //
+      // Với flow hiện tại, browser chỉ PUT raw Blob (khối dữ liệu file thô từ input) lên MinIO.
+      // Browser không tự tính và gửi đúng CRC32 header cho từng part, nên nếu URL bị ký kèm
+      // checksum thì MinIO có thể từ chối request vì chữ ký không khớp.
+      //
+      // Vì vậy ta đặt undefined để UploadPartCommand không yêu cầu checksum riêng cho từng part.
+      // Tính toàn vẹn vẫn được S3 multipart kiểm soát qua ETag (mã định danh part đã upload)
+      // và bước CompleteMultipartUpload sau đó.
       ChecksumAlgorithm: undefined,
     });
     // presignClient dùng S3_PUBLIC_ENDPOINT nên URL chứa host public browser gọi được.

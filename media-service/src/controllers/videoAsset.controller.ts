@@ -86,7 +86,7 @@ class VideoAssetController {
       }
       const hasInvalidPart = parts.some(
         (part) => !part?.ETag || !Number.isInteger(part.PartNumber) || part.PartNumber < 1,
-      );
+      ); // .some() để kiểm tra nếu có phần tử nào trong mảng không hợp lệ, tránh lỗi khi gọi service confirmUpload
       if (hasInvalidPart) {
         res.status(400).json({ status: 'ERR', message: 'Thông tin ETag/PartNumber không hợp lệ.' });
         return;

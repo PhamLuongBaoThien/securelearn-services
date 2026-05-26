@@ -10,7 +10,7 @@ import { VideoAsset, VideoAssetStatus } from '../models/videoAsset.model';
 import { publishVideoFailed, publishVideoReady } from '../events/publishers';
 import s3Service from './s3.service';
 
-const MEDIA_ROOT = path.resolve(process.cwd(), 'tmp-media');
+const MEDIA_ROOT = path.resolve(process.cwd(), 'tmp-media'); // thư mục tạm để lưu file raw và output HLS trong quá trình xử lý video. Cấu trúc: tmp-media/videos/<assetId>/raw_input, tmp-media/videos/<assetId>/hls/*.ts, *.m3u8 (process.cwd() là thư mục gốc của project, thường là backend/media-service) => đường dẫn tuyệt đối, tránh lỗi khi chạy ở môi trường khác nhau. Sau khi xử lý xong sẽ xóa toàn bộ thư mục này để dọn dẹp file tạm
 const ORPHAN_TTL_MS = Number(process.env.MEDIA_ORPHAN_TTL_MS || 30 * 60 * 1000);
 const PROCESSING_TIMEOUT_MS = Number(process.env.MEDIA_PROCESSING_TIMEOUT_MS || 45 * 60 * 1000);
 // #2 — Tăng lên 20 khi migrate lên Cloudflare R2
@@ -135,7 +135,7 @@ class VideoAssetService {
   public async getBatchPartPresignedUrls(videoAssetId: string, totalParts: number): Promise<string[]> {
     const asset = await VideoAsset.findById(videoAssetId);
     if (!asset) throw new Error(`Video asset không tồn tại khi lấy batch part-urls: ${videoAssetId}.`);
-    if (!asset.rawObjectKey || !asset.multipartUploadId) {
+    if (!asset.rawObjectKey || !asset.multipartUploadId) { // rawObjectKey là bằng chứng cho thấy multipart session đã được tạo ở bước initiateUpload., multipartUploadId là bằng chứng cho thấy session đó vẫn còn hiệu lực (chưa bị confirm hoặc abort).
       throw new Error('Upload session không hợp lệ hoặc đã kết thúc.');
     }
 
@@ -163,7 +163,7 @@ class VideoAssetService {
     const asset = await VideoAsset.findById(videoAssetId);
     if (!asset) throw new Error(`Video asset không tồn tại khi confirm upload: ${videoAssetId}.`);
     if (asset.status === VideoAssetStatus.UPLOADED) {
-      void this.processVideoInBackground(asset._id.toString());
+      void this.processVideoInBackground(asset._id.toString()); // Trong trường hợp FE đã gọi confirmUpload nhưng chưa kịp trigger background (ví dụ do lỗi mạng), nếu asset đã ở trạng thái UPLOADED thì vẫn tiếp tục trigger background processing để đảm bảo video được xử lý.
       return asset;
     }
     if ([VideoAssetStatus.PROCESSING, VideoAssetStatus.READY].includes(asset.status)) {
@@ -174,7 +174,7 @@ class VideoAssetService {
     }
 
     // S3 yêu cầu danh sách parts đúng thứ tự tăng dần theo PartNumber.
-    const completedParts = [...parts].sort((a, b) => a.PartNumber - b.PartNumber);
+    const completedParts = [...parts].sort((a, b) => a.PartNumber - b.PartNumber); // đảm bảo FE có gửi parts đúng thứ tự, nếu không sẽ bị lỗi khi complete multipart.
     await s3Service.completeMultipartUpload(asset.rawObjectKey, asset.multipartUploadId, completedParts);
 
     const exists = await s3Service.objectExists(asset.rawObjectKey);
@@ -183,8 +183,8 @@ class VideoAssetService {
     asset.status = VideoAssetStatus.UPLOADED;
     asset.uploadCompletedAt = new Date();
     asset.multipartUploadId = null;
-    asset.processingProgress = 5;
-    await asset.save();
+    asset.processingProgress = 5; // Đánh dấu 5% ngay khi upload xong, trước khi bắt đầu FFmpeg, để FE có phản hồi nhanh rằng file đã được tải lên thành công.
+    await asset.save(); // lúc này asset đã ở trạng thái UPLOADED, sẵn sàng cho bước xử lý video ở background.
 
     void this.processVideoInBackground(asset._id.toString());
     return asset;
@@ -269,9 +269,9 @@ class VideoAssetService {
     }
 
     try {
-      const assetDir = path.join(MEDIA_ROOT, 'videos', asset._id.toString());
-      fs.mkdirSync(assetDir, { recursive: true });
-      const outputDir = path.join(assetDir, 'hls');
+      const assetDir = path.join(MEDIA_ROOT, 'videos', asset._id.toString()); // thư mục tạm cho file raw và output HLS của video này (MEDIA_ROOT/videos/<assetId>/...). Cấu trúc: tmp-media/videos/<assetId>/raw_input, tmp-media/videos/<assetId>/hls/*.ts, *.m3u8
+      fs.mkdirSync(assetDir, { recursive: true }); // tạo thư mục tạm cho video này, đảm bảo có folder riêng cho từng video để tránh xung đột file khi xử lý nhiều video cùng lúc (Ví dụ video A và video B cùng có file raw_input, nếu không có folder riêng sẽ bị xung đột khi download về cùng 1 đường dẫn, recursive: true } nghĩa là nếu thư mục cha chưa tồn tại thì tạo mới). Sau khi xử lý xong sẽ xóa toàn bộ thư mục này để dọn dẹp file tạm.
+      const outputDir = path.join(assetDir, 'hls'); // thư mục tạm để FFmpeg xuất file HLS, sau đó mới upload lên storage. Cấu trúc: tmp-media/videos/<assetId>/hls/*.ts, *.m3u8
 
       if (!asset.rawObjectKey) {
         throw new Error('Không tìm thấy file video để xử lý.');
@@ -291,10 +291,10 @@ class VideoAssetService {
       // So sánh dung lượng file trên disk vs con số FE khai báo.
       // Cho phép sai lệch 10% (do overhead encoding, padding...).
       // Nếu FE khai 100MB nhưng file thật 1GB → có dấu hiệu bất thường → reject.
-      const actualSize = fs.statSync(rawFilePath).size;
-      const declaredSize = asset.sourceSizeBytes;
+      const actualSize = fs.statSync(rawFilePath).size; // kích thước file thực tế sau khi download về, dùng để so sánh với sizeBytes do FE khai báo ở bước initiateUpload.
+      const declaredSize = asset.sourceSizeBytes; // kích thước file do FE khai báo lưu trong DB ở bước initiateUpload.
       if (declaredSize > 0) {
-        const deviation = Math.abs(actualSize - declaredSize) / declaredSize;
+        const deviation = Math.abs(actualSize - declaredSize) / declaredSize; // abs() để lấy giá trị tuyệt đối của độ lệch, tránh trường hợp file nhỏ hơn khai báo cũng bị tính là lệch âm. Nếu deviation > 0.1 (tức là chênh lệch hơn 10%) thì có dấu hiệu bất thường → reject file.
         if (deviation > 0.1) {
           throw new Error(
             `Kích thước file thực tế (${(actualSize / 1024 / 1024).toFixed(1)}MB) ` +
@@ -354,14 +354,14 @@ class VideoAssetService {
       // #1 — FFmpeg: copy nếu H.264, ngược lại encode ultrafast
       // Truyền probeResult đã có sẵn từ bước validation → tránh probe lại file lần 2.
       const { encryptionKeyHex, durationSec } = await processVideoToHLS(
-        rawFilePath,
-        outputDir,
-        asset._id.toString(),
-        onProgress,
-        probeResult, // ← kết quả probe từ validation, không cần probe lại
+        rawFilePath, // đường dẫn file raw video đã download về local, dùng làm input cho FFmpeg
+        outputDir, // thư mục output tạm để FFmpeg xuất file HLS, sau đó mới upload lên storage. Cấu trúc: tmp-media/videos/<assetId>/hls/*.ts, *.m3u8
+        asset._id.toString(), // dùng để đặt tên file manifest và segments theo format <assetId>_playlist.m3u8, <assetId>_segment1.ts, <assetId>_segment2.ts... giúp dễ quản lý và tránh xung đột tên file khi xử lý nhiều video cùng lúc.
+        onProgress, // callback để FFmpeg báo cáo tiến độ thực tế, từ đó cập nhật vào DB. Ví dụ FFmpeg có thể gọi onProgress(5), onProgress(10)... mỗi khi đạt được cột mốc tiến độ mới, giúp FE có phản hồi nhanh về tiến trình xử lý video.
+        probeResult, // kết quả probe từ validation, không cần probe lại
       );
 
-      asset.encryptionKey = encryptionKeyHex;
+      asset.encryptionKey = encryptionKeyHex; // lưu khóa mã hóa (dạng hex string) vào DB để sau này FE có thể gọi API lấy về giải mã khi cần thiết. Khóa này dùng để mã hóa AES-128 cho các segment HLS, đảm bảo chỉ người có khóa mới xem được video. Lưu ý: khóa này KHÔNG PHẢI là khóa để truy cập file trên storage, mà là khóa để giải mã nội dung video đã được mã hóa trong quá trình tạo HLS. Vì vậy, việc lưu khóa này trong DB là cần thiết để sau này khi FE cần phát video, nó sẽ gọi API lấy khóa này về để giải mã các segment HLS khi stream.
 
       // #2 — Upload HLS segments song song theo batch
       const files = fs.readdirSync(outputDir);
