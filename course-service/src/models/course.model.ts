@@ -16,8 +16,10 @@ export enum CourseLevel {
 
 export enum CourseStatus {
   DRAFT = 'DRAFT', // Nháp
+  PENDING = 'PENDING', // Chờ admin duyệt
   PUBLISHED = 'PUBLISHED', // Công khai
-  ARCHIVED = 'ARCHIVED', // Lưu trữ
+  REJECTED = 'REJECTED', // Admin yêu cầu chỉnh sửa, giảng viên có thể sửa và gửi lại
+  ARCHIVED = 'ARCHIVED', // Version cũ đã được thay thế, chỉ giữ để audit
 }
 
 export interface ICourse extends Document {
@@ -33,6 +35,8 @@ export interface ICourse extends Document {
   categoryId?: Types.ObjectId | null;
   level: CourseLevel;
   status: CourseStatus;
+  currentVersionId?: Types.ObjectId | null; // CourseVersion đang public cho học viên/catalog
+  draftVersionId?: Types.ObjectId | null;   // CourseVersion giảng viên đang sửa hoặc chờ duyệt
   price: number;
   totalDuration: number;
   totalLessons: number;
@@ -65,7 +69,10 @@ const courseSchema = new Schema<ICourse>(
       type: String,
       enum: Object.values(CourseStatus),
       default: CourseStatus.DRAFT,
+      index: true,
     },
+    currentVersionId: { type: Schema.Types.ObjectId, ref: 'CourseVersion', default: null, index: true },
+    draftVersionId: { type: Schema.Types.ObjectId, ref: 'CourseVersion', default: null, index: true },
     price: { type: Number, default: 0, min: 0 },
     totalDuration: { type: Number, default: 0 },
     totalLessons: { type: Number, default: 0 },
@@ -76,6 +83,8 @@ const courseSchema = new Schema<ICourse>(
     timestamps: true,
   }
 );
+
+courseSchema.index({ instructorId: 1, status: 1 });
 
 // Slug được tạo từ title + _id để giảm khả năng trùng.
 courseSchema.pre('save', function (next) {

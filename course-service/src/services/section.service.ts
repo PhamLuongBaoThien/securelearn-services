@@ -4,12 +4,12 @@
 // - xóa section sẽ xóa luôn toàn bộ lesson trong section đó
 // - sau khi xóa cần resequence order và sync lại course stats
 import { Types } from 'mongoose';
-import { Course } from '../models/course.model';
+import { CourseVersion } from '../models/courseVersion.model';
 import { Lesson } from '../models/lesson.model';
 import { Section } from '../models/section.model';
 import { Quiz } from '../models/quiz.model';
 import courseService from './course.service';
-import { publishVideoAssetCleanup, publishDocumentAssetCleanup } from '../events/publishers';
+import mediaReferenceService from './mediaReference.service';
 
 class SectionService {
   // Tạo section mới theo thứ tự trong course.
@@ -56,34 +56,11 @@ class SectionService {
 
     // Load đầy đủ asset fields để phát cleanup events
     const lessons = await Lesson.find({ sectionId: section._id })
-      .select('_id videoAssetId attachments')
+      .select('_id courseId videoAssetId attachments')
       .lean();
     const lessonIds = lessons.map(lesson => lesson._id);
 
-    // Phát cleanup event cho từng media asset TRƯỚC khi xoá DB
-    const cleanupPromises: Promise<void>[] = [];
-    for (const lesson of lessons) {
-      if (lesson.videoAssetId) {
-        cleanupPromises.push(
-          publishVideoAssetCleanup({
-            assetId: lesson.videoAssetId.toString(),
-            courseId,
-            lessonId: lesson._id.toString(),
-          })
-        );
-      }
-      // Cleanup toàn bộ attachments
-      for (const attachmentId of (lesson.attachments || [])) {
-        cleanupPromises.push(
-          publishDocumentAssetCleanup({
-            assetId: attachmentId.toString(),
-            courseId,
-            lessonId: lesson._id.toString(),
-          })
-        );
-      }
-    }
-    await Promise.all(cleanupPromises);
+    await mediaReferenceService.cleanupMediaForRemovedLessons(lessons);
 
     if (lessonIds.length > 0) {
       await Quiz.deleteMany({ lessonId: { $in: lessonIds }, courseId });
@@ -141,20 +118,32 @@ class SectionService {
   }
 
   private async assertCourseOwnership(courseId: string, instructorId: string) {
-    const course = await Course.findById(courseId);
-    if (!course) throw new Error('Khóa học không tồn tại.');
-    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền truy cập khóa học này.');
-    return course;
+    const version = await CourseVersion.findById(courseId);
+    if (!version) throw new Error('Bản nội dung khóa học không tồn tại.');
+    if (version.instructorId !== instructorId) throw new Error('Bạn không có quyền truy cập khóa học này.');
+    courseService.assertCourseEditable(version.status);
+    return version;
   }
 
   private async resequenceSections(courseId: string): Promise<void> {
     const sections = await Section.find({ courseId }).sort({ order: 1, createdAt: 1 });
-    await Promise.all(
-      sections.map((section, index) => {
-        section.order = index + 1;
-        return section.save();
-      })
-    );
+    if (sections.length === 0) return;
+
+    const tempOps = sections.map((section, index) => ({
+      updateOne: {
+        filter: { _id: section._id, courseId },
+        update: { $set: { order: -(sections.length + index + 1) } },
+      },
+    }));
+    await Section.bulkWrite(tempOps);
+
+    const finalOps = sections.map((section, index) => ({
+      updateOne: {
+        filter: { _id: section._id, courseId },
+        update: { $set: { order: index + 1 } },
+      },
+    }));
+    await Section.bulkWrite(finalOps);
   }
 }
 

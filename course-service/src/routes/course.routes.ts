@@ -40,6 +40,13 @@ router.get('/my-courses', extractUser, requireInstructor, courseController.getMy
 // [POST] /api/courses — Tạo khóa học mới
 router.post('/', extractUser, requireInstructor, courseController.createCourse);
 
+// [POST] /api/courses/:id/submit-review — Gửi khóa học cho admin duyệt
+router.post('/:id/submit-review', extractUser, requireInstructor, courseController.submitCourseForReview);
+
+// [POST] /api/courses/:id/revisions — Tạo/lấy bản nháp cập nhật cho khóa đã publish
+router.post('/:id/revisions', extractUser, requireInstructor, courseController.createOrGetRevision);
+
+router.use('/:courseId/sections', extractUser, requireInstructor, sectionRoutes);
 router.use('/:courseId', extractUser, requireInstructor, sectionRoutes);
 router.use('/:courseId', extractUser, requireInstructor, lessonRoutes);
 router.use('/:courseId', extractUser, requireInstructor, quizRoutes);
@@ -50,10 +57,7 @@ router.get('/:id/manage', extractUser, requireInstructor, courseController.getCo
 // [PUT] /api/courses/:id — Cập nhật khóa học, hỗ trợ cả metadata và thumbnail file
 router.put('/:id', extractUser, requireInstructor, upload.single('thumbnail'), courseController.updateCourse);
 
-// [PATCH] /api/courses/:id/publish — Publish khóa học
-router.patch('/:id/publish', extractUser, requireInstructor, courseController.publishCourse);
-
-// [POST] /api/courses/:id/publish/validate — Validate publish - check điều kiện publish
+// [POST] /api/courses/:id/publish/validate — Validate điều kiện gửi duyệt
 router.post('/:id/publish/validate', extractUser, requireInstructor, courseController.validatePublish);
 
 // [DELETE] /api/courses/:id — Xóa khóa học

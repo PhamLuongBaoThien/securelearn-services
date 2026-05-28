@@ -1,5 +1,5 @@
 // File này chứa model Section.
-// Section chỉ là container sắp xếp lesson trong course.
+// Section chỉ là container sắp xếp lesson trong một CourseVersion.
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export interface ISection extends Document {
@@ -12,7 +12,7 @@ export interface ISection extends Document {
 
 const sectionSchema = new Schema<ISection>(
   {
-    courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true, index: true },
+    courseId: { type: Schema.Types.ObjectId, ref: 'CourseVersion', required: true, index: true },
     title: { type: String, required: true, trim: true },
     order: { type: Number, required: true },
   },

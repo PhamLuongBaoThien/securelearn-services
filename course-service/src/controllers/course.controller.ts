@@ -162,19 +162,37 @@ class CourseController {
   }
 
   /**
-   * [PATCH] /api/courses/:id/publish
-   * Publish khóa học (Instructor owner).
+   * [POST] /api/courses/:id/submit-review
+   * Gửi khóa học/revision cho admin duyệt.
    */
-  public async publishCourse(req: AuthRequest, res: Response): Promise<void> {
+  public async submitCourseForReview(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const course = await courseService.publishCourse(req.params.id as string, req.userId!);
+      const course = await courseService.submitCourseForReview(req.params.id as string, req.userId!);
       res.status(200).json({
         status: 'OK',
-        message: 'Khóa học đã được xuất bản!',
+        message: 'Khóa học đã được gửi duyệt!',
         data: course,
       });
     } catch (error: any) {
-      const status = error.message.includes('không có quyền') ? 403 : 400;
+      const status = error.message.includes('quyền') ? 403 : 400;
+      res.status(status).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [POST] /api/courses/:id/revisions
+   * Tạo hoặc lấy bản nháp cập nhật cho khóa đã xuất bản.
+   */
+  public async createOrGetRevision(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const course = await courseService.createOrGetRevision(req.params.id as string, req.userId!);
+      res.status(200).json({
+        status: 'OK',
+        message: 'Đã mở bản cập nhật khóa học.',
+        data: course,
+      });
+    } catch (error: any) {
+      const status = error.message.includes('quyền') ? 403 : 400;
       res.status(status).json({ status: 'ERR', message: error.message });
     }
   }
@@ -222,6 +240,62 @@ class CourseController {
       res.status(200).json({ status: 'OK', data: course });
     } catch (error: any) {
       res.status(404).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [GET] /api/admin/courses/review
+   * Danh sách khóa học/revision đang chờ admin duyệt.
+   */
+  public async getCoursesForReview(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { page, limit, search, status } = req.query;
+      const result = await courseService.getCoursesForReview({
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+        search: search as string,
+        status: status as string,
+      });
+      res.status(200).json({ status: 'OK', message: 'Lấy danh sách khóa học chờ duyệt thành công.', data: result });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [GET] /api/admin/courses/:id/review
+   * Chi tiết khóa học để admin xem curriculum trước khi duyệt.
+   */
+  public async getCourseReviewDetail(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const course = await courseService.getCourseReviewDetail(req.params.id as string);
+      res.status(200).json({ status: 'OK', message: 'Lấy chi tiết khóa học thành công.', data: course });
+    } catch (error: any) {
+      res.status(404).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [PATCH] /api/admin/courses/:id/approve
+   */
+  public async approveCourse(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const course = await courseService.approveCourse(req.params.id as string, req.userId!);
+      res.status(200).json({ status: 'OK', message: 'Khóa học đã được phê duyệt.', data: course });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [PATCH] /api/admin/courses/:id/reject
+   */
+  public async rejectCourse(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const course = await courseService.rejectCourse(req.params.id as string, req.userId!, req.body.reason);
+      res.status(200).json({ status: 'OK', message: 'Đã gửi yêu cầu chỉnh sửa.', data: course });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
     }
   }
 }

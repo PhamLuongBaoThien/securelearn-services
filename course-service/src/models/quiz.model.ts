@@ -62,7 +62,7 @@ const quizQuestionSchema = new Schema<IQuizQuestion>(
 // quizSchema: Model chính của Quiz
 const quizSchema = new Schema<IQuiz>(
   {
-    courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true, index: true },
+    courseId: { type: Schema.Types.ObjectId, ref: 'CourseVersion', required: true, index: true },
     lessonId: { type: Schema.Types.ObjectId, ref: 'Lesson', required: true, unique: true, index: true },// unique -> Mỗi lesson chỉ có 1 quiz
     title: { type: String, required: true, trim: true }, // Tiêu đề bài quiz
     passingScore: { type: Number, default: 70, min: 0, max: 100 }, // Điểm tối thiểu để qua bài quiz (%)

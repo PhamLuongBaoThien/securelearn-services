@@ -16,10 +16,13 @@ import {
   type VideoAssetStatusPayload,
 } from '@securelearn/common';
 import { Course } from '../models/course.model';
+import { CourseVersion } from '../models/courseVersion.model';
 import { LessonStatus } from '../models/lesson.model';
 import { Enrollment } from '../models/enrollment.model';
 import { Lesson } from '../models/lesson.model';
 import { Section } from '../models/section.model';
+import { Quiz } from '../models/quiz.model';
+import { QuizAttempt } from '../models/quizAttempt.model';
 import lessonService from '../services/lesson.service';
 
 /**
@@ -37,11 +40,17 @@ export const registerEventHandlers = async (): Promise<void> => {
 
       // Nếu giảng viên đổi tên → đồng bộ instructorName trong tất cả khóa học của họ
       if (payload.updatedFields.includes('fullName') && payload.fullName) {
-        const result = await Course.updateMany(
-          { instructorId: payload.userId },
-          { $set: { instructorName: payload.fullName } }
-        );
-        console.log(`[CourseEvent] Đã cập nhật instructorName thành "${payload.fullName}" cho ${result.modifiedCount} khóa học của user ${payload.userId}`);
+        const [courseResult, versionResult] = await Promise.all([
+          Course.updateMany(
+            { instructorId: payload.userId },
+            { $set: { instructorName: payload.fullName } }
+          ),
+          CourseVersion.updateMany(
+            { instructorId: payload.userId },
+            { $set: { instructorName: payload.fullName } }
+          ),
+        ]);
+        console.log(`[CourseEvent] Đã cập nhật instructorName thành "${payload.fullName}" cho ${courseResult.modifiedCount} khóa học và ${versionResult.modifiedCount} version của user ${payload.userId}`);
       }
     }
   );
@@ -58,9 +67,19 @@ export const registerEventHandlers = async (): Promise<void> => {
       const courseIds = instructorCourses.map((course) => course._id);
 
       if (courseIds.length > 0) {
+        const versions = await CourseVersion.find({ courseId: { $in: courseIds } }).select('_id').lean();
+        const versionIds = versions.map((version) => version._id);
+        const lessons = versionIds.length > 0
+          ? await Lesson.find({ courseId: { $in: versionIds } }).select('_id').lean()
+          : [];
+        const lessonIds = lessons.map((lesson) => lesson._id);
+
         await Promise.all([
-          Lesson.deleteMany({ courseId: { $in: courseIds } }),
-          Section.deleteMany({ courseId: { $in: courseIds } }),
+          lessonIds.length > 0 ? Quiz.deleteMany({ lessonId: { $in: lessonIds } }) : Promise.resolve(),
+          lessonIds.length > 0 ? QuizAttempt.deleteMany({ lessonId: { $in: lessonIds } }) : Promise.resolve(),
+          Lesson.deleteMany({ courseId: { $in: versionIds } }),
+          Section.deleteMany({ courseId: { $in: versionIds } }),
+          CourseVersion.deleteMany({ courseId: { $in: courseIds } }),
           Enrollment.deleteMany({ courseId: { $in: courseIds } }),
           Course.deleteMany({ _id: { $in: courseIds } }),
         ]);

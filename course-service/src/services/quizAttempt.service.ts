@@ -5,16 +5,20 @@
 // - logic hiện tại phù hợp nhất với kiểu 1 đáp án chọn duy nhất
 import { QuizAttempt, QuizAttemptStatus } from '../models/quizAttempt.model';
 import { Quiz } from '../models/quiz.model';
+import { Course, CourseStatus } from '../models/course.model';
+import { CourseVersion } from '../models/courseVersion.model';
 
 class QuizAttemptService {
   public async startAttempt(courseId: string, lessonId: string, quizId: string, userId: string) {
-    const quiz = await Quiz.findOne({ _id: quizId, lessonId, courseId }).lean();
+    const context = await this.resolveCourseQuizContext(courseId);
+    const quiz = await Quiz.findOne({ _id: quizId, lessonId, courseId: context.versionId }).lean();
     if (!quiz) throw new Error('Quiz không tồn tại.');
 
     const attempt = await QuizAttempt.create({
       quizId: quiz._id,
       lessonId: quiz.lessonId,
-      courseId,
+      courseId: context.courseId,
+      courseVersionId: context.versionId,
       userId,
       answers: [],
       score: 0,
@@ -37,9 +41,10 @@ class QuizAttemptService {
     userId: string,
     answers: Array<{ questionId: string; selectedIndex?: number; selectedIndexes?: number[] }>
   ) {
+    const context = await this.resolveCourseQuizContext(courseId);
     const [quiz, attempt] = await Promise.all([
-      Quiz.findOne({ _id: quizId, lessonId, courseId }).lean(),
-      QuizAttempt.findOne({ _id: attemptId, quizId, courseId, lessonId, userId }),
+      Quiz.findOne({ _id: quizId, lessonId, courseId: context.versionId }).lean(),
+      QuizAttempt.findOne({ _id: attemptId, quizId, courseId: context.courseId, courseVersionId: context.versionId, lessonId, userId }),
     ]);
 
     if (!quiz) throw new Error('Quiz không tồn tại.');
@@ -93,6 +98,20 @@ class QuizAttemptService {
     await attempt.save();
 
     return attempt;
+  }
+
+  private async resolveCourseQuizContext(courseId: string): Promise<{ courseId: string; versionId: string }> {
+    const shell = await Course.findById(courseId).select('_id status currentVersionId').lean();
+    if (shell) {
+      if (shell.status !== CourseStatus.PUBLISHED || !shell.currentVersionId) {
+        throw new Error('Khóa học chưa được xuất bản.');
+      }
+      return { courseId: shell._id.toString(), versionId: shell.currentVersionId.toString() };
+    }
+
+    const version = await CourseVersion.findById(courseId).select('_id courseId status').lean();
+    if (!version) throw new Error('Khóa học không tồn tại.');
+    return { courseId: version.courseId.toString(), versionId: version._id.toString() };
   }
 }
 

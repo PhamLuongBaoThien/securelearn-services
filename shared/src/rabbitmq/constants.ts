@@ -38,8 +38,8 @@ export enum RoutingKey {
   // --- Asset Cleanup Events (course-service → media-service) ---
   VIDEO_ASSET_CLEANUP = 'media.video.cleanup',
   DOCUMENT_ASSET_CLEANUP = 'media.document.cleanup',
-}
 
+}
 // ==============================
 // Event Payloads — Interface cho dữ liệu gửi kèm mỗi event
 // ==============================
@@ -102,3 +102,4 @@ export interface AssetAttachedPayload {
   courseId: string;
   lessonId: string;
 }
+

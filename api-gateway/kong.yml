@@ -113,6 +113,7 @@ services:
         paths:
           - /api/courses
           - /api/categories
+          - /api/admin/courses
         strip_path: false
         methods:
           - OPTIONS
@@ -148,6 +149,14 @@ services:
           - PUT
           - PATCH
           - DELETE
+
+      - name: course-admin-protected
+        paths:
+          - /api/admin/courses
+        strip_path: false
+        methods:
+          - GET
+          - PATCH
 
   - name: media-service
     url: http://media-service:5003
@@ -268,6 +277,13 @@ plugins:
 
   - name: jwt
     route: course-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  - name: jwt
+    route: course-admin-protected
     config:
       key_claim_name: iss
       claims_to_verify:

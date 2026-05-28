@@ -33,7 +33,7 @@ export interface ILesson extends Document {
 
 const lessonSchema = new Schema<ILesson>(
   {
-    courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true, index: true },
+    courseId: { type: Schema.Types.ObjectId, ref: 'CourseVersion', required: true, index: true },
     sectionId: { type: Schema.Types.ObjectId, ref: 'Section', required: true, index: true },
     title: { type: String, required: true, trim: true },
     type: { type: String, enum: Object.values(LessonType), default: LessonType.VIDEO },

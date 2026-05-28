@@ -1,5 +1,5 @@
 // File này mount route cho media-service.
-// Tất cả media endpoints hiện đều đi qua extractUser.
+// Tất cả media endpoints đi qua extractUser.
 import { Application } from 'express';
 import documentAssetRoutes from './documentAsset.routes';
 import videoAssetRoutes from './videoAsset.routes';
@@ -11,3 +11,4 @@ const routes = (app: Application) => {
 };
 
 export default routes;
+

@@ -6,17 +6,16 @@
 // - đổi lesson.type phải cleanup reference cũ (video/quiz) để tránh dữ liệu mồ côi
 // - attachments không bị xóa khi đổi type
 import { Types } from 'mongoose';
-import { Course } from '../models/course.model';
+import { CourseVersion } from '../models/courseVersion.model';
 import { ILesson, Lesson, LessonStatus, LessonType } from '../models/lesson.model';
 import { Quiz } from '../models/quiz.model';
 import { Section } from '../models/section.model';
 import courseService from './course.service';
 import {
-  publishVideoAssetCleanup,
-  publishDocumentAssetCleanup,
   publishVideoAssetAttached,
   publishDocumentAssetAttached,
 } from '../events/publishers';
+import mediaReferenceService from './mediaReference.service';
 
 interface MediaAssetBindingSnapshot {
   _id: string;
@@ -123,8 +122,7 @@ class LessonService {
 
     // Phát cleanup event cho video asset
     if (lesson.videoAssetId) {
-      await publishVideoAssetCleanup({
-        assetId: lesson.videoAssetId.toString(),
+      await mediaReferenceService.cleanupVideoIfUnused(lesson.videoAssetId, {
         courseId,
         lessonId,
       });
@@ -132,8 +130,7 @@ class LessonService {
 
     // Phát cleanup event cho toàn bộ attachments
     for (const attachmentId of lesson.attachments) {
-      await publishDocumentAssetCleanup({
-        assetId: attachmentId.toString(),
+      await mediaReferenceService.cleanupDocumentIfUnused(attachmentId, {
         courseId,
         lessonId,
       });
@@ -216,8 +213,7 @@ class LessonService {
     });
 
     if (previousVideoAssetId && previousVideoAssetId !== videoAssetId) {
-      await publishVideoAssetCleanup({
-        assetId: previousVideoAssetId,
+      await mediaReferenceService.cleanupVideoIfUnused(previousVideoAssetId, {
         courseId,
         lessonId,
       });
@@ -233,8 +229,7 @@ class LessonService {
     if (lesson.type !== LessonType.VIDEO) throw new Error('Chỉ bài học video mới được gỡ video asset.');
 
     if (lesson.videoAssetId) {
-      await publishVideoAssetCleanup({
-        assetId: lesson.videoAssetId.toString(),
+      await mediaReferenceService.cleanupVideoIfUnused(lesson.videoAssetId, {
         courseId,
         lessonId,
       });
@@ -314,8 +309,7 @@ class LessonService {
     await lesson.save();
 
     // Phát cleanup event để media-service xóa file vật lý + record DB
-    await publishDocumentAssetCleanup({
-      assetId: documentAssetId,
+    await mediaReferenceService.cleanupDocumentIfUnused(documentAssetId, {
       courseId,
       lessonId,
     });
@@ -351,10 +345,11 @@ class LessonService {
 
   // dùng để đảm bảo giảng viên sở hữu khóa học
   private async assertCourseOwnership(courseId: string, instructorId: string) {
-    const course = await Course.findById(courseId);
-    if (!course) throw new Error('Khóa học không tồn tại.');
-    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền truy cập khóa học này.');
-    return course;
+    const version = await CourseVersion.findById(courseId);
+    if (!version) throw new Error('Bản nội dung khóa học không tồn tại.');
+    if (version.instructorId !== instructorId) throw new Error('Bạn không có quyền truy cập khóa học này.');
+    courseService.assertCourseEditable(version.status);
+    return version;
   }
   // dùng để đảm bảo giảng viên sở hữu khóa học và section
   private async assertCourseAndSectionOwnership(courseId: string, sectionId: string, instructorId: string) {
@@ -382,8 +377,7 @@ class LessonService {
     const lessonId = lesson._id.toString();
 
     if (lesson.videoAssetId) {
-      await publishVideoAssetCleanup({
-        assetId: lesson.videoAssetId.toString(),
+      await mediaReferenceService.cleanupVideoIfUnused(lesson.videoAssetId, {
         courseId,
         lessonId,
       });

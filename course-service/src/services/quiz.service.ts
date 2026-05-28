@@ -4,6 +4,8 @@
 // - API cho instructor và API cho học viên tách riêng
 // - API cho học viên không được lộ đáp án đúng
 import { Types } from 'mongoose';
+import { Course, CourseStatus } from '../models/course.model';
+import { CourseVersion } from '../models/courseVersion.model';
 import { Lesson, LessonStatus, LessonType } from '../models/lesson.model';
 import { IQuizQuestion, Quiz, QuizQuestionType } from '../models/quiz.model';
 import courseService from './course.service';
@@ -29,7 +31,7 @@ interface QuizPayload {
 class QuizService {
   // Tạo quiz xong sẽ bind trạng thái READY vào lesson tương ứng.
   public async createQuiz(courseId: string, lessonId: string, instructorId: string, payload: QuizPayload) {
-    const lesson = await this.assertQuizLesson(courseId, lessonId, instructorId);
+    const lesson = await this.assertQuizLesson(courseId, lessonId, instructorId, true);
     const existingQuiz = await Quiz.findOne({ lessonId: lesson._id }).select('_id').lean();
     if (existingQuiz) {
       throw new Error('Bài học này đã có quiz. Vui lòng dùng cập nhật.');
@@ -52,7 +54,7 @@ class QuizService {
   }
 
   public async updateQuiz(courseId: string, lessonId: string, instructorId: string, payload: QuizPayload) {
-    const lesson = await this.assertQuizLesson(courseId, lessonId, instructorId);
+    const lesson = await this.assertQuizLesson(courseId, lessonId, instructorId, true);
     const quiz = await Quiz.findOne({ lessonId: lesson._id, courseId: lesson.courseId });
     if (!quiz) throw new Error('Quiz không tồn tại.');
 
@@ -71,13 +73,14 @@ class QuizService {
 
   // Khi instructor làm bài test/editor, dùng API manage để lấy đầy đủ quiz.
   public async getQuizForManage(courseId: string, lessonId: string, instructorId: string) {
-    const lesson = await this.assertQuizLesson(courseId, lessonId, instructorId);
+    const lesson = await this.assertQuizLesson(courseId, lessonId, instructorId, false);
     return Quiz.findOne({ lessonId: lesson._id, courseId: lesson.courseId }).lean();
   }
 
   // Đây là payload dành cho học viên làm bài, đã ẩn đáp án đúng.
   public async getQuizForAttempt(courseId: string, lessonId: string, _userId: string) {
-    const lesson = await Lesson.findOne({ courseId, _id: lessonId }).lean();
+    const versionId = await this.resolveQuizAttemptVersionId(courseId);
+    const lesson = await Lesson.findOne({ courseId: versionId, _id: lessonId }).lean();
     if (!lesson) throw new Error('Bài học không tồn tại.');
     if (lesson.type !== LessonType.QUIZ) throw new Error('Bài học này chưa có quiz.');
 
@@ -101,9 +104,25 @@ class QuizService {
       })),
     };
   }
+
+  private async resolveQuizAttemptVersionId(courseId: string): Promise<string> {
+    const shell = await Course.findById(courseId).select('_id status currentVersionId').lean();
+    if (shell) {
+      if (shell.status !== CourseStatus.PUBLISHED || !shell.currentVersionId) {
+        throw new Error('Khóa học chưa được xuất bản.');
+      }
+      return shell.currentVersionId.toString();
+    }
+
+    const version = await CourseVersion.findById(courseId).select('_id').lean();
+    if (!version) throw new Error('Khóa học không tồn tại.');
+    return version._id.toString();
+  }
+
   // kiểm tra quyền của instructor và bài học có phải là QUIZ không.
-  private async assertQuizLesson(courseId: string, lessonId: string, _instructorId: string) {
-    await courseService.getOwnedCourseOrThrow(courseId, _instructorId);
+  private async assertQuizLesson(courseId: string, lessonId: string, _instructorId: string, requireEditable: boolean) {
+    const course = await courseService.getOwnedCourseOrThrow(courseId, _instructorId);
+    if (requireEditable) courseService.assertCourseEditable(course.status);
     const lesson = await Lesson.findOne({ _id: lessonId, courseId });
     if (!lesson) throw new Error('Bài học không tồn tại.');
     if (lesson.type !== LessonType.QUIZ) throw new Error('Bài học này không phải loại quiz.');

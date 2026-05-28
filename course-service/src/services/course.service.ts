@@ -1,21 +1,12 @@
-// ========================
-// File này chứa service trung tâm của course-service.
-// Vai trò chính:
-// - quản lý metadata khóa học
-// - dựng response course cho editor/public
-// - đồng bộ thống kê course
-// - kiểm tra điều kiện publish
-// Lưu ý:
-// - hướng mới là CRUD section/lesson riêng, không còn đặt nặng flow replace toàn bộ curriculum
-// - validate publish đang là chốt nghiệp vụ chính trước khi cho publish course
-// ========================
 import { Types } from 'mongoose';
 import { Course, ICourse, CourseStatus } from '../models/course.model';
+import { CourseVersion, ICourseVersion } from '../models/courseVersion.model';
 import { Lesson, LessonStatus, LessonType } from '../models/lesson.model';
 import { Quiz } from '../models/quiz.model';
 import { Section } from '../models/section.model';
-import { publishCourseCreated, publishVideoAssetCleanup, publishDocumentAssetCleanup } from '../events/publishers';
+import { publishCourseCreated } from '../events/publishers';
 import categoryService from './category.service';
+import mediaReferenceService from './mediaReference.service';
 
 interface CourseLessonResponse {
   _id: string;
@@ -27,15 +18,14 @@ interface CourseLessonResponse {
   order: number;
   isFreePreview: boolean;
   videoAssetId: string | null;
-  attachments: string[];           // Tài liệu đính kèm
+  attachments: string[];
   quizId: string | null;
-  contentMeta: {
-    questionCount?: number;
-  } | null;
+  contentMeta: { questionCount?: number } | null;
 }
 
 interface CourseResponse {
   _id: string;
+  courseId: string;
   title: string;
   slug: string;
   shortDescription: string;
@@ -46,21 +36,22 @@ interface CourseResponse {
   instructorId: string;
   instructorName: string;
   categoryId: string | null;
-  category: {
-    _id: string;
-    name: string;
-    slug: string;
-    parentId: string | null;
-  } | null;
+  category: { _id: string; name: string; slug: string; parentId: string | null } | null;
   level: string;
   status: string;
-  price: number;
-  sections: Array<{
+  submittedAt: Date | null;
+  reviewedAt: Date | null;
+  reviewedBy: string;
+  rejectionReason: string;
+  activeRevision?: {
     _id: string;
-    title: string;
-    order: number;
-    lessons: CourseLessonResponse[];
-  }>;
+    status: string;
+    rejectionReason: string;
+    submittedAt: Date | null;
+    updatedAt: Date;
+  } | null;
+  price: number;
+  sections: Array<{ _id: string; title: string; order: number; lessons: CourseLessonResponse[] }>;
   totalDuration: number;
   totalLessons: number;
   totalSections: number;
@@ -69,8 +60,10 @@ interface CourseResponse {
   updatedAt: Date;
 }
 
-type CourseDocumentLike = {
+type VersionLike = {
   _id: Types.ObjectId;
+  courseId: Types.ObjectId;
+  versionNumber: number;
   title: string;
   slug: string;
   shortDescription?: string;
@@ -81,7 +74,7 @@ type CourseDocumentLike = {
   instructorId: string;
   instructorName: string;
   categoryId?:
-    | (Types.ObjectId & { name?: never })
+    | Types.ObjectId
     | {
         _id: Types.ObjectId;
         name: string;
@@ -91,102 +84,128 @@ type CourseDocumentLike = {
     | null;
   level: string;
   status: string;
+  submittedAt?: Date | null;
+  reviewedAt?: Date | null;
+  reviewedBy?: string;
+  rejectionReason?: string;
   price: number;
   totalDuration: number;
   totalLessons: number;
   totalSections?: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type CourseShellLike = {
+  _id: Types.ObjectId;
+  title: string;
+  slug: string;
+  thumbnail: string;
+  instructorId: string;
+  instructorName: string;
+  status: string;
+  currentVersionId?: Types.ObjectId | null;
+  draftVersionId?: Types.ObjectId | null;
   enrollmentCount: number;
   createdAt: Date;
   updatedAt: Date;
 };
 
+interface CourseReviewResponse {
+  _id: string;
+  title: string;
+  slug: string;
+  description: string;
+  thumbnailUrl: string;
+  instructor: { _id: string; fullName: string; email: string };
+  category: string;
+  level: string;
+  price: number;
+  status: string;
+  totalLessons: number;
+  totalChapters: number;
+  totalDuration: number;
+  submittedAt: Date | null;
+  rejectionReason: string;
+  createdAt: Date;
+  isRevision: boolean;
+  courseId: string;
+}
+
 class CourseService {
-  // Rule publish hiện tại:
-  // - course phải có title, thumbnail, category
-  // - phải có ít nhất 1 section
-  // - mỗi section phải có ít nhất 1 lesson
-  // - lesson phải READY
-  // - VIDEO cần videoAssetId, QUIZ cần có quiz + ít nhất 1 câu hỏi
-  public async validateCoursePublish(courseId: string, instructorId: string) {
-    const course = await Course.findById(courseId).lean();
-    if (!course) throw new Error('Khóa học không tồn tại.');
-    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền truy cập khóa học này.');
+  // Kiểm tra đủ điều kiện trước khi instructor gửi CourseVersion cho admin duyệt.
+  // Hàm trả thêm message đã format sẵn để frontend đưa thẳng vào toast.
+  public async validateCoursePublish(versionId: string, instructorId: string) {
+    const version = await CourseVersion.findById(versionId).lean();
+    if (!version) throw new Error('Bản nội dung khóa học không tồn tại.');
+    if (version.instructorId !== instructorId) throw new Error('Bạn không có quyền truy cập khóa học này.');
 
     const errors: Array<{ field: string; message: string; sectionId?: string; lessonId?: string }> = [];
+    const sectionErrorGroups = new Map<string, { title: string; items: string[] }>();
 
-    if (!course.title?.trim()) errors.push({ field: 'title', message: 'Khóa học chưa có tiêu đề.' });
-    if (!course.thumbnail?.trim()) errors.push({ field: 'thumbnail', message: 'Khóa học chưa có ảnh đại diện.' });
-    if (!course.categoryId) errors.push({ field: 'categoryId', message: 'Khóa học chưa có danh mục.' });
+    const addSectionError = (sectionId: string, sectionTitle: string, item: string) => {
+      const group = sectionErrorGroups.get(sectionId);
+      if (group) group.items.push(item);
+      else sectionErrorGroups.set(sectionId, { title: sectionTitle, items: [item] });
+    };
+
+    if (!version.title?.trim()) errors.push({ field: 'title', message: 'Khóa học chưa có tiêu đề.' });
+    if (!version.thumbnail?.trim()) errors.push({ field: 'thumbnail', message: 'Khóa học chưa có ảnh đại diện.' });
+    if (!version.categoryId) errors.push({ field: 'categoryId', message: 'Khóa học chưa có danh mục.' });
 
     const [sections, lessons] = await Promise.all([
-      Section.find({ courseId }).sort({ order: 1 }).lean(),
-      Lesson.find({ courseId }).sort({ order: 1 }).lean(),
+      Section.find({ courseId: version._id }).sort({ order: 1 }).lean(),
+      Lesson.find({ courseId: version._id }).sort({ order: 1 }).lean(),
     ]);
 
-    if (sections.length === 0) {
-      errors.push({ field: 'sections', message: 'Khóa học phải có ít nhất 1 chương.' });
-    }
+    if (sections.length === 0) errors.push({ field: 'sections', message: 'Khóa học phải có ít nhất 1 chương.' });
 
     const lessonIds = lessons.map((lesson) => lesson._id);
-    const quizzes = lessonIds.length > 0
-      ? await Quiz.find({ courseId, lessonId: { $in: lessonIds } }).select('lessonId questions').lean()
+    const quizzes = lessonIds.length
+      ? await Quiz.find({ courseId: version._id, lessonId: { $in: lessonIds } }).select('lessonId questions').lean()
       : [];
     const quizByLessonId = new Map(quizzes.map((quiz) => [quiz.lessonId.toString(), quiz]));
 
     for (const section of sections) {
       const sectionLessons = lessons.filter((lesson) => lesson.sectionId.toString() === section._id.toString());
       if (sectionLessons.length === 0) {
-        errors.push({
-          field: 'section.lessons',
-          message: `Chương "${section.title}" chưa có bài học nào.`,
-          sectionId: section._id.toString(),
-        });
+        errors.push({ field: 'section.lessons', message: `Chương "${section.title}" chưa có bài học nào.`, sectionId: section._id.toString() });
+        addSectionError(section._id.toString(), section.title, 'Chưa có bài học nào.');
       }
 
       for (const lesson of sectionLessons) {
-        if (lesson.status !== LessonStatus.READY) {
-          errors.push({
-            field: 'lesson.status',
-            message: `Bài học "${lesson.title}" chưa sẵn sàng.`,
-            sectionId: section._id.toString(),
-            lessonId: lesson._id.toString(),
-          });
-        }
+        const sectionId = section._id.toString();
+        const lessonId = lesson._id.toString();
+        const lessonLabel = `Chương "${section.title}" / Bài "${lesson.title}"`;
 
         if (lesson.type === LessonType.VIDEO && !lesson.videoAssetId) {
-          errors.push({
-            field: 'lesson.videoAssetId',
-            message: `Bài học "${lesson.title}" chưa gắn video asset.`,
-            sectionId: section._id.toString(),
-            lessonId: lesson._id.toString(),
-          });
+          errors.push({ field: 'lesson.videoAssetId', message: `${lessonLabel}: chưa có video.`, sectionId, lessonId });
+          addSectionError(sectionId, section.title, `${lesson.title}: chưa có video.`);
+          continue;
         }
 
         if (lesson.type === LessonType.QUIZ) {
           const quiz = quizByLessonId.get(lesson._id.toString());
           if (!quiz) {
-            errors.push({
-              field: 'quiz.lessonId',
-              message: `Bài học "${lesson.title}" chưa có quiz.`,
-              sectionId: section._id.toString(),
-              lessonId: lesson._id.toString(),
-            });
-          } else if (quiz.questions.length === 0) {
-            errors.push({
-              field: 'quiz.questions',
-              message: `Quiz của bài học "${lesson.title}" chưa có câu hỏi.`,
-              sectionId: section._id.toString(),
-              lessonId: lesson._id.toString(),
-            });
+            errors.push({ field: 'quiz.lessonId', message: `${lessonLabel}: chưa tạo quiz.`, sectionId, lessonId });
+            addSectionError(sectionId, section.title, `${lesson.title}: chưa tạo quiz.`);
+            continue;
           }
+          if (quiz.questions.length === 0) {
+            errors.push({ field: 'quiz.questions', message: `${lessonLabel}: quiz chưa có câu hỏi.`, sectionId, lessonId });
+            addSectionError(sectionId, section.title, `${lesson.title}: quiz chưa có câu hỏi.`);
+            continue;
+          }
+        }
+
+        if (lesson.status !== LessonStatus.READY) {
+          errors.push({ field: 'lesson.status', message: `${lessonLabel}: nội dung chưa sẵn sàng.`, sectionId, lessonId });
+          addSectionError(sectionId, section.title, `${lesson.title}: nội dung chưa sẵn sàng.`);
         }
       }
     }
 
-    return {
-      ok: errors.length === 0,
-      errors,
-    };
+    return { ok: errors.length === 0, errors, message: this.formatPublishValidationMessage(errors, sectionErrorGroups) };
   }
 
   public async createCourse(data: {
@@ -198,162 +217,286 @@ class CourseService {
     instructorId: string;
     instructorName: string;
   }): Promise<CourseResponse> {
-    let resolvedCategoryId: Types.ObjectId | null = null;
-    if (data.categoryId) {
-      const category = await categoryService.resolveActiveCategoryById(data.categoryId);
-      resolvedCategoryId = category._id as Types.ObjectId;
-    }
+    const resolvedCategoryId = data.categoryId
+      ? (await categoryService.resolveActiveCategoryById(data.categoryId))._id as Types.ObjectId
+      : null;
 
-    const course = new Course({
+    // Tạo Course shell trước để có Course._id ổn định cho catalog/enrollment sau này.
+    const shell = new Course({
       ...data,
       categoryId: resolvedCategoryId,
       status: CourseStatus.DRAFT,
     });
+    await shell.save();
 
-    await course.save();
-
-    await publishCourseCreated({
-      courseId: course._id.toString(),
-      title: course.title,
-      instructorId: course.instructorId,
+    // Khóa mới luôn có version 1 dạng DRAFT; editor làm việc với id của version này.
+    const version = await CourseVersion.create({
+      courseId: shell._id,
+      versionNumber: 1,
+      title: shell.title,
+      slug: shell.slug,
+      shortDescription: shell.shortDescription,
+      description: data.description || '',
+      thumbnail: shell.thumbnail,
+      whatYouWillLearn: shell.whatYouWillLearn,
+      requirements: shell.requirements,
+      instructorId: shell.instructorId,
+      instructorName: shell.instructorName,
+      categoryId: shell.categoryId,
+      level: shell.level,
+      status: CourseStatus.DRAFT,
+      price: shell.price,
     });
 
-    return (await this.getCourseById(course._id.toString())) as CourseResponse;
+    shell.draftVersionId = version._id as Types.ObjectId;
+    await shell.save();
+
+    await publishCourseCreated({ courseId: shell._id.toString(), title: shell.title, instructorId: shell.instructorId });
+    return this.buildVersionResponse(version._id.toString(), shell);
   }
 
   public async getMyCourses(instructorId: string): Promise<CourseResponse[]> {
-    const courses = await Course.find({ instructorId })
-      .populate('categoryId', 'name slug parentId')
-      .sort({ createdAt: -1 })
-      .lean();
+    const shells = await Course.find({ instructorId }).sort({ createdAt: -1 }).lean();
 
-    return courses.map((course) => this.mapCourseResponse(course as unknown as CourseDocumentLike, []));
+    const versionIds = shells.flatMap((shell) => [shell.currentVersionId, shell.draftVersionId].filter(Boolean) as Types.ObjectId[]);
+    const versions = versionIds.length
+      ? await CourseVersion.find({ _id: { $in: versionIds } }).populate('categoryId', 'name slug parentId').lean()
+      : [];
+    const versionById = new Map(versions.map((version) => [version._id.toString(), version as unknown as VersionLike]));
+
+    return shells.map((shell) => {
+      const current = shell.currentVersionId ? versionById.get(shell.currentVersionId.toString()) : undefined;
+      const draft = shell.draftVersionId ? versionById.get(shell.draftVersionId.toString()) : undefined;
+      const primary = shell.status === CourseStatus.PUBLISHED && current ? current : draft || current;
+      const response = this.mapVersionResponse(primary as VersionLike, shell as unknown as CourseShellLike, []);
+      response._id = shell.status === CourseStatus.PUBLISHED ? shell._id.toString() : primary!._id.toString();
+      response.status = shell.status === CourseStatus.PUBLISHED ? shell.status : primary!.status;
+      response.activeRevision = shell.status === CourseStatus.PUBLISHED && draft ? this.mapActiveRevision(draft) : null;
+      return response;
+    });
   }
 
-  public async getCourseForManage(courseId: string, instructorId: string): Promise<CourseResponse> {
-    const course = await this.getOwnedCourseOrThrow(courseId, instructorId, true);
-    return this.buildCourseResponse(course as unknown as CourseDocumentLike);
+  public async getCourseForManage(versionId: string, instructorId: string): Promise<CourseResponse> {
+    const { version, shell } = await this.getOwnedVersionOrThrow(versionId, instructorId, true);
+    return this.buildVersionResponse(version._id.toString(), shell);
   }
 
-  // File editor hiện tại chủ yếu gọi hàm này để cập nhật metadata course.
-  // Curriculum item-level đã được tách sang section.service và lesson.service.
   public async updateCourse(
-    courseId: string,
+    versionId: string,
     instructorId: string,
     data: Partial<Pick<ICourse, 'title' | 'shortDescription' | 'description' | 'thumbnail' | 'whatYouWillLearn' | 'requirements' | 'level' | 'price'>> & { categoryId?: string }
   ): Promise<CourseResponse> {
-    const course = await Course.findById(courseId);
-    if (!course) throw new Error('Khóa học không tồn tại.');
-    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền chỉnh sửa khóa học này.');
+    const { version, shell } = await this.getOwnedVersionOrThrow(versionId, instructorId);
+    this.assertCourseEditable(version.status);
 
-    if (data.title !== undefined) course.title = data.title;
-    if (data.shortDescription !== undefined) course.shortDescription = data.shortDescription;
-    if (data.description !== undefined) course.description = data.description;
-    if (data.thumbnail !== undefined) course.thumbnail = data.thumbnail;
-    if (data.whatYouWillLearn !== undefined) course.whatYouWillLearn = data.whatYouWillLearn;
-    if (data.requirements !== undefined) course.requirements = data.requirements;
+    if (data.title !== undefined) version.title = data.title;
+    if (data.shortDescription !== undefined) version.shortDescription = data.shortDescription;
+    if (data.description !== undefined) version.description = data.description;
+    if (data.thumbnail !== undefined) version.thumbnail = data.thumbnail;
+    if (data.whatYouWillLearn !== undefined) version.whatYouWillLearn = data.whatYouWillLearn;
+    if (data.requirements !== undefined) version.requirements = data.requirements;
     if (data.categoryId !== undefined) {
-      if (!data.categoryId) {
-        course.categoryId = null;
-      } else {
-        const category = await categoryService.resolveActiveCategoryById(data.categoryId);
-        course.categoryId = category._id as Types.ObjectId;
-      }
+      version.categoryId = data.categoryId ? (await categoryService.resolveActiveCategoryById(data.categoryId))._id as Types.ObjectId : null;
     }
-    if (data.level !== undefined) course.level = data.level;
-    if (data.price !== undefined) course.price = data.price;
+    if (data.level !== undefined) version.level = data.level as any;
+    if (data.price !== undefined) version.price = data.price;
 
-    await course.save();
-
-    return (await this.getCourseById(course._id.toString())) as CourseResponse;
+    await version.save();
+    await this.syncShellDraftCache(shell._id.toString(), version);
+    return this.buildVersionResponse(version._id.toString(), shell);
   }
 
-  public async deleteCourse(courseId: string, instructorId: string): Promise<void> {
-    const course = await Course.findById(courseId);
-    if (!course) throw new Error('Khóa học không tồn tại.');
-    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền xóa khóa học này.');
+  public async deleteCourse(id: string, instructorId: string): Promise<void> {
+    const shell = await Course.findOne({ _id: id, instructorId });
+    const version = shell ? null : await CourseVersion.findOne({ _id: id, instructorId });
+    if (!shell && !version) throw new Error('Khóa học không tồn tại.');
 
-    // Load đầy đủ asset fields để phát cleanup events
-    const lessons = await Lesson.find({ courseId: course._id })
-      .select('_id videoAssetId attachments')
-      .lean();
+    const targetShell = shell || await Course.findById(version!.courseId);
+    if (!targetShell) throw new Error('Khóa học không tồn tại.');
+    if (targetShell.status === CourseStatus.PUBLISHED && shell) throw new Error('Khóa học đã xuất bản không thể xóa trực tiếp.');
+    if (version && version.status === CourseStatus.PUBLISHED) throw new Error('Bản nội dung đã xuất bản không thể xóa trực tiếp.');
+
+    const shouldDeleteShell = Boolean(shell || (version && !targetShell.currentVersionId));
+    const versionIds = shouldDeleteShell
+      ? await CourseVersion.find({ courseId: targetShell._id }).select('_id').lean()
+      : [{ _id: version!._id }];
+    const ids = versionIds.map((item) => item._id);
+    // Cleanup media theo batch trước khi xóa lesson để tránh bỏ sót asset dùng chung giữa nhiều version bị xóa cùng lúc.
+    const lessons = await Lesson.find({ courseId: { $in: ids } }).select('_id courseId videoAssetId attachments').lean();
+    await mediaReferenceService.cleanupMediaForRemovedLessons(lessons);
+
     const lessonIds = lessons.map((lesson) => lesson._id);
-
-    // Phát cleanup events cho toàn bộ media assets song song TRƯỚC khi xoá DB
-    const cleanupPromises: Promise<void>[] = [];
-    for (const lesson of lessons) {
-      if (lesson.videoAssetId) {
-        cleanupPromises.push(
-          publishVideoAssetCleanup({
-            assetId: lesson.videoAssetId.toString(),
-            courseId,
-            lessonId: lesson._id.toString(),
-          })
-        );
-      }
-      // Cleanup toàn bộ attachments
-      for (const attachmentId of (lesson.attachments || [])) {
-        cleanupPromises.push(
-          publishDocumentAssetCleanup({
-            assetId: attachmentId.toString(),
-            courseId,
-            lessonId: lesson._id.toString(),
-          })
-        );
-      }
-    }
-    await Promise.all(cleanupPromises);
-
-    // Xoá toàn bộ DB records sau khi đã phát events
     await Promise.all([
-      lessonIds.length > 0 ? Quiz.deleteMany({ courseId: course._id, lessonId: { $in: lessonIds } }) : Promise.resolve(),
-      Section.deleteMany({ courseId: course._id }),
-      Lesson.deleteMany({ courseId: course._id }),
-      Course.findByIdAndDelete(courseId),
+      lessonIds.length ? Quiz.deleteMany({ lessonId: { $in: lessonIds } }) : Promise.resolve(),
+      Section.deleteMany({ courseId: { $in: ids } }),
+      Lesson.deleteMany({ courseId: { $in: ids } }),
+      CourseVersion.deleteMany({ _id: { $in: ids } }),
+      shouldDeleteShell ? Course.findByIdAndDelete(targetShell._id) : Course.findByIdAndUpdate(targetShell._id, { $set: { draftVersionId: null } }),
     ]);
   }
 
-  public async publishCourse(courseId: string, instructorId: string): Promise<CourseResponse> {
-    const course = await Course.findById(courseId);
-    if (!course) throw new Error('Khóa học không tồn tại.');
-    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền publish khóa học này.');
+  public async submitCourseForReview(versionId: string, instructorId: string): Promise<CourseResponse> {
+    const { version, shell } = await this.getOwnedVersionOrThrow(versionId, instructorId);
+    if (![CourseStatus.DRAFT, CourseStatus.REJECTED].includes(version.status as CourseStatus)) {
+      throw new Error('Chỉ bản nháp hoặc bản cần chỉnh sửa mới có thể gửi duyệt.');
+    }
+    const validation = await this.validateCoursePublish(versionId, instructorId);
+    if (!validation.ok) throw new Error(validation.message || validation.errors[0].message);
+    if (!version.categoryId) throw new Error('Khóa học chưa có danh mục hợp lệ.');
+    await categoryService.resolveActiveCategoryById(version.categoryId.toString());
 
-    const validation = await this.validateCoursePublish(courseId, instructorId);
-    if (!validation.ok) {
-      throw new Error(validation.errors[0].message);
+    // Instructor chỉ chuyển version sang PENDING; Course chỉ public sau khi admin approve.
+    version.status = CourseStatus.PENDING;
+    version.submittedAt = new Date();
+    version.reviewedAt = null;
+    version.reviewedBy = '';
+    version.rejectionReason = '';
+    await version.save();
+
+    if (shell.status !== CourseStatus.PUBLISHED) {
+      shell.status = CourseStatus.PENDING;
+      await this.syncShellDraftCache(shell._id.toString(), version);
     }
 
-    if (!course.categoryId) {
-      throw new Error('Khóa học chưa có danh mục hợp lệ.');
-    }
-
-    await categoryService.resolveActiveCategoryById(course.categoryId.toString());
-
-    course.status = CourseStatus.PUBLISHED;
-    await course.save();
-
-    return (await this.getCourseById(course._id.toString())) as CourseResponse;
+    return this.buildVersionResponse(version._id.toString(), shell);
   }
 
-  public async getPublishedCourses(query: {
-    page?: number;
-    limit?: number;
-    search?: string;
-    category?: string;
-    level?: string;
-  }): Promise<{ courses: CourseResponse[]; total: number; page: number; totalPages: number }> {
+  // Với khóa đã PUBLISHED, giảng viên không sửa currentVersion trực tiếp.
+  // Hệ thống tạo/lấy draftVersion mới và copy curriculum hiện tại sang để chỉnh sửa an toàn.
+  public async createOrGetRevision(courseId: string, instructorId: string): Promise<CourseResponse> {
+    const shell = await Course.findById(courseId);
+    if (!shell) throw new Error('Khóa học không tồn tại.');
+    if (shell.instructorId !== instructorId) throw new Error('Bạn không có quyền chỉnh sửa khóa học này.');
+    if (shell.status !== CourseStatus.PUBLISHED) throw new Error('Chỉ khóa học đã xuất bản mới cần tạo bản cập nhật.');
+
+    if (shell.draftVersionId) {
+      const existing = await CourseVersion.findOne({
+        _id: shell.draftVersionId,
+        status: { $in: [CourseStatus.DRAFT, CourseStatus.PENDING, CourseStatus.REJECTED] },
+      });
+      if (existing) return this.buildVersionResponse(existing._id.toString(), shell);
+    }
+
+    const current = await CourseVersion.findById(shell.currentVersionId);
+    if (!current) throw new Error('Khóa học chưa có phiên bản public để tạo bản cập nhật.');
+    const versionNumber = await CourseVersion.countDocuments({ courseId: shell._id }) + 1;
+    const draft = await CourseVersion.create({
+      courseId: shell._id,
+      versionNumber,
+      title: current.title,
+      slug: current.slug,
+      shortDescription: current.shortDescription,
+      description: current.description,
+      thumbnail: current.thumbnail,
+      whatYouWillLearn: current.whatYouWillLearn,
+      requirements: current.requirements,
+      instructorId: current.instructorId,
+      instructorName: current.instructorName,
+      categoryId: current.categoryId,
+      level: current.level,
+      status: CourseStatus.DRAFT,
+      price: current.price,
+    });
+
+    await this.copyCurriculum(current._id as Types.ObjectId, draft._id as Types.ObjectId);
+    await this.syncCourseStats(draft._id as Types.ObjectId);
+    shell.draftVersionId = draft._id as Types.ObjectId;
+    await shell.save();
+
+    return this.buildVersionResponse(draft._id.toString(), shell);
+  }
+
+  public async getCoursesForReview(query: { page?: number; limit?: number; search?: string; status?: string }): Promise<{ courses: CourseReviewResponse[]; total: number; page: number; totalPages: number }> {
     const page = query.page || 1;
-    const limit = query.limit || 12;
+    const limit = query.limit || 20;
     const skip = (page - 1) * limit;
-
-    const filter: Record<string, unknown> = { status: CourseStatus.PUBLISHED };
-
+    const filter: Record<string, unknown> = { status: query.status || CourseStatus.PENDING };
     if (query.search) {
       filter.$or = [
         { title: { $regex: query.search, $options: 'i' } },
-        { description: { $regex: query.search, $options: 'i' } },
+        { instructorName: { $regex: query.search, $options: 'i' } },
       ];
     }
+
+    // Admin review làm việc trực tiếp trên CourseVersion PENDING, gồm cả khóa mới và bản cập nhật.
+    const [versions, total] = await Promise.all([
+      CourseVersion.find(filter).populate('categoryId', 'name slug parentId').sort({ submittedAt: -1, updatedAt: -1 }).skip(skip).limit(limit).lean(),
+      CourseVersion.countDocuments(filter),
+    ]);
+
+    return { courses: versions.map((version) => this.mapCourseReviewResponse(version as unknown as VersionLike)), total, page, totalPages: Math.ceil(total / limit) };
+  }
+
+  public async getCourseReviewDetail(versionId: string): Promise<CourseResponse> {
+    const version = await CourseVersion.findById(versionId).populate('categoryId', 'name slug parentId').lean();
+    if (!version) throw new Error('Bản nội dung khóa học không tồn tại.');
+    const shell = await Course.findById(version.courseId).lean();
+    if (!shell) throw new Error('Khóa học gốc không tồn tại.');
+    return this.buildVersionResponse(version._id.toString(), shell as unknown as CourseShellLike);
+  }
+
+  public async approveCourse(versionId: string, adminId: string): Promise<CourseReviewResponse> {
+    const version = await CourseVersion.findById(versionId);
+    if (!version) throw new Error('Bản nội dung khóa học không tồn tại.');
+    if (version.status !== CourseStatus.PENDING) throw new Error('Chỉ khóa học đang chờ duyệt mới có thể phê duyệt.');
+
+    const shell = await Course.findById(version.courseId);
+    if (!shell) throw new Error('Khóa học gốc không tồn tại.');
+
+    // Approve bản cập nhật: version cũ thành ARCHIVED, version mới thành currentVersionId.
+    if (shell.currentVersionId && shell.currentVersionId.toString() !== version._id.toString()) {
+      await CourseVersion.findByIdAndUpdate(shell.currentVersionId, { $set: { status: CourseStatus.ARCHIVED } });
+    }
+
+    version.status = CourseStatus.PUBLISHED;
+    version.reviewedAt = new Date();
+    version.reviewedBy = adminId;
+    version.rejectionReason = '';
+    await version.save();
+
+    shell.currentVersionId = version._id as Types.ObjectId;
+    shell.draftVersionId = null;
+    shell.status = CourseStatus.PUBLISHED;
+    await this.syncShellDraftCache(shell._id.toString(), version, shell);
+    // Sau khi public version mới, xóa media chỉ còn nằm trong archived versions.
+    await mediaReferenceService.cleanupArchivedVersionMedia(shell._id as Types.ObjectId);
+
+    const approved = await CourseVersion.findById(version._id).populate('categoryId', 'name slug parentId').lean();
+    return this.mapCourseReviewResponse(approved as unknown as VersionLike);
+  }
+
+  public async rejectCourse(versionId: string, adminId: string, reason: string): Promise<CourseReviewResponse> {
+    const normalizedReason = reason?.trim();
+    if (!normalizedReason) throw new Error('Vui lòng nhập góp ý chỉnh sửa.');
+
+    const version = await CourseVersion.findById(versionId);
+    if (!version) throw new Error('Bản nội dung khóa học không tồn tại.');
+    if (version.status !== CourseStatus.PENDING) throw new Error('Chỉ khóa học đang chờ duyệt mới có thể yêu cầu chỉnh sửa.');
+
+    // Reject không đụng vào currentVersion public; instructor sửa lại chính version này rồi gửi duyệt lại.
+    version.status = CourseStatus.REJECTED;
+    version.reviewedAt = new Date();
+    version.reviewedBy = adminId;
+    version.rejectionReason = normalizedReason;
+    await version.save();
+
+    const shell = await Course.findById(version.courseId);
+    if (shell && shell.status !== CourseStatus.PUBLISHED) {
+      shell.status = CourseStatus.REJECTED;
+      await shell.save();
+    }
+
+    const rejected = await CourseVersion.findById(version._id).populate('categoryId', 'name slug parentId').lean();
+    return this.mapCourseReviewResponse(rejected as unknown as VersionLike);
+  }
+
+  public async getPublishedCourses(query: { page?: number; limit?: number; search?: string; category?: string; level?: string }): Promise<{ courses: CourseResponse[]; total: number; page: number; totalPages: number }> {
+    const page = query.page || 1;
+    const limit = query.limit || 12;
+    const skip = (page - 1) * limit;
+    const filter: Record<string, unknown> = { status: CourseStatus.PUBLISHED, currentVersionId: { $ne: null } };
+
+    if (query.search) filter.$or = [{ title: { $regex: query.search, $options: 'i' } }, { description: { $regex: query.search, $options: 'i' } }];
     if (query.category) {
       const category = await categoryService.resolveActiveCategorySlug(query.category);
       const categoryIds = await categoryService.getDescendantAndSelfIds(category._id.toString());
@@ -361,102 +504,189 @@ class CourseService {
     }
     if (query.level) filter.level = query.level;
 
-    const [courses, total] = await Promise.all([
-      Course.find(filter)
-        .populate('categoryId', 'name slug parentId')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
+    // Public catalog chỉ lấy Course shell đã PUBLISHED rồi hydrate nội dung từ currentVersionId.
+    const [shells, total] = await Promise.all([
+      Course.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       Course.countDocuments(filter),
     ]);
 
-    return {
-      courses: courses.map((course) => this.mapCourseResponse(course as unknown as CourseDocumentLike, [])),
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
-    };
+    const responses = await Promise.all(shells.map((shell) => this.buildVersionResponse(shell.currentVersionId!.toString(), shell as unknown as CourseShellLike, true)));
+    responses.forEach((response, index) => { response._id = shells[index]._id.toString(); });
+    return { courses: responses, total, page, totalPages: Math.ceil(total / limit) };
   }
 
   public async getCourseBySlug(slug: string): Promise<CourseResponse> {
-    const course = await Course.findOne({ slug, status: CourseStatus.PUBLISHED })
-      .populate('categoryId', 'name slug parentId')
-      .lean();
-    if (!course) throw new Error('Khóa học không tồn tại hoặc chưa được xuất bản.');
-    return this.buildCourseResponse(course as unknown as CourseDocumentLike);
+    const shell = await Course.findOne({ slug, status: CourseStatus.PUBLISHED, currentVersionId: { $ne: null } }).lean();
+    if (!shell) throw new Error('Khóa học không tồn tại hoặc chưa được xuất bản.');
+    const response = await this.buildVersionResponse(shell.currentVersionId!.toString(), shell as unknown as CourseShellLike, true);
+    response._id = shell._id.toString();
+    return response;
   }
 
-  public async getOwnedCourseOrThrow(courseId: string, instructorId: string, populateCategory = false) {
-    const query = Course.findById(courseId);
-    if (populateCategory) {
-      query.populate('categoryId', 'name slug parentId');
+  public async getOwnedCourseOrThrow(versionId: string, instructorId: string, populateCategory = false) {
+    const { version } = await this.getOwnedVersionOrThrow(versionId, instructorId, populateCategory);
+    return version;
+  }
+
+  public async getOwnedVersionOrThrow(versionId: string, instructorId: string, populateCategory = false) {
+    const query = CourseVersion.findById(versionId);
+    if (populateCategory) query.populate('categoryId', 'name slug parentId');
+    const version = await query;
+    if (!version) throw new Error('Bản nội dung khóa học không tồn tại.');
+    if (version.instructorId !== instructorId) throw new Error('Bạn không có quyền truy cập khóa học này.');
+    const shell = await Course.findById(version.courseId);
+    if (!shell) throw new Error('Khóa học gốc không tồn tại.');
+    return { version, shell };
+  }
+
+  public assertCourseEditable(status: string): void {
+    if (![CourseStatus.DRAFT, CourseStatus.REJECTED].includes(status as CourseStatus)) {
+      throw new Error('Khóa học đang chờ duyệt hoặc đã xuất bản không thể chỉnh sửa trực tiếp.');
+    }
+  }
+
+  public async syncCourseStats(versionId: Types.ObjectId | string): Promise<void> {
+    const normalizedVersionId = typeof versionId === 'string' ? new Types.ObjectId(versionId) : versionId;
+    const [sections, lessons] = await Promise.all([
+      Section.find({ courseId: normalizedVersionId }).select('_id').lean(),
+      Lesson.find({ courseId: normalizedVersionId }).select('duration').lean(),
+    ]);
+    const totalDuration = lessons.reduce((sum, lesson) => sum + (lesson.duration || 0), 0);
+    const version = await CourseVersion.findByIdAndUpdate(
+      normalizedVersionId,
+      { $set: { totalSections: sections.length, totalLessons: lessons.length, totalDuration } },
+      { new: true }
+    );
+    if (version) await this.syncShellDraftCache(version.courseId.toString(), version);
+  }
+
+
+  // Cache metadata lên Course shell để list/filter nhanh.
+  // Nếu course đã PUBLISHED, chỉ currentVersion mới được phép cập nhật cache public.
+  private async syncShellDraftCache(courseId: string, version: Pick<ICourseVersion, '_id' | 'title' | 'shortDescription' | 'description' | 'thumbnail' | 'whatYouWillLearn' | 'requirements' | 'categoryId' | 'level' | 'price' | 'totalDuration' | 'totalLessons' | 'totalSections'>, shellDoc?: ICourse): Promise<void> {
+    const shell = shellDoc || await Course.findById(courseId);
+    if (!shell) return;
+    const shouldUpdateCache = shell.status !== CourseStatus.PUBLISHED || shell.currentVersionId?.toString() === version._id.toString();
+    if (!shouldUpdateCache) return;
+
+    shell.title = version.title;
+    shell.shortDescription = version.shortDescription || '';
+    shell.description = version.description;
+    shell.thumbnail = version.thumbnail;
+    shell.whatYouWillLearn = version.whatYouWillLearn || [];
+    shell.requirements = version.requirements || [];
+    shell.categoryId = version.categoryId ?? null;
+    shell.level = version.level;
+    shell.price = version.price;
+    shell.totalDuration = version.totalDuration;
+    shell.totalLessons = version.totalLessons;
+    shell.totalSections = version.totalSections || 0;
+    await shell.save();
+  }
+
+  private formatPublishValidationMessage(errors: Array<{ field: string; message: string; sectionId?: string }>, sectionErrorGroups: Map<string, { title: string; items: string[] }>): string {
+    if (errors.length === 0) return '';
+    const maxItems = 8;
+    let visibleCount = 0;
+    const lines = ['Khóa học chưa thể gửi duyệt:'];
+
+    for (const error of errors.filter((item) => !item.sectionId)) {
+      if (visibleCount >= maxItems) break;
+      lines.push(`• ${error.message}`);
+      visibleCount += 1;
     }
 
-    const course = await query.lean();
-    if (!course) throw new Error('Khóa học không tồn tại.');
-    if (course.instructorId !== instructorId) throw new Error('Bạn không có quyền truy cập khóa học này.');
-    return course;
+    for (const group of sectionErrorGroups.values()) {
+      if (visibleCount >= maxItems) break;
+      lines.push(`• ${group.title}`);
+      for (const item of group.items) {
+        if (visibleCount >= maxItems) break;
+        lines.push(`  - ${item}`);
+        visibleCount += 1;
+      }
+    }
+
+    const remainingCount = errors.length - visibleCount;
+    if (remainingCount > 0) lines.push(`...và ${remainingCount} lỗi khác.`);
+    return lines.join('\n');
   }
 
-  // update totalSections, totalLessons, totalDuration của course
-  public async syncCourseStats(courseId: Types.ObjectId | string): Promise<void> {
-    const normalizedCourseId = typeof courseId === 'string' ? new Types.ObjectId(courseId) : courseId; // dòng này để đảm bảo courseId là ObjectId
+  private async buildVersionResponse(versionId: string, shell: CourseShellLike | ICourse, includeSections = true): Promise<CourseResponse> {
+    const version = await CourseVersion.findById(versionId).populate('categoryId', 'name slug parentId').lean();
+    if (!version) throw new Error('Bản nội dung khóa học không tồn tại.');
+    const sections = includeSections ? await this.loadCourseSections(version._id.toString()) : [];
+    return this.mapVersionResponse(version as unknown as VersionLike, shell as unknown as CourseShellLike, sections);
+  }
+
+  private async copyCurriculum(sourceVersionId: Types.ObjectId, targetVersionId: Types.ObjectId): Promise<void> {
+    // Clone curriculum sang version mới: tạo Section/Lesson/Quiz mới nhưng giữ video/document assetId.
+    // Media cũ chỉ bị xóa khi version cũ archived và không còn active version nào tham chiếu.
     const [sections, lessons] = await Promise.all([
-      Section.find({ courseId: normalizedCourseId }).select('_id').lean(), // lấy tất cả section của course
-      Lesson.find({ courseId: normalizedCourseId }).select('duration').lean(), // lấy tất cả lesson của cours
+      Section.find({ courseId: sourceVersionId }).sort({ order: 1, createdAt: 1 }).lean(),
+      Lesson.find({ courseId: sourceVersionId }).sort({ order: 1, createdAt: 1 }).lean(),
     ]);
 
-    const totalDuration = lessons.reduce((sum, lesson) => sum + (lesson.duration || 0), 0); // tính tổng duration của course
+    const sectionIdMap = new Map<string, Types.ObjectId>();
+    const lessonIdMap = new Map<string, Types.ObjectId>();
+    for (const section of sections) {
+      const createdSection = await Section.create({ courseId: targetVersionId, title: section.title, order: section.order });
+      sectionIdMap.set(section._id.toString(), createdSection._id as Types.ObjectId);
+    }
 
-    await Course.findByIdAndUpdate(normalizedCourseId, {
-      $set: {
-        totalSections: sections.length,
-        totalLessons: lessons.length,
-        totalDuration,
-      },
-    });
+
+    for (const lesson of lessons) {
+      const targetSectionId = sectionIdMap.get(lesson.sectionId.toString());
+      if (!targetSectionId) continue;
+      const createdLesson = await Lesson.create({
+        courseId: targetVersionId,
+        sectionId: targetSectionId,
+        title: lesson.title,
+        type: lesson.type,
+        status: lesson.status,
+        content: lesson.content,
+        duration: lesson.duration,
+        order: lesson.order,
+        isFreePreview: lesson.isFreePreview,
+        videoAssetId: lesson.videoAssetId ?? null,
+        attachments: lesson.attachments || [],
+      });
+      lessonIdMap.set(lesson._id.toString(), createdLesson._id as Types.ObjectId);
+    }
+
+    const quizzes = await Quiz.find({ courseId: sourceVersionId }).lean();
+    for (const quiz of quizzes) {
+      const targetLessonId = lessonIdMap.get(quiz.lessonId.toString());
+      if (!targetLessonId) continue;
+      await Quiz.create({
+        courseId: targetVersionId,
+        lessonId: targetLessonId,
+        title: quiz.title,
+        passingScore: quiz.passingScore,
+        shuffleQuestions: quiz.shuffleQuestions,
+        shuffleOptions: quiz.shuffleOptions,
+        timeLimitSec: quiz.timeLimitSec ?? null,
+        questions: quiz.questions,
+      });
+    }
   }
 
-  // Dựng response quản lý course theo shape mới: course -> sections -> lessons.
-  private async getCourseById(courseId: string): Promise<CourseResponse | null> {
-    const course = await Course.findById(courseId)
-      .populate('categoryId', 'name slug parentId')
-      .lean();
-
-    return course ? this.buildCourseResponse(course as unknown as CourseDocumentLike) : null;
-  }
-
-  private async buildCourseResponse(course: CourseDocumentLike): Promise<CourseResponse> {
-    const sections = await this.loadCourseSections(course._id.toString());
-    return this.mapCourseResponse(course, sections);
-  }
-
-  // Tải toàn bộ section + lesson theo thứ tự để frontend editor render đúng curriculum.
-  private async loadCourseSections(courseId: string): Promise<CourseResponse['sections']> {
-    const courseObjectId = new Types.ObjectId(courseId);
+  private async loadCourseSections(versionId: string): Promise<CourseResponse['sections']> {
+    const versionObjectId = new Types.ObjectId(versionId);
     const [sections, lessons] = await Promise.all([
-      Section.find({ courseId: courseObjectId }).sort({ order: 1, createdAt: 1 }).lean(),
-      Lesson.find({ courseId: courseObjectId }).sort({ order: 1, createdAt: 1 }).lean(),
+      Section.find({ courseId: versionObjectId }).sort({ order: 1, createdAt: 1 }).lean(),
+      Lesson.find({ courseId: versionObjectId }).sort({ order: 1, createdAt: 1 }).lean(),
     ]);
 
     const lessonIds = lessons.map((lesson) => lesson._id);
-    const quizzes = lessonIds.length > 0
-      ? await Quiz.find({ courseId: courseObjectId, lessonId: { $in: lessonIds } }).select('lessonId questions').lean()
-      : [];
-
+    const quizzes = lessonIds.length ? await Quiz.find({ courseId: versionObjectId, lessonId: { $in: lessonIds } }).select('lessonId questions').lean() : [];
     const quizMetaByLessonId = new Map<string, { quizId: string; questionCount: number }>();
     for (const quiz of quizzes) {
-      quizMetaByLessonId.set(quiz.lessonId.toString(), {
-        quizId: quiz._id.toString(),
-        questionCount: quiz.questions.length,
-      });
+      quizMetaByLessonId.set(quiz.lessonId.toString(), { quizId: quiz._id.toString(), questionCount: quiz.questions.length });
     }
 
     const lessonsBySectionId = new Map<string, CourseLessonResponse[]>();
     for (const lesson of lessons) {
-      const sectionKey = lesson.sectionId.toString();
-      const bucket = lessonsBySectionId.get(sectionKey) || [];
+      const bucket = lessonsBySectionId.get(lesson.sectionId.toString()) || [];
       const quizMeta = quizMetaByLessonId.get(lesson._id.toString());
       bucket.push({
         _id: lesson._id.toString(),
@@ -472,7 +702,7 @@ class CourseService {
         quizId: quizMeta?.quizId || null,
         contentMeta: lesson.type === LessonType.QUIZ ? { questionCount: quizMeta?.questionCount || 0 } : null,
       });
-      lessonsBySectionId.set(sectionKey, bucket);
+      lessonsBySectionId.set(lesson.sectionId.toString(), bucket);
     }
 
     return sections.map((section) => ({
@@ -483,39 +713,73 @@ class CourseService {
     }));
   }
 
-  private mapCourseResponse(course: CourseDocumentLike, sections: CourseResponse['sections']): CourseResponse {
-    const category = course.categoryId && typeof course.categoryId === 'object' && 'slug' in course.categoryId
-      ? {
-          _id: course.categoryId._id.toString(),
-          name: course.categoryId.name,
-          slug: course.categoryId.slug,
-          parentId: course.categoryId.parentId ? course.categoryId.parentId.toString() : null,
-        }
+  private mapVersionResponse(version: VersionLike, shell: CourseShellLike, sections: CourseResponse['sections']): CourseResponse {
+    const category = version.categoryId && typeof version.categoryId === 'object' && 'slug' in version.categoryId
+      ? { _id: version.categoryId._id.toString(), name: version.categoryId.name, slug: version.categoryId.slug, parentId: version.categoryId.parentId ? version.categoryId.parentId.toString() : null }
       : null;
 
     return {
-      _id: course._id.toString(),
-      title: course.title,
-      slug: course.slug,
-      shortDescription: course.shortDescription || '',
-      description: course.description,
-      thumbnail: course.thumbnail,
-      whatYouWillLearn: course.whatYouWillLearn || [],
-      requirements: course.requirements || [],
-      instructorId: course.instructorId,
-      instructorName: course.instructorName,
-      categoryId: category?._id || (course.categoryId ? course.categoryId.toString() : null),
+      _id: version._id.toString(),
+      courseId: shell._id.toString(),
+      title: version.title,
+      slug: shell.slug || version.slug,
+      shortDescription: version.shortDescription || '',
+      description: version.description,
+      thumbnail: version.thumbnail,
+      whatYouWillLearn: version.whatYouWillLearn || [],
+      requirements: version.requirements || [],
+      instructorId: version.instructorId,
+      instructorName: version.instructorName,
+      categoryId: category?._id || (version.categoryId ? version.categoryId.toString() : null),
       category,
-      level: course.level,
-      status: course.status,
-      price: course.price,
+      level: version.level,
+      status: version.status,
+      submittedAt: version.submittedAt || null,
+      reviewedAt: version.reviewedAt || null,
+      reviewedBy: version.reviewedBy || '',
+      rejectionReason: version.rejectionReason || '',
+      price: version.price,
       sections,
-      totalDuration: course.totalDuration,
-      totalLessons: course.totalLessons,
-      totalSections: course.totalSections || 0,
-      enrollmentCount: course.enrollmentCount,
-      createdAt: course.createdAt,
-      updatedAt: course.updatedAt,
+      totalDuration: version.totalDuration,
+      totalLessons: version.totalLessons,
+      totalSections: version.totalSections || 0,
+      enrollmentCount: shell.enrollmentCount,
+      createdAt: version.createdAt,
+      updatedAt: version.updatedAt,
+    };
+  }
+
+  private mapActiveRevision(version: VersionLike) {
+    return {
+      _id: version._id.toString(),
+      status: version.status,
+      rejectionReason: version.rejectionReason || '',
+      submittedAt: version.submittedAt || null,
+      updatedAt: version.updatedAt,
+    };
+  }
+
+  private mapCourseReviewResponse(version: VersionLike): CourseReviewResponse {
+    const category = version.categoryId && typeof version.categoryId === 'object' && 'slug' in version.categoryId ? version.categoryId.name : '';
+    return {
+      _id: version._id.toString(),
+      title: version.title,
+      slug: version.slug,
+      description: version.description,
+      thumbnailUrl: version.thumbnail,
+      instructor: { _id: version.instructorId, fullName: version.instructorName, email: '' },
+      category,
+      level: version.level,
+      price: version.price,
+      status: version.status,
+      totalLessons: version.totalLessons,
+      totalChapters: version.totalSections || 0,
+      totalDuration: Math.round((version.totalDuration || 0) / 60),
+      submittedAt: version.submittedAt || null,
+      rejectionReason: version.rejectionReason || '',
+      createdAt: version.createdAt,
+      isRevision: version.versionNumber > 1,
+      courseId: version.courseId.toString(),
     };
   }
 }

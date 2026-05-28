@@ -73,3 +73,4 @@ export const publishDocumentAssetAttached = async (payload: AssetAttachedPayload
     payload
   );
 };
+

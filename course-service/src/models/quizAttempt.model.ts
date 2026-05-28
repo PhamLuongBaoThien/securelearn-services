@@ -15,7 +15,8 @@ export interface IQuizAttemptAnswer {
 export interface IQuizAttempt extends Document {
   quizId: Types.ObjectId;
   lessonId: Types.ObjectId;
-  courseId: Types.ObjectId;
+  courseId: Types.ObjectId; // Course public shell id
+  courseVersionId: Types.ObjectId;
   userId: string;
   answers: IQuizAttemptAnswer[];
   score: number;
@@ -41,7 +42,8 @@ const quizAttemptSchema = new Schema<IQuizAttempt>(
   {
     quizId: { type: Schema.Types.ObjectId, ref: 'Quiz', required: true, index: true }, // Id của quiz
     lessonId: { type: Schema.Types.ObjectId, ref: 'Lesson', required: true, index: true }, // Id của lesson
-    courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true, index: true }, // Id của course
+    courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true, index: true }, // Id của Course public shell
+    courseVersionId: { type: Schema.Types.ObjectId, ref: 'CourseVersion', required: true, index: true }, // Id của nội dung version lúc làm bài
     userId: { type: String, required: true, index: true }, // Id từ auth-service
     answers: { type: [quizAttemptAnswerSchema], default: [] }, // Lưu đáp án của học viên, array theo thứ tự questionId
     score: { type: Number, default: 0, min: 0, max: 100 }, // Điểm số của học viên
@@ -57,5 +59,6 @@ const quizAttemptSchema = new Schema<IQuizAttempt>(
 
 quizAttemptSchema.index({ quizId: 1, userId: 1, startedAt: -1 });
 quizAttemptSchema.index({ courseId: 1, userId: 1 });
+quizAttemptSchema.index({ courseVersionId: 1, userId: 1 });
 
 export const QuizAttempt = mongoose.model<IQuizAttempt>('QuizAttempt', quizAttemptSchema);

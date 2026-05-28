@@ -6,8 +6,12 @@ import { Application } from 'express';
 import courseRoutes from './course.routes';
 import categoryRoutes from './category.routes';
 import quizAttemptRoutes from './quizAttempt.routes';
+import adminCourseRoutes from './adminCourse.routes';
 
 const routes = (app: Application) => {
+  // Admin review APIs phải mount riêng để không bị slug route của /api/courses bắt nhầm.
+  app.use('/api/admin/courses', adminCourseRoutes);
+
   // Route này xử lý cả public course routes và authenticated course routes
   app.use('/api/courses', courseRoutes);
 

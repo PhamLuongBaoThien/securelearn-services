@@ -10,6 +10,8 @@ import {
 } from '@securelearn/common';
 import videoAssetService from '../services/videoAsset.service';
 import documentAssetService from '../services/documentAsset.service';
+import { VideoAsset } from '../models/videoAsset.model';
+import { DocumentAsset } from '../models/documentAsset.model';
 
 /**
  * Đăng ký lắng nghe tất cả events mà Media Service quan tâm.
@@ -60,5 +62,7 @@ export const registerEventHandlers = async (): Promise<void> => {
     }
   );
 
+
   console.log('[MediaEvent] Đã đăng ký lắng nghe tất cả events.');
 };
+
