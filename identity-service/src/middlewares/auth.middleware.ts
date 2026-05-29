@@ -6,6 +6,7 @@
 // ========================
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import redisClient from '../config/redis';
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -16,7 +17,7 @@ export interface AuthRequest extends Request {
  * Middleware trích xuất thông tin user từ JWT token.
  * Kong đã verify token → middleware chỉ decode lấy data.
  */
-export const extractUser = (req: AuthRequest, res: Response, next: NextFunction): void => {
+export const extractUser = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
 
   if (!token) {
@@ -33,5 +34,12 @@ export const extractUser = (req: AuthRequest, res: Response, next: NextFunction)
 
   req.userId = decoded.id;
   req.userRole = decoded.role;
+  if (decoded.role !== 'ADMIN') {
+    const isLocked = await redisClient.get(`locked_user:${decoded.id}`);
+    if (isLocked) {
+      res.status(403).json({ status: 'ERR', message: 'Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.' });
+      return;
+    }
+  }
   next();
 };

@@ -5,6 +5,7 @@ import { Request, Response } from 'express';
 import authService from '../services/auth.service';
 import { generalAccessToken, generalRefreshToken, refreshTokenJwtService } from '../services/jwt.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import redisClient from '../config/redis';
 
 const REFRESH_TOKEN_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 ngày
 
@@ -124,6 +125,14 @@ class AuthController {
 
       // Query DB lấy fullName hiện tại — đảm bảo access token luôn có tên mới nhất
       const user = await authService.getProfile(result.decoded!.id);
+      if (!user || user.isLocked) {
+        if (user?.isLocked) {
+          await redisClient.set(`locked_user:${result.decoded!.id}`, '1');
+        }
+        res.clearCookie('refresh_token');
+        res.status(403).json({ status: 'ERR', message: 'Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.' });
+        return;
+      }
       const access_token = generalAccessToken({
         id: result.decoded!.id,
         role: result.decoded!.role,

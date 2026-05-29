@@ -10,6 +10,7 @@ import {
   RoutingKey,
   type UserRegisteredPayload,
 } from '@securelearn/common';
+import redisClient from './redis';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -60,6 +61,11 @@ passport.use(
             }
           );
         } else {
+          if (user.isLocked) {
+            await redisClient.set(`locked_user:${user._id.toString()}`, '1');
+            return done(new Error('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.'));
+          }
+
           // Account Linking: User đã tồn tại (đăng ký bằng email/password)
           // → Cập nhật avatar nếu chưa có
           let needSave = false;

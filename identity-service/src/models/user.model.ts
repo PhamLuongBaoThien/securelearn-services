@@ -17,6 +17,12 @@ export interface IUser extends Document {
   fullName: string;
   role: Role;
   isLocked: boolean;
+  lockedAt?: Date;
+  lockedBy?: string;
+  lockReason?: string;
+  unlockedAt?: Date;
+  unlockedBy?: string;
+  unlockReason?: string;
   subscriptionStatus: SubscriptionStatus;
   phone?: string;
   profile?: {
@@ -65,6 +71,34 @@ const userSchema: Schema = new Schema(
     isLocked: {
       type: Boolean,
       default: false,
+    },
+
+    lockedAt: {
+      type: Date,
+    },
+
+    lockedBy: {
+      type: String,
+      trim: true,
+    },
+
+    lockReason: {
+      type: String,
+      trim: true,
+    },
+
+    unlockedAt: {
+      type: Date,
+    },
+
+    unlockedBy: {
+      type: String,
+      trim: true,
+    },
+
+    unlockReason: {
+      type: String,
+      trim: true,
     },
 
     phone: {

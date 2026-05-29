@@ -7,6 +7,8 @@ import adminService from '../services/admin.service';
 import { generalAccessToken, generalRefreshToken, refreshTokenJwtService } from '../services/jwt.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { User } from '../models/user.model';
+import { Admin } from '../models/admin.model';
+import redisClient from '../config/redis';
 
 const REFRESH_TOKEN_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 ngày
 
@@ -305,6 +307,28 @@ class AdminController {
         User.countDocuments(query),
       ]);
 
+      const adminIds = Array.from(
+        new Set(
+          users
+            .flatMap((u: any) => [u.lockedBy, u.unlockedBy])
+            .filter(Boolean)
+            .map((id: any) => String(id))
+        )
+      );
+      const admins = adminIds.length
+        ? await Admin.find({ _id: { $in: adminIds } }).select('fullName email').lean()
+        : [];
+      const adminMap = new Map(
+        admins.map((admin: any) => [
+          admin._id.toString(),
+          {
+            _id: admin._id,
+            fullName: admin.fullName,
+            email: admin.email,
+          },
+        ])
+      );
+
       const mapped = users.map((u: any) => ({
         _id: u._id,
         email: u.email,
@@ -315,6 +339,14 @@ class AdminController {
         subscriptionStatus: u.subscriptionStatus,
         phone: u.phone,
         profile: u.profile,
+        lockedAt: u.lockedAt,
+        lockedBy: u.lockedBy,
+        lockReason: u.lockReason,
+        unlockedAt: u.unlockedAt,
+        unlockedBy: u.unlockedBy,
+        unlockReason: u.unlockReason,
+        lockedByAdmin: u.lockedBy ? adminMap.get(String(u.lockedBy)) : undefined,
+        unlockedByAdmin: u.unlockedBy ? adminMap.get(String(u.unlockedBy)) : undefined,
         createdAt: u.createdAt,
         updatedAt: u.updatedAt,
         lastLoginAt: u.lastLoginAt,
@@ -339,15 +371,27 @@ class AdminController {
    */
   public async lockUser(req: AuthRequest, res: Response): Promise<void> {
     try {
+      const reason = String(req.body.reason || '').trim();
+      if (!reason) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng nhập lý do khóa tài khoản.' });
+        return;
+      }
+
       const user = await User.findByIdAndUpdate(
         req.params.id,
-        { isLocked: true },
+        {
+          isLocked: true,
+          lockedAt: new Date(),
+          lockedBy: req.userId,
+          lockReason: reason,
+        },
         { new: true }
       ).select('-password');
       if (!user) {
         res.status(404).json({ status: 'ERR', message: 'Không tìm thấy người dùng.' });
         return;
       }
+      await redisClient.set(`locked_user:${user._id.toString()}`, '1');
       res.status(200).json({ status: 'OK', message: 'Đã khóa tài khoản.' });
     } catch (err: any) {
       res.status(500).json({ status: 'ERR', message: err.message });
@@ -359,15 +403,22 @@ class AdminController {
    */
   public async unlockUser(req: AuthRequest, res: Response): Promise<void> {
     try {
+      const reason = String(req.body.reason || '').trim();
       const user = await User.findByIdAndUpdate(
         req.params.id,
-        { isLocked: false },
+        {
+          isLocked: false,
+          unlockedAt: new Date(),
+          unlockedBy: req.userId,
+          unlockReason: reason,
+        },
         { new: true }
       ).select('-password');
       if (!user) {
         res.status(404).json({ status: 'ERR', message: 'Không tìm thấy người dùng.' });
         return;
       }
+      await redisClient.del(`locked_user:${user._id.toString()}`);
       res.status(200).json({ status: 'OK', message: 'Đã mở khóa tài khoản.' });
     } catch (err: any) {
       res.status(500).json({ status: 'ERR', message: err.message });

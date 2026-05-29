@@ -69,8 +69,10 @@ class AuthService {
 
     // 2. Kiểm tra tài khoản bị khóa
     if (user.isLocked) {
+      await redisClient.set(`locked_user:${user._id.toString()}`, '1');
       throw new Error('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.');
     }
+    await redisClient.del(`locked_user:${user._id.toString()}`);
 
     // 3. Nếu user đăng ký qua Google thì không có password cục bộ
     if (!user.password) {
