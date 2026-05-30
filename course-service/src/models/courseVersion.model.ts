@@ -22,6 +22,8 @@ export interface ICourseVersion extends Document {
   submittedAt?: Date | null;
   reviewedAt?: Date | null;
   reviewedBy?: string;
+  reviewedByName?: string;
+  reviewedByEmail?: string;
   rejectionReason?: string;
   price: number;
   totalDuration: number;
@@ -59,6 +61,8 @@ const courseVersionSchema = new Schema<ICourseVersion>(
     submittedAt: { type: Date, default: null },
     reviewedAt: { type: Date, default: null },
     reviewedBy: { type: String, default: '' },
+    reviewedByName: { type: String, default: '', trim: true },
+    reviewedByEmail: { type: String, default: '', trim: true, lowercase: true },
     rejectionReason: { type: String, default: '' },
     price: { type: Number, default: 0, min: 0 },
     totalDuration: { type: Number, default: 0 },

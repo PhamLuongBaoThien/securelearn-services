@@ -42,6 +42,7 @@ interface CourseResponse {
   submittedAt: Date | null;
   reviewedAt: Date | null;
   reviewedBy: string;
+  reviewedByAdmin?: { _id: string; fullName: string; email: string };
   rejectionReason: string;
   activeRevision?: {
     _id: string;
@@ -87,6 +88,8 @@ type VersionLike = {
   submittedAt?: Date | null;
   reviewedAt?: Date | null;
   reviewedBy?: string;
+  reviewedByName?: string;
+  reviewedByEmail?: string;
   rejectionReason?: string;
   price: number;
   totalDuration: number;
@@ -126,11 +129,20 @@ interface CourseReviewResponse {
   totalChapters: number;
   totalDuration: number;
   submittedAt: Date | null;
+  reviewedAt: Date | null;
+  reviewedBy: string;
+  reviewedByAdmin?: { _id: string; fullName: string; email: string };
   rejectionReason: string;
   createdAt: Date;
   isRevision: boolean;
   courseId: string;
 }
+
+type ReviewerSnapshot = {
+  adminId: string;
+  adminName: string;
+  adminEmail: string;
+};
 
 class CourseService {
   // Kiểm tra đủ điều kiện trước khi instructor gửi CourseVersion cho admin duyệt.
@@ -350,6 +362,8 @@ class CourseService {
     version.submittedAt = new Date();
     version.reviewedAt = null;
     version.reviewedBy = '';
+    version.reviewedByName = '';
+    version.reviewedByEmail = '';
     version.rejectionReason = '';
     await version.save();
 
@@ -435,7 +449,7 @@ class CourseService {
     return this.buildVersionResponse(version._id.toString(), shell as unknown as CourseShellLike);
   }
 
-  public async approveCourse(versionId: string, adminId: string): Promise<CourseReviewResponse> {
+  public async approveCourse(versionId: string, admin: ReviewerSnapshot): Promise<CourseReviewResponse> {
     const version = await CourseVersion.findById(versionId);
     if (!version) throw new Error('Bản nội dung khóa học không tồn tại.');
     if (version.status !== CourseStatus.PENDING) throw new Error('Chỉ khóa học đang chờ duyệt mới có thể phê duyệt.');
@@ -450,7 +464,9 @@ class CourseService {
 
     version.status = CourseStatus.PUBLISHED;
     version.reviewedAt = new Date();
-    version.reviewedBy = adminId;
+    version.reviewedBy = admin.adminId;
+    version.reviewedByName = admin.adminName;
+    version.reviewedByEmail = admin.adminEmail;
     version.rejectionReason = '';
     await version.save();
 
@@ -465,7 +481,7 @@ class CourseService {
     return this.mapCourseReviewResponse(approved as unknown as VersionLike);
   }
 
-  public async rejectCourse(versionId: string, adminId: string, reason: string): Promise<CourseReviewResponse> {
+  public async rejectCourse(versionId: string, admin: ReviewerSnapshot, reason: string): Promise<CourseReviewResponse> {
     const normalizedReason = reason?.trim();
     if (!normalizedReason) throw new Error('Vui lòng nhập góp ý chỉnh sửa.');
 
@@ -476,7 +492,9 @@ class CourseService {
     // Reject không đụng vào currentVersion public; instructor sửa lại chính version này rồi gửi duyệt lại.
     version.status = CourseStatus.REJECTED;
     version.reviewedAt = new Date();
-    version.reviewedBy = adminId;
+    version.reviewedBy = admin.adminId;
+    version.reviewedByName = admin.adminName;
+    version.reviewedByEmail = admin.adminEmail;
     version.rejectionReason = normalizedReason;
     await version.save();
 
@@ -717,6 +735,7 @@ class CourseService {
     const category = version.categoryId && typeof version.categoryId === 'object' && 'slug' in version.categoryId
       ? { _id: version.categoryId._id.toString(), name: version.categoryId.name, slug: version.categoryId.slug, parentId: version.categoryId.parentId ? version.categoryId.parentId.toString() : null }
       : null;
+    const reviewedByAdmin = this.mapReviewerSnapshot(version);
 
     return {
       _id: version._id.toString(),
@@ -737,6 +756,7 @@ class CourseService {
       submittedAt: version.submittedAt || null,
       reviewedAt: version.reviewedAt || null,
       reviewedBy: version.reviewedBy || '',
+      ...(reviewedByAdmin && { reviewedByAdmin }),
       rejectionReason: version.rejectionReason || '',
       price: version.price,
       sections,
@@ -761,6 +781,7 @@ class CourseService {
 
   private mapCourseReviewResponse(version: VersionLike): CourseReviewResponse {
     const category = version.categoryId && typeof version.categoryId === 'object' && 'slug' in version.categoryId ? version.categoryId.name : '';
+    const reviewedByAdmin = this.mapReviewerSnapshot(version);
     return {
       _id: version._id.toString(),
       title: version.title,
@@ -776,10 +797,22 @@ class CourseService {
       totalChapters: version.totalSections || 0,
       totalDuration: Math.round((version.totalDuration || 0) / 60),
       submittedAt: version.submittedAt || null,
+      reviewedAt: version.reviewedAt || null,
+      reviewedBy: version.reviewedBy || '',
+      ...(reviewedByAdmin && { reviewedByAdmin }),
       rejectionReason: version.rejectionReason || '',
       createdAt: version.createdAt,
       isRevision: version.versionNumber > 1,
       courseId: version.courseId.toString(),
+    };
+  }
+
+  private mapReviewerSnapshot(version: VersionLike) {
+    if (!version.reviewedBy) return undefined;
+    return {
+      _id: version.reviewedBy,
+      fullName: version.reviewedByName || '',
+      email: version.reviewedByEmail || '',
     };
   }
 }

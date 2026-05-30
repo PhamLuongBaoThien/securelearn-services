@@ -280,7 +280,11 @@ class CourseController {
    */
   public async approveCourse(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const course = await courseService.approveCourse(req.params.id as string, req.userId!);
+      const course = await courseService.approveCourse(req.params.id as string, {
+        adminId: req.userId!,
+        adminName: req.userName || '',
+        adminEmail: req.userEmail || '',
+      });
       res.status(200).json({ status: 'OK', message: 'Khóa học đã được phê duyệt.', data: course });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
@@ -292,7 +296,11 @@ class CourseController {
    */
   public async rejectCourse(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const course = await courseService.rejectCourse(req.params.id as string, req.userId!, req.body.reason);
+      const course = await courseService.rejectCourse(req.params.id as string, {
+        adminId: req.userId!,
+        adminName: req.userName || '',
+        adminEmail: req.userEmail || '',
+      }, req.body.reason);
       res.status(200).json({ status: 'OK', message: 'Đã gửi yêu cầu chỉnh sửa.', data: course });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });

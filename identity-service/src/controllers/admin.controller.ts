@@ -31,6 +31,7 @@ class AdminController {
         id: admin._id.toString(),
         role: 'ADMIN',
         fullName: admin.fullName,
+        email: admin.email,
       });
       const refresh_token = generalRefreshToken({ id: admin._id.toString(), role: 'ADMIN' });
 
@@ -87,6 +88,7 @@ class AdminController {
         id: result.decoded!.id,
         role: result.decoded!.role,
         fullName: admin?.fullName ?? '',
+        email: admin?.email ?? '',
       });
 
       res.status(200).json({

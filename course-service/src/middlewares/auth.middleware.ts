@@ -12,6 +12,7 @@ export interface AuthRequest extends Request {
   userId?: string;
   userRole?: string;
   userName?: string; // fullName của user, được giải mã từ JWT payload
+  userEmail?: string;
   file?: any;
 }
 
@@ -27,7 +28,7 @@ export const extractUser = async (req: AuthRequest, res: Response, next: NextFun
     return;
   }
 
-  const decoded = jwt.decode(token) as { id: string; role: string; fullName?: string } | null;
+  const decoded = jwt.decode(token) as { id: string; role: string; fullName?: string; email?: string } | null;
 
   if (!decoded) {
     res.status(401).json({ status: 'ERR', message: 'Token không hợp lệ.' });
@@ -37,6 +38,7 @@ export const extractUser = async (req: AuthRequest, res: Response, next: NextFun
   req.userId = decoded.id;
   req.userRole = decoded.role;
   req.userName = decoded.fullName ?? '';
+  req.userEmail = decoded.email ?? '';
   if (decoded.role !== 'ADMIN') {
     const isLocked = await redisClient.get(`locked_user:${decoded.id}`);
     if (isLocked) {

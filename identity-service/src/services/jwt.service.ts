@@ -9,7 +9,7 @@ dotenv.config();
 
 // ===== Sinh Access Token (ngắn hạn — 10 phút) =====
 // Chứa fullName để các service đọc tên mà không cần gọi DB
-const generalAccessToken = (payload: { id: string; role: string; fullName: string }) => {
+const generalAccessToken = (payload: { id: string; role: string; fullName: string; email?: string }) => {
   const access_token = jwt.sign(
     { ...payload, iss: 'securelearn' }, // iss claim để Kong JWT Plugin nhận diện
     process.env.ACCESS_TOKEN as string,
