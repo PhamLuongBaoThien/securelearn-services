@@ -1,5 +1,5 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
-import { CourseLevel, CourseStatus } from './course.model';
+import { CategoryResolutionStatus, CourseLevel, CourseStatus } from './course.model';
 import slugify from 'slugify';
 
 // CourseVersion là bản nội dung thật của khóa học.
@@ -17,6 +17,9 @@ export interface ICourseVersion extends Document {
   instructorId: string;
   instructorName: string;
   categoryId?: Types.ObjectId | null;
+  categoryResolutionStatus: CategoryResolutionStatus;
+  suggestedCategoryName: string;
+  suggestedCategoryNote: string;
   level: CourseLevel;
   status: CourseStatus;
   submittedAt?: Date | null;
@@ -47,6 +50,14 @@ const courseVersionSchema = new Schema<ICourseVersion>(
     instructorId: { type: String, required: true, index: true },
     instructorName: { type: String, default: '' },
     categoryId: { type: Schema.Types.ObjectId, ref: 'Category', default: null, index: true },
+    categoryResolutionStatus: {
+      type: String,
+      enum: Object.values(CategoryResolutionStatus),
+      default: CategoryResolutionStatus.NONE,
+      index: true,
+    },
+    suggestedCategoryName: { type: String, default: '', trim: true, maxlength: 120 },
+    suggestedCategoryNote: { type: String, default: '', trim: true, maxlength: 500 },
     level: {
       type: String,
       enum: Object.values(CourseLevel),

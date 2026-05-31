@@ -9,7 +9,7 @@
 // - curriculum chi tiết hiện được tách sang section/lesson/quiz controllers
 // ========================
 import { Request, Response } from 'express';
-import { CourseLevel } from '../models/course.model';
+import { CategoryResolutionStatus, CourseLevel } from '../models/course.model';
 import courseService from '../services/course.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
@@ -21,6 +21,9 @@ type UpdateCoursePayload = {
   whatYouWillLearn?: string[];
   requirements?: string[];
   categoryId?: string;
+  categoryResolutionStatus?: CategoryResolutionStatus;
+  suggestedCategoryName?: string;
+  suggestedCategoryNote?: string;
   level?: CourseLevel;
   price?: number;
 };
@@ -46,7 +49,7 @@ const parseCourseLevel = (value: unknown): CourseLevel | undefined => {
 };
 
 const buildUpdateCoursePayload = (req: AuthRequest): UpdateCoursePayload => {
-  const { title, shortDescription, description, thumbnail, categoryId, category, level, price } = req.body;
+  const { title, shortDescription, description, thumbnail, categoryId, category, categoryResolutionStatus, suggestedCategoryName, suggestedCategoryNote, level, price } = req.body;
 
   return {
     title,
@@ -56,6 +59,9 @@ const buildUpdateCoursePayload = (req: AuthRequest): UpdateCoursePayload => {
     whatYouWillLearn: normalizeStringArray(req.body.whatYouWillLearn),
     requirements: normalizeStringArray(req.body.requirements),
     categoryId: categoryId !== undefined ? categoryId : category,
+    categoryResolutionStatus,
+    suggestedCategoryName,
+    suggestedCategoryNote,
     level: parseCourseLevel(level),
     price: parseOptionalNumber(price),
   };
@@ -284,7 +290,7 @@ class CourseController {
         adminId: req.userId!,
         adminName: req.userName || '',
         adminEmail: req.userEmail || '',
-      });
+      }, { finalCategoryId: req.body.finalCategoryId });
       res.status(200).json({ status: 'OK', message: 'Khóa học đã được phê duyệt.', data: course });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });

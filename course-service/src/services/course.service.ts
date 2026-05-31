@@ -1,10 +1,10 @@
 import { Types } from 'mongoose';
-import { Course, ICourse, CourseStatus } from '../models/course.model';
+import { CategoryResolutionStatus, Course, ICourse, CourseStatus } from '../models/course.model';
 import { CourseVersion, ICourseVersion } from '../models/courseVersion.model';
 import { Lesson, LessonStatus, LessonType } from '../models/lesson.model';
 import { Quiz } from '../models/quiz.model';
 import { Section } from '../models/section.model';
-import { publishCourseCreated } from '../events/publishers';
+import { publishCourseCreated, publishCoursePublished } from '../events/publishers';
 import categoryService from './category.service';
 import mediaReferenceService from './mediaReference.service';
 
@@ -37,6 +37,9 @@ interface CourseResponse {
   instructorName: string;
   categoryId: string | null;
   category: { _id: string; name: string; slug: string; parentId: string | null } | null;
+  categoryResolutionStatus: CategoryResolutionStatus;
+  suggestedCategoryName: string;
+  suggestedCategoryNote: string;
   level: string;
   status: string;
   submittedAt: Date | null;
@@ -74,6 +77,9 @@ type VersionLike = {
   requirements?: string[];
   instructorId: string;
   instructorName: string;
+  categoryResolutionStatus?: CategoryResolutionStatus;
+  suggestedCategoryName?: string;
+  suggestedCategoryNote?: string;
   categoryId?:
     | Types.ObjectId
     | {
@@ -122,6 +128,11 @@ interface CourseReviewResponse {
   thumbnailUrl: string;
   instructor: { _id: string; fullName: string; email: string };
   category: string;
+  categoryId: string | null;
+  categorySlug: string;
+  categoryResolutionStatus: CategoryResolutionStatus;
+  suggestedCategoryName: string;
+  suggestedCategoryNote: string;
   level: string;
   price: number;
   status: string;
@@ -161,9 +172,14 @@ class CourseService {
       else sectionErrorGroups.set(sectionId, { title: sectionTitle, items: [item] });
     };
 
+    const needsAdminClassification = version.categoryResolutionStatus === CategoryResolutionStatus.NEEDS_ADMIN_CLASSIFICATION;
+
     if (!version.title?.trim()) errors.push({ field: 'title', message: 'Khóa học chưa có tiêu đề.' });
     if (!version.thumbnail?.trim()) errors.push({ field: 'thumbnail', message: 'Khóa học chưa có ảnh đại diện.' });
-    if (!version.categoryId) errors.push({ field: 'categoryId', message: 'Khóa học chưa có danh mục.' });
+    if (!version.categoryId && !needsAdminClassification) errors.push({ field: 'categoryId', message: 'Khóa học chưa có danh mục.' });
+    if (needsAdminClassification && !version.suggestedCategoryName?.trim()) {
+      errors.push({ field: 'suggestedCategoryName', message: 'Vui lòng nhập chủ đề khóa học để người kiểm duyệt phân loại.' });
+    }
 
     const [sections, lessons] = await Promise.all([
       Section.find({ courseId: version._id }).sort({ order: 1 }).lean(),
@@ -224,6 +240,8 @@ class CourseService {
     title: string;
     description?: string;
     categoryId?: string;
+    suggestedCategoryName?: string;
+    suggestedCategoryNote?: string;
     level?: string;
     price?: number;
     instructorId: string;
@@ -237,6 +255,8 @@ class CourseService {
     const shell = new Course({
       ...data,
       categoryId: resolvedCategoryId,
+      suggestedCategoryName: data.suggestedCategoryName || '',
+      suggestedCategoryNote: data.suggestedCategoryNote || '',
       status: CourseStatus.DRAFT,
     });
     await shell.save();
@@ -255,6 +275,9 @@ class CourseService {
       instructorId: shell.instructorId,
       instructorName: shell.instructorName,
       categoryId: shell.categoryId,
+      categoryResolutionStatus: shell.categoryResolutionStatus,
+      suggestedCategoryName: shell.suggestedCategoryName,
+      suggestedCategoryNote: shell.suggestedCategoryNote,
       level: shell.level,
       status: CourseStatus.DRAFT,
       price: shell.price,
@@ -296,7 +319,7 @@ class CourseService {
   public async updateCourse(
     versionId: string,
     instructorId: string,
-    data: Partial<Pick<ICourse, 'title' | 'shortDescription' | 'description' | 'thumbnail' | 'whatYouWillLearn' | 'requirements' | 'level' | 'price'>> & { categoryId?: string }
+    data: Partial<Pick<ICourse, 'title' | 'shortDescription' | 'description' | 'thumbnail' | 'whatYouWillLearn' | 'requirements' | 'categoryResolutionStatus' | 'suggestedCategoryName' | 'suggestedCategoryNote' | 'level' | 'price'>> & { categoryId?: string }
   ): Promise<CourseResponse> {
     const { version, shell } = await this.getOwnedVersionOrThrow(versionId, instructorId);
     this.assertCourseEditable(version.status);
@@ -307,8 +330,18 @@ class CourseService {
     if (data.thumbnail !== undefined) version.thumbnail = data.thumbnail;
     if (data.whatYouWillLearn !== undefined) version.whatYouWillLearn = data.whatYouWillLearn;
     if (data.requirements !== undefined) version.requirements = data.requirements;
-    if (data.categoryId !== undefined) {
-      version.categoryId = data.categoryId ? (await categoryService.resolveActiveCategoryById(data.categoryId))._id as Types.ObjectId : null;
+    const needsAdminClassification = data.categoryResolutionStatus === CategoryResolutionStatus.NEEDS_ADMIN_CLASSIFICATION;
+    if (needsAdminClassification) {
+      version.categoryId = null;
+      version.categoryResolutionStatus = CategoryResolutionStatus.NEEDS_ADMIN_CLASSIFICATION;
+      version.suggestedCategoryName = String(data.suggestedCategoryName || '').trim();
+      version.suggestedCategoryNote = String(data.suggestedCategoryNote || '').trim();
+    } else if (data.categoryId !== undefined) {
+      const category = data.categoryId ? await categoryService.resolveActiveCategoryById(data.categoryId) : null;
+      version.categoryId = category ? category._id as Types.ObjectId : null;
+      version.categoryResolutionStatus = CategoryResolutionStatus.NONE;
+      version.suggestedCategoryName = '';
+      version.suggestedCategoryNote = '';
     }
     if (data.level !== undefined) version.level = data.level as any;
     if (data.price !== undefined) version.price = data.price;
@@ -354,8 +387,11 @@ class CourseService {
     }
     const validation = await this.validateCoursePublish(versionId, instructorId);
     if (!validation.ok) throw new Error(validation.message || validation.errors[0].message);
-    if (!version.categoryId) throw new Error('Khóa học chưa có danh mục hợp lệ.');
-    await categoryService.resolveActiveCategoryById(version.categoryId.toString());
+    if (version.categoryId) {
+      await categoryService.resolveActiveCategoryById(version.categoryId.toString());
+    } else if (version.categoryResolutionStatus !== CategoryResolutionStatus.NEEDS_ADMIN_CLASSIFICATION) {
+      throw new Error('Khóa học chưa có danh mục hợp lệ.');
+    }
 
     // Instructor chỉ chuyển version sang PENDING; Course chỉ public sau khi admin approve.
     version.status = CourseStatus.PENDING;
@@ -407,6 +443,9 @@ class CourseService {
       instructorId: current.instructorId,
       instructorName: current.instructorName,
       categoryId: current.categoryId,
+      categoryResolutionStatus: current.categoryResolutionStatus,
+      suggestedCategoryName: current.suggestedCategoryName,
+      suggestedCategoryNote: current.suggestedCategoryNote,
       level: current.level,
       status: CourseStatus.DRAFT,
       price: current.price,
@@ -449,13 +488,32 @@ class CourseService {
     return this.buildVersionResponse(version._id.toString(), shell as unknown as CourseShellLike);
   }
 
-  public async approveCourse(versionId: string, admin: ReviewerSnapshot): Promise<CourseReviewResponse> {
+  public async approveCourse(versionId: string, admin: ReviewerSnapshot, options: { finalCategoryId?: string } = {}): Promise<CourseReviewResponse> {
     const version = await CourseVersion.findById(versionId);
     if (!version) throw new Error('Bản nội dung khóa học không tồn tại.');
     if (version.status !== CourseStatus.PENDING) throw new Error('Chỉ khóa học đang chờ duyệt mới có thể phê duyệt.');
 
     const shell = await Course.findById(version.courseId);
     if (!shell) throw new Error('Khóa học gốc không tồn tại.');
+
+    const needsAdminClassification = version.categoryResolutionStatus === CategoryResolutionStatus.NEEDS_ADMIN_CLASSIFICATION;
+    if (needsAdminClassification && !options.finalCategoryId) {
+      throw new Error('Vui lòng chọn danh mục xuất bản trước khi phê duyệt khóa học.');
+    }
+    if (options.finalCategoryId) {
+      const finalCategory = await categoryService.resolveActiveCategoryById(options.finalCategoryId);
+      version.categoryId = finalCategory._id as Types.ObjectId;
+      version.categoryResolutionStatus = CategoryResolutionStatus.NONE;
+      version.suggestedCategoryName = '';
+      version.suggestedCategoryNote = '';
+    } else if (!version.categoryId) {
+      throw new Error('Khóa học chưa có danh mục xuất bản hợp lệ.');
+    } else {
+      await categoryService.resolveActiveCategoryById(version.categoryId.toString());
+      version.categoryResolutionStatus = CategoryResolutionStatus.NONE;
+      version.suggestedCategoryName = '';
+      version.suggestedCategoryNote = '';
+    }
 
     // Approve bản cập nhật: version cũ thành ARCHIVED, version mới thành currentVersionId.
     if (shell.currentVersionId && shell.currentVersionId.toString() !== version._id.toString()) {
@@ -476,6 +534,22 @@ class CourseService {
     await this.syncShellDraftCache(shell._id.toString(), version, shell);
     // Sau khi public version mới, xóa media chỉ còn nằm trong archived versions.
     await mediaReferenceService.cleanupArchivedVersionMedia(shell._id as Types.ObjectId);
+
+    // Phát event thông báo khóa học đã được xuất bản để downstream cập nhật index/cache.
+    try {
+      await publishCoursePublished({
+        courseId: shell._id.toString(),
+        versionId: version._id.toString(),
+        title: version.title,
+        slug: version.slug,
+        instructorId: version.instructorId,
+        finalCategoryId: version.categoryId ? version.categoryId.toString() : undefined,
+        publishedAt: version.reviewedAt ? version.reviewedAt.toISOString() : new Date().toISOString(),
+      });
+    } catch (err) {
+      // Không block publish nếu event broker gặp lỗi; log và tiếp tục.
+      console.error('Failed to publish COURSE_PUBLISHED event', err);
+    }
 
     const approved = await CourseVersion.findById(version._id).populate('categoryId', 'name slug parentId').lean();
     return this.mapCourseReviewResponse(approved as unknown as VersionLike);
@@ -581,7 +655,7 @@ class CourseService {
 
   // Cache metadata lên Course shell để list/filter nhanh.
   // Nếu course đã PUBLISHED, chỉ currentVersion mới được phép cập nhật cache public.
-  private async syncShellDraftCache(courseId: string, version: Pick<ICourseVersion, '_id' | 'title' | 'shortDescription' | 'description' | 'thumbnail' | 'whatYouWillLearn' | 'requirements' | 'categoryId' | 'level' | 'price' | 'totalDuration' | 'totalLessons' | 'totalSections'>, shellDoc?: ICourse): Promise<void> {
+  private async syncShellDraftCache(courseId: string, version: Pick<ICourseVersion, '_id' | 'title' | 'shortDescription' | 'description' | 'thumbnail' | 'whatYouWillLearn' | 'requirements' | 'categoryId' | 'categoryResolutionStatus' | 'suggestedCategoryName' | 'suggestedCategoryNote' | 'level' | 'price' | 'totalDuration' | 'totalLessons' | 'totalSections'>, shellDoc?: ICourse): Promise<void> {
     const shell = shellDoc || await Course.findById(courseId);
     if (!shell) return;
     const shouldUpdateCache = shell.status !== CourseStatus.PUBLISHED || shell.currentVersionId?.toString() === version._id.toString();
@@ -594,6 +668,9 @@ class CourseService {
     shell.whatYouWillLearn = version.whatYouWillLearn || [];
     shell.requirements = version.requirements || [];
     shell.categoryId = version.categoryId ?? null;
+    shell.categoryResolutionStatus = version.categoryResolutionStatus || CategoryResolutionStatus.NONE;
+    shell.suggestedCategoryName = version.suggestedCategoryName || '';
+    shell.suggestedCategoryNote = version.suggestedCategoryNote || '';
     shell.level = version.level;
     shell.price = version.price;
     shell.totalDuration = version.totalDuration;
@@ -751,6 +828,9 @@ class CourseService {
       instructorName: version.instructorName,
       categoryId: category?._id || (version.categoryId ? version.categoryId.toString() : null),
       category,
+      categoryResolutionStatus: version.categoryResolutionStatus || CategoryResolutionStatus.NONE,
+      suggestedCategoryName: version.suggestedCategoryName || '',
+      suggestedCategoryNote: version.suggestedCategoryNote || '',
       level: version.level,
       status: version.status,
       submittedAt: version.submittedAt || null,
@@ -781,6 +861,8 @@ class CourseService {
 
   private mapCourseReviewResponse(version: VersionLike): CourseReviewResponse {
     const category = version.categoryId && typeof version.categoryId === 'object' && 'slug' in version.categoryId ? version.categoryId.name : '';
+    const categoryId = version.categoryId && typeof version.categoryId === 'object' && 'slug' in version.categoryId ? version.categoryId._id.toString() : (version.categoryId ? version.categoryId.toString() : null);
+    const categorySlug = version.categoryId && typeof version.categoryId === 'object' && 'slug' in version.categoryId ? version.categoryId.slug : '';
     const reviewedByAdmin = this.mapReviewerSnapshot(version);
     return {
       _id: version._id.toString(),
@@ -790,6 +872,11 @@ class CourseService {
       thumbnailUrl: version.thumbnail,
       instructor: { _id: version.instructorId, fullName: version.instructorName, email: '' },
       category,
+      categoryId,
+      categorySlug,
+      categoryResolutionStatus: version.categoryResolutionStatus || CategoryResolutionStatus.NONE,
+      suggestedCategoryName: version.suggestedCategoryName || '',
+      suggestedCategoryNote: version.suggestedCategoryNote || '',
       level: version.level,
       price: version.price,
       status: version.status,

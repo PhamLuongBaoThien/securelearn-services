@@ -22,6 +22,11 @@ export enum CourseStatus {
   ARCHIVED = 'ARCHIVED', // Version cũ đã được thay thế, chỉ giữ để audit
 }
 
+export enum CategoryResolutionStatus {
+  NONE = 'NONE',
+  NEEDS_ADMIN_CLASSIFICATION = 'NEEDS_ADMIN_CLASSIFICATION',
+}
+
 export interface ICourse extends Document {
   title: string;
   slug: string;
@@ -33,6 +38,9 @@ export interface ICourse extends Document {
   instructorId: string;       // userId từ Identity Service
   instructorName: string;     // Cache tên giảng viên (cập nhật qua event)
   categoryId?: Types.ObjectId | null;
+  categoryResolutionStatus: CategoryResolutionStatus;
+  suggestedCategoryName: string;
+  suggestedCategoryNote: string;
   level: CourseLevel;
   status: CourseStatus;
   currentVersionId?: Types.ObjectId | null; // CourseVersion đang public cho học viên/catalog
@@ -60,6 +68,14 @@ const courseSchema = new Schema<ICourse>(
     instructorId: { type: String, required: true, index: true },
     instructorName: { type: String, default: '' },
     categoryId: { type: Schema.Types.ObjectId, ref: 'Category', default: null, index: true },
+    categoryResolutionStatus: {
+      type: String,
+      enum: Object.values(CategoryResolutionStatus),
+      default: CategoryResolutionStatus.NONE,
+      index: true,
+    },
+    suggestedCategoryName: { type: String, default: '', trim: true, maxlength: 120 },
+    suggestedCategoryNote: { type: String, default: '', trim: true, maxlength: 500 },
     level: {
       type: String,
       enum: Object.values(CourseLevel),
