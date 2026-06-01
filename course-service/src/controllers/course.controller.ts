@@ -133,6 +133,16 @@ class CourseController {
     }
   }
 
+  public async getPublishedCourseForManage(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const course = await courseService.getPublishedCourseForManage(req.params.id as string, req.userId!);
+      res.status(200).json({ status: 'OK', data: course });
+    } catch (error: any) {
+      const status = error.message.includes('quyền') ? 403 : 404;
+      res.status(status).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   /**
    * [PUT] /api/courses/:id
    * Cập nhật khóa học (Instructor owner).

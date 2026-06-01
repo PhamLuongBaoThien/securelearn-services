@@ -52,6 +52,7 @@ router.use('/:courseId', extractUser, requireInstructor, lessonRoutes);
 router.use('/:courseId', extractUser, requireInstructor, quizRoutes);
 
 // [GET] /api/courses/:id/manage — Chi tiết khóa học (quản lý)
+router.get('/:id/manage/published', extractUser, requireInstructor, courseController.getPublishedCourseForManage);
 router.get('/:id/manage', extractUser, requireInstructor, courseController.getCourseForManage);
 
 // [PUT] /api/courses/:id — Cập nhật khóa học, hỗ trợ cả metadata và thumbnail file

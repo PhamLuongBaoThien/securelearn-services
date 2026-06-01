@@ -60,6 +60,7 @@ interface CourseResponse {
   totalLessons: number;
   totalSections: number;
   enrollmentCount: number;
+  isRevision: boolean;  // true nếu là bản cập nhật (versionNumber > 1), false nếu là bản náp lần đầu chưa xuất bản
   createdAt: Date;
   updatedAt: Date;
 }
@@ -314,6 +315,12 @@ class CourseService {
   public async getCourseForManage(versionId: string, instructorId: string): Promise<CourseResponse> {
     const { version, shell } = await this.getOwnedVersionOrThrow(versionId, instructorId, true);
     return this.buildVersionResponse(version._id.toString(), shell);
+  }
+
+  public async getPublishedCourseForManage(versionId: string, instructorId: string): Promise<CourseResponse> {
+    const { shell } = await this.getOwnedVersionOrThrow(versionId, instructorId);
+    if (!shell.currentVersionId) throw new Error('Khóa học chưa có bản đã xuất bản.');
+    return this.buildVersionResponse(shell.currentVersionId.toString(), shell);
   }
 
   public async updateCourse(
@@ -844,6 +851,7 @@ class CourseService {
       totalLessons: version.totalLessons,
       totalSections: version.totalSections || 0,
       enrollmentCount: shell.enrollmentCount,
+      isRevision: version.versionNumber > 1,
       createdAt: version.createdAt,
       updatedAt: version.updatedAt,
     };
