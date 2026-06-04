@@ -88,9 +88,12 @@ const courseVersionSchema = new Schema<ICourseVersion>(
 courseVersionSchema.index({ courseId: 1, versionNumber: 1 }, { unique: true });
 courseVersionSchema.index({ instructorId: 1, status: 1 });
 
+// Slug của version được tạo từ title khi title thay đổi.
+// Không yêu cầu unique (không có unique constraint), nhưng vẫn được generate đồng bộ với Course shell.
+// Slug canonical dùng để routing public được lấy từ Course shell, không phải từ CourseVersion.
 courseVersionSchema.pre('save', function (next) {
   if (this.isModified('title')) {
-    this.slug = slugify(this.title, { lower: true, strict: true }) + '-' + this._id;
+    this.slug = slugify(this.title, { lower: true, strict: true });
   }
 
   next();

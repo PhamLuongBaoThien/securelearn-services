@@ -102,10 +102,23 @@ const courseSchema = new Schema<ICourse>(
 
 courseSchema.index({ instructorId: 1, status: 1 });
 
-// Slug được tạo từ title + _id để giảm khả năng trùng.
-courseSchema.pre('save', function (next) {
+// Slug được tạo từ title khi title thay đổi.
+// Nếu slug đã tồn tại thì thêm hậu tố số (-2, -3, ...) cho đến khi tìm được slug chưa dùng.
+// Ví dụ: "React Cơ Bản" → react-co-ban → (nếu trùng) react-co-ban-2 → ...
+courseSchema.pre('save', async function (next) {
   if (this.isModified('title')) {
-    this.slug = slugify(this.title, { lower: true, strict: true }) + '-' + this._id;
+    const base = slugify(this.title, { lower: true, strict: true });
+    let candidate = base;
+    let counter = 2;
+
+    // Kiểm tra slug candidate đã tồn tại chưa (loại trừ chính document này).
+    // eslint-disable-next-line no-await-in-loop
+    while (await Course.findOne({ slug: candidate, _id: { $ne: this._id } })) {
+      candidate = `${base}-${counter}`;
+      counter++;
+    }
+
+    this.slug = candidate;
   }
 
   next();
