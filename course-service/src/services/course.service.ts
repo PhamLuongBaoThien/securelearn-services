@@ -589,7 +589,18 @@ class CourseService {
     return this.mapCourseReviewResponse(rejected as unknown as VersionLike);
   }
 
-  public async getPublishedCourses(query: { page?: number; limit?: number; search?: string; category?: string; level?: string }): Promise<{ courses: CourseResponse[]; total: number; page: number; totalPages: number }> {
+  public async getPublishedCourses(query: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    category?: string;
+    level?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    minDuration?: number; // seconds
+    maxDuration?: number; // seconds
+    sort?: string;
+  }): Promise<{ courses: CourseResponse[]; total: number; page: number; totalPages: number }> {
     const page = query.page || 1;
     const limit = query.limit || 12;
     const skip = (page - 1) * limit;
@@ -597,15 +608,51 @@ class CourseService {
 
     if (query.search) filter.$or = [{ title: { $regex: query.search, $options: 'i' } }, { description: { $regex: query.search, $options: 'i' } }];
     if (query.category) {
-      const category = await categoryService.resolveActiveCategorySlug(query.category);
-      const categoryIds = await categoryService.getDescendantAndSelfIds(category._id.toString());
-      filter.categoryId = { $in: categoryIds };
+      const slugs = query.category.split(',').map((s) => s.trim()).filter(Boolean);
+      const allCategoryIds: string[] = [];
+      for (const slug of slugs) {
+        try {
+          const category = await categoryService.resolveActiveCategorySlug(slug);
+          const categoryIds = await categoryService.getDescendantAndSelfIds(category._id.toString());
+          allCategoryIds.push(...categoryIds);
+        } catch (error) {
+          // Ignore invalid slugs
+        }
+      }
+      if (allCategoryIds.length > 0) {
+        filter.categoryId = { $in: allCategoryIds };
+      }
     }
-    if (query.level) filter.level = query.level;
+    if (query.level) {
+      const levels = query.level.split(',').map((s) => s.trim()).filter(Boolean);
+      if (levels.length > 0) {
+        filter.level = { $in: levels };
+      }
+    }
+
+    if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+      filter.price = {};
+      if (query.minPrice !== undefined) (filter.price as any).$gte = query.minPrice;
+      if (query.maxPrice !== undefined) (filter.price as any).$lte = query.maxPrice;
+    }
+
+    if (query.minDuration !== undefined || query.maxDuration !== undefined) {
+      filter.totalDuration = {};
+      if (query.minDuration !== undefined) (filter.totalDuration as any).$gte = query.minDuration;
+      if (query.maxDuration !== undefined) (filter.totalDuration as any).$lte = query.maxDuration;
+    }
+
+    let sortOption: any = { createdAt: -1 };
+    switch (query.sort) {
+      case 'newest':    sortOption = { createdAt: -1 };      break;
+      case 'popular':   sortOption = { enrollmentCount: -1 }; break;
+      case 'price_asc': sortOption = { price: 1 };            break;
+      case 'price_desc':sortOption = { price: -1 };           break;
+    }
 
     // Public catalog chỉ lấy Course shell đã PUBLISHED rồi hydrate nội dung từ currentVersionId.
     const [shells, total] = await Promise.all([
-      Course.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Course.find(filter).sort(sortOption).skip(skip).limit(limit).lean(),
       Course.countDocuments(filter),
     ]);
 
