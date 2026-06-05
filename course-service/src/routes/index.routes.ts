@@ -7,6 +7,7 @@ import courseRoutes from './course.routes';
 import categoryRoutes from './category.routes';
 import quizAttemptRoutes from './quizAttempt.routes';
 import adminCourseRoutes from './adminCourse.routes';
+import cartRoutes from './cart.routes';
 
 const routes = (app: Application) => {
   // Admin review APIs phải mount riêng để không bị slug route của /api/courses bắt nhầm.
@@ -17,6 +18,9 @@ const routes = (app: Application) => {
 
   // Route này xử lý quiz attempt cho student
   app.use('/api/courses', quizAttemptRoutes);
+
+  // Route giỏ hàng cho learner đã đăng nhập
+  app.use('/api/cart', cartRoutes);
 
   // Route cho category
   app.use('/api/categories', categoryRoutes);

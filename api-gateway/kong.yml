@@ -7,6 +7,7 @@
 #   GET /api/courses
 #   GET /api/courses/:slug
 #   GET /api/categories
+#   GET/POST/DELETE /api/cart...
 # - PROTECTED (JWT qua Kong, role check ở service):
 #   GET /api/courses/enrolled
 #   GET /api/courses/my-courses
@@ -158,6 +159,22 @@ services:
           - GET
           - PATCH
 
+      - name: cart-preflight # CORS preflight là OPTIONS request, không có header Authorization → để route riêng không gắn JWT plugin.
+        paths:
+          - /api/cart
+        strip_path: false
+        methods:
+          - OPTIONS
+
+      - name: cart-protected
+        paths:
+          - /api/cart
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - DELETE
+
   - name: media-service
     url: http://media-service:5003
     routes:
@@ -291,6 +308,13 @@ plugins:
 
   - name: jwt
     route: course-protected-reads
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  - name: jwt
+    route: cart-protected
     config:
       key_claim_name: iss
       claims_to_verify:

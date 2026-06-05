@@ -5,7 +5,8 @@
 // - enrollment APIs
 // - instructor APIs cho course, section, lesson, quiz
 // Lưu ý:
-// - slug route phải đặt cuối vì pattern rộng
+// - slug route phải đặt trước các router.use('/:courseId', ...) broad middleware.
+//   Nếu đặt sau, guest xem /api/courses/:slug sẽ bị extractUser chặn trước khi tới public route.
 // - section/lesson/quiz được mount dưới :courseId
 // ========================
 import { Router } from 'express';
@@ -46,11 +47,6 @@ router.post('/:id/submit-review', extractUser, requireInstructor, courseControll
 // [POST] /api/courses/:id/revisions — Tạo/lấy bản nháp cập nhật cho khóa đã publish
 router.post('/:id/revisions', extractUser, requireInstructor, courseController.createOrGetRevision);
 
-router.use('/:courseId/sections', extractUser, requireInstructor, sectionRoutes);
-router.use('/:courseId', extractUser, requireInstructor, sectionRoutes);
-router.use('/:courseId', extractUser, requireInstructor, lessonRoutes);
-router.use('/:courseId', extractUser, requireInstructor, quizRoutes);
-
 // [GET] /api/courses/:id/manage — Chi tiết khóa học (quản lý)
 router.get('/:id/manage/published', extractUser, requireInstructor, courseController.getPublishedCourseForManage);
 router.get('/:id/manage', extractUser, requireInstructor, courseController.getCourseForManage);
@@ -64,9 +60,14 @@ router.post('/:id/publish/validate', extractUser, requireInstructor, courseContr
 // [DELETE] /api/courses/:id — Xóa khóa học
 router.delete('/:id', extractUser, requireInstructor, courseController.deleteCourse);
 
-// ========== PUBLIC (Slug route — phải đặt cuối cùng vì match pattern rộng) ==========
+// ========== PUBLIC (Slug route — đặt trước broad nested routers để guest không bị middleware auth chặn) ==========
 
 // [GET] /api/courses/:slug — Chi tiết khóa học theo slug
 router.get('/:slug', courseController.getCourseBySlug);
+
+router.use('/:courseId/sections', extractUser, requireInstructor, sectionRoutes);
+router.use('/:courseId', extractUser, requireInstructor, sectionRoutes);
+router.use('/:courseId', extractUser, requireInstructor, lessonRoutes);
+router.use('/:courseId', extractUser, requireInstructor, quizRoutes);
 
 export default router;
