@@ -11,6 +11,7 @@ export enum Exchange {
   IDENTITY = 'identity.events',
   COURSE = 'course.events',
   MEDIA = 'media.events',
+  PAYMENT = 'payment.events',
 }
 
 /**
@@ -34,6 +35,10 @@ export enum RoutingKey {
   VIDEO_ASSET_FAILED = 'media.video.failed',
   VIDEO_ASSET_ATTACHED = 'media.video.attached',
   DOCUMENT_ASSET_ATTACHED = 'media.document.attached',
+
+  // --- Payment Events ---
+  PAYMENT_COURSE_SUCCEEDED = 'payment.course.succeeded',
+  PAYMENT_COURSE_FAILED = 'payment.course.failed',
 
   // --- Asset Cleanup Events (course-service → media-service) ---
   VIDEO_ASSET_CLEANUP = 'media.video.cleanup',
@@ -103,3 +108,40 @@ export interface AssetAttachedPayload {
   lessonId: string;
 }
 
+export type PaymentProvider = 'VNPAY' | 'MOMO';
+export type PaymentMethod = 'VNPAY' | 'MOMO';
+export type PaymentStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED';
+
+export interface PaymentCourseItemPayload {
+  courseId: string;
+  slug: string;
+  title: string;
+  price: number;
+  thumbnail?: string;
+  instructorName?: string;
+}
+
+export interface PaymentCourseSucceededPayload {
+  transactionId: string;
+  transactionCode: string;
+  userId: string;
+  userRole: string;
+  fullName: string;
+  email: string;
+  provider: PaymentProvider;
+  paymentMethod: PaymentMethod;
+  amount: number;
+  items: PaymentCourseItemPayload[];
+  paidAt: string;
+}
+
+export interface PaymentCourseFailedPayload {
+  transactionId: string;
+  transactionCode: string;
+  userId: string;
+  provider: PaymentProvider;
+  paymentMethod: PaymentMethod;
+  amount: number;
+  reason: string;
+  failedAt: string;
+}

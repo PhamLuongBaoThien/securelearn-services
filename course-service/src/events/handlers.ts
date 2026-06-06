@@ -14,6 +14,7 @@ import {
   type UserUpdatedPayload,
   type UserDeletedPayload,
   type VideoAssetStatusPayload,
+  type PaymentCourseSucceededPayload,
 } from '@securelearn/common';
 import { Course } from '../models/course.model';
 import { CourseVersion } from '../models/courseVersion.model';
@@ -24,6 +25,8 @@ import { Section } from '../models/section.model';
 import { Quiz } from '../models/quiz.model';
 import { QuizAttempt } from '../models/quizAttempt.model';
 import lessonService from '../services/lesson.service';
+import cartService from '../services/cart.service';
+import enrollmentService from '../services/enrollment.service';
 
 /**
  * Đăng ký lắng nghe tất cả events mà Course Service quan tâm.
@@ -119,6 +122,37 @@ export const registerEventHandlers = async (): Promise<void> => {
         status: LessonStatus.FAILED,
       });
       console.log(`[CourseEvent] Video asset FAILED cho lesson ${payload.lessonId}`);
+    }
+  );
+
+  await subscribeMessage<PaymentCourseSucceededPayload>(
+    Exchange.PAYMENT,
+    RoutingKey.PAYMENT_COURSE_SUCCEEDED,
+    'course-service.payment-course-succeeded',
+    async (payload) => {
+      console.log(`[CourseEvent] Payment succeeded: ${payload.transactionCode} | user ${payload.userId}`);
+
+      let allSucceeded = true;
+
+      for (const item of payload.items) {
+        try {
+          await enrollmentService.enroll(payload.userId, item.courseId, payload.userRole);
+        } catch (error: any) {
+          const message = error?.message || 'Không thể ghi danh khóa học từ thanh toán.';
+          console.warn(`[CourseEvent] Enroll failed for course ${item.courseId}: ${message}`);
+
+          if (!message.includes('đã ghi danh')) {
+            allSucceeded = false;
+          }
+        }
+      }
+
+      if (allSucceeded) {
+        await cartService.clearCart(payload.userId);
+        console.log(`[CourseEvent] Đã ghi danh và xóa giỏ hàng của user ${payload.userId} sau thanh toán ${payload.transactionCode}`);
+      } else {
+        console.warn(`[CourseEvent] Thanh toán ${payload.transactionCode} hoàn tất nhưng có ít nhất 1 khóa học chưa ghi danh thành công.`);
+      }
     }
   );
 

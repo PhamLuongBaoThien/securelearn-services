@@ -175,6 +175,31 @@ services:
           - POST
           - DELETE
 
+  - name: payment-service
+    url: http://payment-service:5004
+    routes:
+      - name: payment-preflight
+        paths:
+          - /api/payments
+        strip_path: false
+        methods:
+          - OPTIONS
+
+      - name: payment-webhook
+        paths:
+          - /api/payments/webhooks
+        strip_path: false
+        methods:
+          - POST
+
+      - name: payment-protected
+        paths:
+          - /api/payments
+        strip_path: false
+        methods:
+          - GET
+          - POST
+
   - name: media-service
     url: http://media-service:5003
     routes:
@@ -315,6 +340,13 @@ plugins:
 
   - name: jwt
     route: cart-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  - name: jwt
+    route: payment-protected
     config:
       key_claim_name: iss
       claims_to_verify:
