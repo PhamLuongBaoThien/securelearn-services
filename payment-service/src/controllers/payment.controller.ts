@@ -9,9 +9,11 @@
 // - getTransaction()
 // - getTransactionByCode()
 // - webhookVnpay()
+// - webhookMomo()
+// - momoReturn()
 // ========================
 
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import paymentService from '../services/payment.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { PaymentMethod, PaymentProvider } from '@securelearn/common';
@@ -79,7 +81,7 @@ class PaymentController {
     }
   }
 
-  public async webhookVnpay(req: AuthRequest, res: Response): Promise<void> {
+  public async webhookVnpay(req: Request, res: Response): Promise<void> {
     try {
       const payload = {
         ...(req.query as Record<string, unknown>),
@@ -95,6 +97,19 @@ class PaymentController {
     }
   }
 
+  public async webhookMomo(req: Request, res: Response): Promise<void> {
+    try {
+      const payload = {
+        ...(req.query as Record<string, unknown>),
+        ...(req.body as Record<string, unknown>),
+      };
+      await paymentService.handleMomoIpn(payload);
+      res.status(204).send();
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   public async vnpayReturn(req: AuthRequest, res: Response): Promise<void> {
     try {
       const payload = {
@@ -105,6 +120,23 @@ class PaymentController {
       res.status(200).json({
         status: 'OK',
         message: 'Xác nhận thanh toán VNPay thành công.',
+        data: result,
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async momoReturn(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const payload = {
+        ...(req.query as Record<string, unknown>),
+        ...(req.body as Record<string, unknown>),
+      };
+      const result = await paymentService.handleMomoReturn(payload);
+      res.status(200).json({
+        status: 'OK',
+        message: 'Xác nhận thanh toán MoMo thành công.',
         data: result,
       });
     } catch (error: any) {

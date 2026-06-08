@@ -3,13 +3,15 @@
 // Mục đích:
 // - tạo checkout cho giỏ hàng khóa học
 // - tra cứu transaction
-// - xử lý IPN/return theo VNPay
+// - xử lý IPN/return theo VNPay và MoMo
 // - phát event sang course-service khi thanh toán thành công
 // Hàm chính:
 // - createCourseCheckout()
 // - getTransactionForUser()
 // - getTransactionByCodeForUser()
 // - handleVnpayIpn()
+// - handleMomoIpn()
+// - handleMomoReturn()
 // - failTransaction()
 // ========================
 import { randomUUID } from 'crypto';
@@ -20,6 +22,9 @@ import { PaymentWebhookEvent } from '../models/paymentWebhookEvent.model';
 import { publishPaymentCourseFailed, publishPaymentCourseSucceeded } from '../events/publishers';
 import { buildVnpayPaymentUrl } from './vnpay/vnpay.builder';
 import { verifyVnpaySignature } from './vnpay/vnpay.verifier';
+import { createMomoPaymentSession, queryMomoTransaction } from './momo/momo.client';
+import { verifyMomoSignature } from './momo/momo.verifier';
+import { getMomoConfig } from './momo/momo.config';
 
 type CheckoutRequest = {
   paymentMethod: PaymentMethod;
@@ -58,13 +63,9 @@ class PaymentService {
     }
 
     const normalizedProvider = this.normalizeProvider(request.provider, request.paymentMethod);
-    if (normalizedProvider !== 'VNPAY') {
-      throw new Error('Hiện tại SecureLearn mới tích hợp VNPay cho phase thanh toán đầu tiên.');
-    }
 
     const transactionCode = this.generateTransactionCode(normalizedProvider);
     const orderInfo = this.buildOrderInfo(user.fullName, cart.items);
-
     const transaction = await PaymentTransaction.create({
       transactionCode,
       userId: user.userId,
@@ -78,26 +79,64 @@ class PaymentService {
       status: 'PENDING' as PaymentStatus,
     });
 
-    await PaymentAttempt.create({
-      transactionId: transaction._id.toString(),
-      transactionCode,
-      userId: user.userId,
-      action: 'CHECKOUT',
-      provider: normalizedProvider,
-      paymentMethod: request.paymentMethod,
-      success: true,
-      message: 'Created checkout session',
-      rawPayload: { cartCount: cart.items.length, clientIp, orderInfo },
-    });
+    let paymentUrl = '';
+
+    try {
+      if (normalizedProvider === 'MOMO') {
+        const momoConfig = getMomoConfig();
+        paymentUrl = await this.createMomoCheckoutUrl({
+          orderId: transaction.transactionCode,
+          amount: transaction.amount,
+          orderInfo,
+          redirectUrl: momoConfig.returnUrl,
+          ipnUrl: momoConfig.ipnUrl,
+          items: this.toMomoItems(cart.items),
+          userInfo: { name: user.fullName, email: user.email },
+        });
+      } else {
+        paymentUrl = buildVnpayPaymentUrl({
+          txnRef: transaction.transactionCode,
+          amount: transaction.amount,
+          orderInfo,
+          ipAddr: clientIp || '127.0.0.1',
+        });
+      }
+
+      await PaymentAttempt.create({
+        transactionId: transaction._id.toString(),
+        transactionCode,
+        userId: user.userId,
+        action: 'CHECKOUT',
+        provider: normalizedProvider,
+        paymentMethod: request.paymentMethod,
+        success: true,
+        message: 'Created checkout session',
+        rawPayload: { cartCount: cart.items.length, clientIp, orderInfo, paymentUrl },
+      });
+    } catch (error: any) {
+      transaction.status = 'FAILED';
+      transaction.failedAt = new Date();
+      transaction.failureReason = error.message || 'Không thể tạo phiên thanh toán.';
+      await transaction.save();
+
+      await PaymentAttempt.create({
+        transactionId: transaction._id.toString(),
+        transactionCode,
+        userId: user.userId,
+        action: 'CHECKOUT',
+        provider: normalizedProvider,
+        paymentMethod: request.paymentMethod,
+        success: false,
+        message: error.message || 'Không thể tạo phiên thanh toán.',
+        rawPayload: { cartCount: cart.items.length, clientIp, orderInfo },
+      });
+
+      throw error;
+    }
 
     return {
       transaction: this.mapTransaction(transaction),
-      paymentUrl: buildVnpayPaymentUrl({
-        txnRef: transaction.transactionCode,
-        amount: transaction.amount,
-        orderInfo,
-        ipAddr: clientIp || '127.0.0.1',
-      }),
+      paymentUrl,
     };
   }
 
@@ -188,6 +227,30 @@ class PaymentService {
       throw new Error(result.message);
     }
     return result.data!;
+  }
+
+  public async handleMomoIpn(payload: Record<string, unknown>) {
+    const result = await this.processMomoResult(payload, 'WEBHOOK');
+    return result;
+  }
+
+  public async handleMomoReturn(payload: Record<string, unknown>) {
+    const result = await this.processMomoResult(payload, 'CONFIRM');
+    if (result.success) {
+      return result.data!;
+    }
+
+    const orderId = String(payload.orderId || payload.order_id || '');
+    if (!orderId) {
+      throw new Error(result.message);
+    }
+
+    const reconciled = await this.reconcileMomoTransaction(orderId);
+    if (!reconciled.success) {
+      throw new Error(reconciled.message);
+    }
+
+    return reconciled.data!;
   }
 
   private async processVnpayResult(payload: Record<string, unknown>, action: 'WEBHOOK' | 'CONFIRM') {
@@ -328,6 +391,146 @@ class PaymentService {
     };
   }
 
+  private async processMomoResult(payload: Record<string, unknown>, action: 'WEBHOOK' | 'CONFIRM' | 'QUERY') {
+    const orderId = String(payload.orderId || payload.order_id || '');
+    if (!orderId) {
+      return { success: false, message: 'Thiếu mã đơn hàng (orderId).' };
+    }
+
+    if (action !== 'QUERY' && !verifyMomoSignature(payload)) {
+      return { success: false, message: 'Chữ ký giao dịch MoMo không hợp lệ.' };
+    }
+
+    const transaction = await PaymentTransaction.findOne({ transactionCode: orderId });
+    if (!transaction) {
+      return { success: false, message: 'Giao dịch không tồn tại trên hệ thống.' };
+    }
+
+    const resultCode = Number(payload.resultCode ?? payload.result_code ?? -1);
+    const amount = Number(payload.amount ?? 0);
+    const requestId = String(payload.requestId || payload.request_id || '');
+    const transId = String(payload.transId || payload.trans_id || '');
+    const responseTime = String(payload.responseTime || payload.response_time || '');
+    const eventId = `${orderId}-${transId || requestId || 'na'}`;
+
+    const existingWebhook = await PaymentWebhookEvent.findOne({ provider: 'MOMO', eventId });
+    if (existingWebhook) {
+      return {
+        success: true,
+        message: 'Giao dịch đã được ghi nhận trước đó.',
+        data: this.mapTransaction(transaction),
+      };
+    }
+
+    if (Math.round(transaction.amount) !== Math.round(amount)) {
+      return { success: false, message: 'Số tiền thanh toán không khớp với giao dịch.' };
+    }
+
+    if (transaction.status === 'SUCCEEDED') {
+      await PaymentWebhookEvent.create({
+        provider: 'MOMO',
+        eventId,
+        transactionCode: orderId,
+        status: 'SUCCEEDED',
+        processedAt: new Date(),
+        rawPayload: payload,
+      });
+
+      return { success: true, message: 'Thành công', data: this.mapTransaction(transaction) };
+    }
+
+    if (![0, 9000].includes(resultCode)) {
+      transaction.status = 'FAILED';
+      transaction.failedAt = new Date();
+      transaction.failureReason = String(payload.message || 'Thanh toán MoMo thất bại.');
+      transaction.providerRef = transId || transaction.providerRef || randomUUID();
+      await transaction.save();
+
+      await PaymentAttempt.create({
+        transactionId: transaction._id.toString(),
+        transactionCode: orderId,
+        userId: transaction.userId,
+        action,
+        provider: 'MOMO',
+        paymentMethod: transaction.paymentMethod,
+        success: false,
+        message: transaction.failureReason,
+        rawPayload: payload,
+      });
+
+      await publishPaymentCourseFailed({
+        transactionId: transaction._id.toString(),
+        transactionCode: transaction.transactionCode,
+        userId: transaction.userId,
+        provider: 'MOMO',
+        paymentMethod: transaction.paymentMethod,
+        amount: transaction.amount,
+        reason: transaction.failureReason,
+        failedAt: new Date().toISOString(),
+      });
+
+      await PaymentWebhookEvent.create({
+        provider: 'MOMO',
+        eventId,
+        transactionCode: orderId,
+        status: 'FAILED',
+        processedAt: new Date(),
+        rawPayload: payload,
+      });
+
+      return {
+        success: false,
+        message: `Thanh toán MoMo thất bại (Mã phản hồi: ${resultCode}).`,
+        data: this.mapTransaction(transaction),
+      };
+    }
+
+    transaction.status = 'SUCCEEDED';
+    transaction.providerRef = transId || transaction.providerRef || randomUUID();
+    transaction.paidAt = responseTime ? new Date(Number(responseTime)) : new Date();
+    transaction.failureReason = '';
+    await transaction.save();
+
+    await PaymentAttempt.create({
+      transactionId: transaction._id.toString(),
+      transactionCode: orderId,
+      userId: transaction.userId,
+      action,
+      provider: 'MOMO',
+      paymentMethod: transaction.paymentMethod,
+      success: true,
+      message: `MoMo ${action} success`,
+      rawPayload: payload,
+    });
+
+    await publishPaymentCourseSucceeded(this.toSucceededPayload(transaction));
+
+    await PaymentWebhookEvent.create({
+      provider: 'MOMO',
+      eventId,
+      transactionCode: orderId,
+      status: 'SUCCEEDED',
+      processedAt: new Date(),
+      rawPayload: payload,
+    });
+
+    return {
+      success: true,
+      message: 'Thành công',
+      data: this.mapTransaction(transaction),
+    };
+  }
+
+  private async reconcileMomoTransaction(orderId: string) {
+    const response = await queryMomoTransaction(orderId);
+    const payload: Record<string, unknown> = {
+      ...response,
+      orderId: response.orderId || orderId,
+    };
+
+    return this.processMomoResult(payload, 'QUERY');
+  }
+
   private async fetchCart(token: string): Promise<{ items: PaymentCourseItem[]; totalPrice: number }> {
     const response = await fetch(`${this.courseServiceUrl}/api/cart`, {
       headers: {
@@ -445,6 +648,63 @@ class PaymentService {
     const minute = Number(value.slice(10, 12));
     const second = Number(value.slice(12, 14));
     return new Date(Date.UTC(year, month, day, hour - 7, minute, second));
+  }
+
+  private async createMomoCheckoutUrl(input: {
+    orderId: string;
+    amount: number;
+    orderInfo: string;
+    redirectUrl: string;
+    ipnUrl: string;
+    items: Array<{
+      id: string;
+      name: string;
+      description: string;
+      imageUrl?: string;
+      price: number;
+      quantity: number;
+      totalPrice: number;
+      category?: string;
+      unit?: string;
+      taxAmount?: number;
+    }>;
+    userInfo: {
+      name: string;
+      email?: string;
+      phoneNumber?: string;
+    };
+  }) {
+    const session = await createMomoPaymentSession({
+      orderId: input.orderId,
+      amount: input.amount,
+      orderInfo: input.orderInfo,
+      redirectUrl: input.redirectUrl,
+      ipnUrl: input.ipnUrl,
+      orderExpireTime: Number(process.env.MOMO_ORDER_EXPIRE_TIME || '30'),
+      items: input.items,
+      userInfo: input.userInfo,
+    });
+
+    if (!session.payUrl) {
+      throw new Error('MoMo không trả về đường dẫn thanh toán.');
+    }
+
+    return session.payUrl;
+  }
+
+  private toMomoItems(items: PaymentCourseItem[]) {
+    return items.map((item) => ({
+      id: item.courseId,
+      name: item.title,
+      description: item.title,
+      imageUrl: item.thumbnail || 'https://placehold.co/300x300/png?text=SecureLearn',
+      price: Math.round(item.price),
+      quantity: 1,
+      totalPrice: Math.round(item.price),
+      category: 'education',
+      unit: 'course',
+      taxAmount: 0,
+    }));
   }
 }
 
