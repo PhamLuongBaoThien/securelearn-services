@@ -72,7 +72,7 @@ class AuthController {
       const user = await authService.login(email, password);
 
       // Sinh token từ jwt.service
-      const access_token = generalAccessToken({ id: user._id.toString(), role: user.role, fullName: user.fullName });
+      const access_token = generalAccessToken({ id: user._id.toString(), role: user.role, fullName: user.fullName, email: user.email });
       const refresh_token = generalRefreshToken({ id: user._id.toString(), role: user.role });
 
       // Lưu Refresh Token vào HttpOnly Cookie (chống XSS — JS không đọc được)
@@ -137,6 +137,7 @@ class AuthController {
         id: result.decoded!.id,
         role: result.decoded!.role,
         fullName: user?.fullName ?? '',
+        email: user?.email ?? '',
       });
 
       res.status(200).json({
@@ -174,7 +175,7 @@ class AuthController {
   public async googleCallback(req: Request, res: Response): Promise<void> {
     try {
       const user: any = req.user;
-      const access_token = generalAccessToken({ id: user._id.toString(), role: user.role, fullName: user.fullName });
+      const access_token = generalAccessToken({ id: user._id.toString(), role: user.role, fullName: user.fullName, email: user.email });
       const refresh_token = generalRefreshToken({ id: user._id.toString(), role: user.role });
 
       // Gắn refresh token vào cookie
@@ -226,6 +227,7 @@ class AuthController {
           id: req.userId!,
           role: req.userRole!,
           fullName: updatedUser.fullName,
+          email: updatedUser.email ?? '',
         });
       }
 
@@ -344,6 +346,7 @@ class AuthController {
         id: updatedUser!._id.toString(),
         role: updatedUser!.role,
         fullName: updatedUser!.fullName,
+        email: updatedUser!.email ?? '',
       });
       const refresh_token = generalRefreshToken({
         id: updatedUser!._id.toString(),

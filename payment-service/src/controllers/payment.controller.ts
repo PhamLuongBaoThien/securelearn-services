@@ -1,3 +1,4 @@
+// ========================
 // Payment Controller
 // Mục đích:
 // - nhận request HTTP từ gateway
@@ -6,8 +7,9 @@
 // Hàm chính:
 // - courseCheckout()
 // - getTransaction()
-// - confirm()
-// - webhook()
+// - getTransactionByCode()
+// - webhookVnpay()
+// ========================
 
 import { Response } from 'express';
 import paymentService from '../services/payment.service';
@@ -37,7 +39,8 @@ class PaymentController {
           email: req.userEmail || '',
         },
         authHeader,
-        { paymentMethod, provider }
+        { paymentMethod, provider },
+        String(req.headers['x-forwarded-for'] || req.ip || '127.0.0.1').split(',')[0].trim()
       );
 
       res.status(201).json({
@@ -60,40 +63,49 @@ class PaymentController {
     }
   }
 
-  public async confirm(req: AuthRequest, res: Response): Promise<void> {
+  public async getTransactionByCode(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { transactionId, providerRef } = req.body as { transactionId?: string; providerRef?: string };
-      if (!transactionId) {
-        res.status(400).json({ status: 'ERR', message: 'Thiếu transactionId.' });
+      const transactionCode = String(req.params.transactionCode || '');
+      if (!transactionCode) {
+        res.status(400).json({ status: 'ERR', message: 'Thiếu transactionCode.' });
         return;
       }
 
-      const transaction = await paymentService.confirmTransaction(String(transactionId), {
-        userId: req.userId!,
-        userRole: req.userRole!,
-        fullName: req.userName || '',
-        email: req.userEmail || '',
-      }, providerRef);
-
-      res.status(200).json({
-        status: 'OK',
-        message: 'Thanh toán thành công.',
-        data: transaction,
-      });
+      const transaction = await paymentService.getTransactionByCodeForUser(transactionCode, req.userId!);
+      res.status(200).json({ status: 'OK', data: transaction });
     } catch (error: any) {
       const status = error.message.includes('quyền') ? 403 : 400;
       res.status(status).json({ status: 'ERR', message: error.message });
     }
   }
 
-  public async webhook(req: AuthRequest, res: Response): Promise<void> {
+  public async webhookVnpay(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const provider = String(req.params.provider || '').toUpperCase() as PaymentProvider;
-      const transaction = await paymentService.handleWebhook(provider, req.body as Record<string, unknown>);
+      const payload = {
+        ...(req.query as Record<string, unknown>),
+        ...(req.body as Record<string, unknown>),
+      };
+      const result = await paymentService.handleVnpayIpn(payload);
+      res.status(200).json({
+        RspCode: result.rspCode,
+        Message: result.message,
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async vnpayReturn(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const payload = {
+        ...(req.query as Record<string, unknown>),
+        ...(req.body as Record<string, unknown>),
+      };
+      const result = await paymentService.handleVnpayReturn(payload);
       res.status(200).json({
         status: 'OK',
-        message: 'Webhook đã được xử lý.',
-        data: transaction,
+        message: 'Xác nhận thanh toán VNPay thành công.',
+        data: result,
       });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });

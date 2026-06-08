@@ -17,6 +17,34 @@ export interface AuthRequest extends Request {
   userEmail?: string;
 }
 
+const identityServiceBaseUrl = process.env.IDENTITY_SERVICE_URL || 'http://localhost:5001';
+
+const resolveProfileFromIdentityService = async (token: string): Promise<Partial<Pick<AuthRequest, 'userEmail' | 'userName'>>> => {
+  try {
+    const response = await fetch(`${identityServiceBaseUrl}/api/auth/me`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const data = (await response.json()) as {
+      status?: string;
+      data?: { email?: string; fullName?: string };
+    };
+
+    if (response.ok && data.status === 'OK' && data.data) {
+      return {
+        userEmail: data.data.email || '',
+        userName: data.data.fullName || '',
+      };
+    }
+  } catch (error) {
+    console.warn('[PaymentAuth] Không thể lấy profile từ identity-service:', error);
+  }
+
+  return {};
+};
+
 export const extractUser = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
 
@@ -35,6 +63,12 @@ export const extractUser = async (req: AuthRequest, res: Response, next: NextFun
   req.userRole = decoded.role;
   req.userName = decoded.fullName ?? '';
   req.userEmail = decoded.email ?? '';
+
+  if (!req.userEmail) {
+    const profile = await resolveProfileFromIdentityService(token);
+    req.userEmail = profile.userEmail ?? '';
+    req.userName = req.userName || profile.userName || '';
+  }
 
   if (decoded.role !== 'ADMIN') {
     const isLocked = await redisClient.get(`locked_user:${decoded.id}`);

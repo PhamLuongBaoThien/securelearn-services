@@ -190,6 +190,7 @@ services:
           - /api/payments/webhooks
         strip_path: false
         methods:
+          - GET
           - POST
 
       - name: payment-protected
