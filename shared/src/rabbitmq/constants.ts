@@ -119,6 +119,11 @@ export interface PaymentCourseItemPayload {
   price: number;
   thumbnail?: string;
   instructorName?: string;
+  instructorId?: string;
+  adminPercent?: number;
+  instructorPercent?: number;
+  adminAmount?: number;
+  instructorAmount?: number;
 }
 
 export interface PaymentCourseSucceededPayload {

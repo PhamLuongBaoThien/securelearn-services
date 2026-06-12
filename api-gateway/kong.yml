@@ -200,6 +200,7 @@ services:
         methods:
           - GET
           - POST
+          - PUT
 
   - name: media-service
     url: http://media-service:5003

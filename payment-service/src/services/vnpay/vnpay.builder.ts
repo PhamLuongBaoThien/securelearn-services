@@ -73,12 +73,12 @@ export const buildVnpayPaymentUrl = (input: BuildVnpayPaymentUrlInput): string =
   // Sort key theo alphabet — bắt buộc theo spec VNPay
   const sortedKeys = Object.keys(params).sort();
 
-  // Chuỗi hash data: key=phpUrlEncode(value) — đúng theo PHP demo VNPay
+  // Chuỗi hash data: key=phpUrlEncode(value) — khớp với cách VNPay ký trên query đã encode
   const hashData = sortedKeys
     .map((key) => `${key}=${phpUrlEncode(params[key])}`)
     .join('&');
 
-  // URL query string: phpUrlEncode(key)=phpUrlEncode(value)
+  // URL query string: encode cả key lẫn value để browser xử lý đúng
   const queryString = sortedKeys
     .map((key) => `${phpUrlEncode(key)}=${phpUrlEncode(params[key])}`)
     .join('&');

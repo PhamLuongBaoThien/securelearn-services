@@ -9,6 +9,7 @@ export interface CartCourseItem {
   price: number;
   thumbnail?: string;
   instructorName: string;
+  instructorId: string;
   addedAt: Date;
 }
 
@@ -123,7 +124,7 @@ class CartService {
       _id: { $in: courseIds },
       status: CourseStatus.PUBLISHED,
     })
-      .select('slug title price thumbnail instructorName')
+      .select('slug title price thumbnail instructorName instructorId')
       .lean();
 
     const coursesById = new Map(courses.map((course) => [course._id.toString(), course]));
@@ -137,6 +138,7 @@ class CartService {
           price: course.price,
           thumbnail: course.thumbnail,
           instructorName: course.instructorName,
+          instructorId: course.instructorId,
           addedAt: item.addedAt,
         });
         return result;

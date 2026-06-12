@@ -18,6 +18,7 @@ import { randomUUID } from 'crypto';
 import { PaymentMethod, PaymentProvider, PaymentStatus, type PaymentCourseSucceededPayload } from '@securelearn/common';
 import { PaymentAttempt } from '../models/paymentAttempt.model';
 import { PaymentTransaction, type PaymentCourseItem, type IPaymentTransaction } from '../models/paymentTransaction.model';
+import { FinanceConfig } from '../models/financeConfig.model';
 import { PaymentWebhookEvent } from '../models/paymentWebhookEvent.model';
 import { publishPaymentCourseFailed, publishPaymentCourseSucceeded } from '../events/publishers';
 import { buildVnpayPaymentUrl } from './vnpay/vnpay.builder';
@@ -42,14 +43,21 @@ type CartResponse = {
       price: number;
       thumbnail?: string;
       instructorName: string;
+      instructorId: string;
     }>;
     totalPrice: number;
   };
 };
 
+type RevenueSplitConfig = {
+  adminPercent: number;
+  instructorPercent: number;
+};
+
 class PaymentService {
   private readonly courseServiceUrl = process.env.COURSE_SERVICE_URL || 'http://course-service:5002';
   private readonly clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+  private readonly financeConfigKey = 'COURSE_REVENUE_SPLIT';
 
   public async createCourseCheckout(
     user: { userId: string; userRole: string; fullName: string; email: string },
@@ -65,7 +73,7 @@ class PaymentService {
     const normalizedProvider = this.normalizeProvider(request.provider, request.paymentMethod);
 
     const transactionCode = this.generateTransactionCode(normalizedProvider);
-    const orderInfo = this.buildOrderInfo(user.fullName, cart.items);
+    const orderInfo = this.buildOrderInfo(transactionCode, cart.items.length);
     const transaction = await PaymentTransaction.create({
       transactionCode,
       userId: user.userId,
@@ -153,15 +161,15 @@ class PaymentService {
   private async confirmTransaction(transactionId: string, user: { userId: string; userRole: string; fullName: string; email: string }, providerRef?: string) {
     const transaction = await this.findOwnedTransaction(transactionId, user.userId);
 
-    if (transaction.status === 'SUCCEEDED') {
-      return this.mapTransaction(transaction);
+    if (transaction.status !== 'SUCCEEDED') {
+      transaction.status = 'SUCCEEDED';
+      transaction.providerRef = providerRef || transaction.providerRef || randomUUID();
+      transaction.paidAt = new Date();
+      transaction.failureReason = '';
+      await transaction.save();
     }
 
-    transaction.status = 'SUCCEEDED';
-    transaction.providerRef = providerRef || transaction.providerRef || randomUUID();
-    transaction.paidAt = new Date();
-    transaction.failureReason = '';
-    await transaction.save();
+    await this.ensureRevenueSnapshot(transaction);
 
     await PaymentAttempt.create({
       transactionId: transaction._id.toString(),
@@ -294,6 +302,7 @@ class PaymentService {
 
     // Trường hợp giao dịch đã ở trạng thái thành công trong DB (được xử lý bởi cổng kia trước)
     if (transaction.status === 'SUCCEEDED') {
+      await this.ensureRevenueSnapshot(transaction);
       await PaymentWebhookEvent.create({
         provider: 'VNPAY',
         eventId,
@@ -359,6 +368,7 @@ class PaymentService {
     transaction.paidAt = payDate ? this.parseVnpayDate(payDate) : new Date();
     transaction.failureReason = '';
     await transaction.save();
+    await this.ensureRevenueSnapshot(transaction);
 
     await PaymentAttempt.create({
       transactionId: transaction._id.toString(),
@@ -427,6 +437,7 @@ class PaymentService {
     }
 
     if (transaction.status === 'SUCCEEDED') {
+      await this.ensureRevenueSnapshot(transaction);
       await PaymentWebhookEvent.create({
         provider: 'MOMO',
         eventId,
@@ -490,6 +501,7 @@ class PaymentService {
     transaction.paidAt = responseTime ? new Date(Number(responseTime)) : new Date();
     transaction.failureReason = '';
     await transaction.save();
+    await this.ensureRevenueSnapshot(transaction);
 
     await PaymentAttempt.create({
       transactionId: transaction._id.toString(),
@@ -571,7 +583,8 @@ class PaymentService {
     return transaction;
   }
 
-  private mapTransaction(transaction: IPaymentTransaction) {
+  private mapTransaction(transaction: any) {
+    const splitTotals = this.calculateTransactionSplitTotals(transaction);
     return {
       _id: transaction._id.toString(),
       transactionCode: transaction.transactionCode,
@@ -581,6 +594,9 @@ class PaymentService {
       email: transaction.email,
       items: transaction.items,
       amount: transaction.amount,
+      grossAmount: transaction.amount,
+      adminAmount: splitTotals.adminAmount,
+      instructorAmount: splitTotals.instructorAmount,
       provider: transaction.provider,
       paymentMethod: transaction.paymentMethod,
       status: transaction.status,
@@ -593,7 +609,7 @@ class PaymentService {
     };
   }
 
-  private toPaymentItem(item: { _id: string; slug: string; title: string; price: number; thumbnail?: string; instructorName?: string }): PaymentCourseItem {
+  private toPaymentItem(item: { _id: string; slug: string; title: string; price: number; thumbnail?: string; instructorName?: string; instructorId?: string }): PaymentCourseItem {
     return {
       courseId: item._id,
       slug: item.slug,
@@ -601,6 +617,7 @@ class PaymentService {
       price: item.price,
       thumbnail: item.thumbnail,
       instructorName: item.instructorName,
+      instructorId: item.instructorId,
     };
   }
 
@@ -620,6 +637,387 @@ class PaymentService {
     };
   }
 
+  private async ensureRevenueSnapshot(transaction: IPaymentTransaction): Promise<void> {
+    const config = await this.ensureFinanceSplitConfig();
+    let changed = false;
+
+    transaction.items = transaction.items.map((item) => {
+      const hasValidSnapshot =
+        Number.isFinite(item.adminPercent) &&
+        Number.isFinite(item.instructorPercent) &&
+        item.adminPercent! + item.instructorPercent! === 100;
+      const adminPercent = hasValidSnapshot ? item.adminPercent! : config.adminPercent;
+      const instructorPercent = hasValidSnapshot ? item.instructorPercent! : config.instructorPercent;
+      const adminAmount = this.calculateSplitAmount(item.price, adminPercent);
+      const instructorAmount = item.price - adminAmount;
+
+      if (
+        item.instructorId !== (item.instructorId || '') ||
+        item.adminPercent !== adminPercent ||
+        item.instructorPercent !== instructorPercent ||
+        item.adminAmount !== adminAmount ||
+        item.instructorAmount !== instructorAmount
+      ) {
+        changed = true;
+      }
+
+      return {
+        ...item,
+        instructorId: item.instructorId || '',
+        adminPercent,
+        instructorPercent,
+        adminAmount,
+        instructorAmount,
+      };
+    });
+
+    if (changed) {
+      await transaction.save();
+    }
+  }
+
+  private async ensureFinanceSplitConfig(): Promise<RevenueSplitConfig> {
+    const adminPercent = Number(process.env.DEFAULT_ADMIN_REVENUE_PERCENT || 25);
+    const instructorPercent = Number(process.env.DEFAULT_INSTRUCTOR_REVENUE_PERCENT || 75);
+    const normalizedAdmin = Number.isFinite(adminPercent) ? adminPercent : 25;
+    const normalizedInstructor = Number.isFinite(instructorPercent) ? instructorPercent : 75;
+
+    const config = await FinanceConfig.findOneAndUpdate(
+      { configKey: this.financeConfigKey },
+      { $setOnInsert: { adminPercent: normalizedAdmin, instructorPercent: normalizedInstructor } },
+      { upsert: true, new: true, lean: true }
+    );
+
+    return {
+      adminPercent: config!.adminPercent,
+      instructorPercent: config!.instructorPercent,
+    };
+  }
+
+  private calculateSplitAmount(amount: number, percent: number): number {
+    return Math.floor((amount * percent) / 100);
+  }
+
+  private calculateTransactionSplitTotals(transaction: any) {
+    return transaction.items.reduce(
+      (acc: { adminAmount: number; instructorAmount: number }, item: any) => {
+        const adminAmount = item.adminAmount ?? this.calculateSplitAmount(item.price, item.adminPercent ?? 0);
+        const instructorAmount = item.instructorAmount ?? (item.price - adminAmount);
+        acc.adminAmount += adminAmount;
+        acc.instructorAmount += instructorAmount;
+        return acc;
+      },
+      { adminAmount: 0, instructorAmount: 0 }
+    );
+  }
+
+  private async queryTransactions(query?: { startDate?: string; endDate?: string; provider?: string; status?: string; page?: number; limit?: number }) {
+    const filter: Record<string, any> = {};
+    if (query?.provider) filter.provider = query.provider;
+    if (query?.status) filter.status = query.status;
+    if (query?.startDate || query?.endDate) {
+      filter.createdAt = {};
+      if (query.startDate) filter.createdAt.$gte = new Date(query.startDate);
+      if (query.endDate) filter.createdAt.$lte = new Date(query.endDate);
+    }
+
+    const page = Math.max(Number(query?.page || 1), 1);
+    const limit = Math.min(Math.max(Number(query?.limit || 20), 1), 100);
+    const skip = (page - 1) * limit;
+
+    const [transactions, total] = await Promise.all([
+      PaymentTransaction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      PaymentTransaction.countDocuments(filter),
+    ]);
+
+    return { transactions, total, page, limit };
+  }
+
+  private async buildRevenueSummary(transactions: any[]) {
+    const summary = transactions.reduce(
+      (acc: any, transaction: any) => {
+        if (transaction.status !== 'SUCCEEDED') {
+          return acc;
+        }
+        const paidAt = transaction.paidAt || transaction.createdAt;
+        const month = `${paidAt.getFullYear()}-${String(paidAt.getMonth() + 1).padStart(2, '0')}`;
+        const splitTotals = this.calculateTransactionSplitTotals(transaction);
+
+        acc.totalRevenue += transaction.amount;
+        acc.totalAdminRevenue += splitTotals.adminAmount;
+        acc.totalInstructorRevenue += splitTotals.instructorAmount;
+        acc.successfulTransactions += 1;
+
+        const monthBucket = acc.monthlyData.find((entry: any) => entry.month === month);
+        if (monthBucket) {
+          monthBucket.revenue += transaction.amount;
+          monthBucket.adminRevenue += splitTotals.adminAmount;
+          monthBucket.instructorRevenue += splitTotals.instructorAmount;
+          monthBucket.transactions += 1;
+        } else {
+          acc.monthlyData.push({
+            month,
+            revenue: transaction.amount,
+            adminRevenue: splitTotals.adminAmount,
+            instructorRevenue: splitTotals.instructorAmount,
+            transactions: 1,
+          });
+        }
+
+        const providerBucket = acc.providerBreakdown.find((entry: any) => entry.provider === transaction.provider);
+        if (providerBucket) {
+          providerBucket.revenue += transaction.amount;
+          providerBucket.adminRevenue += splitTotals.adminAmount;
+          providerBucket.instructorRevenue += splitTotals.instructorAmount;
+          providerBucket.transactions += 1;
+        } else {
+          acc.providerBreakdown.push({
+            provider: transaction.provider,
+            revenue: transaction.amount,
+            adminRevenue: splitTotals.adminAmount,
+            instructorRevenue: splitTotals.instructorAmount,
+            transactions: 1,
+          });
+        }
+
+        return acc;
+      },
+      {
+        totalRevenue: 0,
+        totalAdminRevenue: 0,
+        totalInstructorRevenue: 0,
+        successfulTransactions: 0,
+        monthlyData: [] as Array<{ month: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
+        providerBreakdown: [] as Array<{ provider: PaymentProvider; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
+      }
+    );
+
+    summary.monthlyData.sort((a: any, b: any) => a.month.localeCompare(b.month));
+
+    const splitConfig = await this.ensureFinanceSplitConfig();
+    const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    const currentMonthData = summary.monthlyData.find((entry: any) => entry.month === currentMonth);
+
+    return {
+      ...summary,
+      adminPercent: splitConfig.adminPercent,
+      instructorPercent: splitConfig.instructorPercent,
+      thisMonthRevenue: currentMonthData?.revenue ?? 0,
+      thisMonthAdminRevenue: currentMonthData?.adminRevenue ?? 0,
+      thisMonthInstructorRevenue: currentMonthData?.instructorRevenue ?? 0,
+      activeSubscriptions: 0,
+    };
+  }
+
+  private buildInstructorSummary(items: Array<{
+    transactionCode: string;
+    transactionId: string;
+    provider: PaymentProvider;
+    paymentMethod: PaymentMethod;
+    paidAt: Date;
+    courseId: string;
+    courseTitle: string;
+    slug: string;
+    instructorId: string;
+    instructorName: string;
+    grossAmount: number;
+    adminPercent: number;
+    instructorPercent: number;
+    adminAmount: number;
+    instructorAmount: number;
+  }>) {
+    const summary = items.reduce(
+      (acc: any, item: any) => {
+        const month = `${item.paidAt.getFullYear()}-${String(item.paidAt.getMonth() + 1).padStart(2, '0')}`;
+        acc.totalGrossRevenue += item.grossAmount;
+        acc.totalAdminRevenue += item.adminAmount;
+        acc.totalInstructorRevenue += item.instructorAmount;
+        acc.totalTransactions += 1;
+
+        const monthBucket = acc.monthlyData.find((entry: any) => entry.month === month);
+        if (monthBucket) {
+          monthBucket.revenue += item.grossAmount;
+          monthBucket.adminRevenue += item.adminAmount;
+          monthBucket.instructorRevenue += item.instructorAmount;
+          monthBucket.transactions += 1;
+        } else {
+          acc.monthlyData.push({
+            month,
+            revenue: item.grossAmount,
+            adminRevenue: item.adminAmount,
+            instructorRevenue: item.instructorAmount,
+            transactions: 1,
+          });
+        }
+
+        const courseBucket = acc.courseBreakdown.find((entry: any) => entry.courseId === item.courseId);
+        if (courseBucket) {
+          courseBucket.grossRevenue += item.grossAmount;
+          courseBucket.adminRevenue += item.adminAmount;
+          courseBucket.instructorRevenue += item.instructorAmount;
+          courseBucket.transactions += 1;
+        } else {
+          acc.courseBreakdown.push({
+            courseId: item.courseId,
+            courseTitle: item.courseTitle,
+            slug: item.slug,
+            grossRevenue: item.grossAmount,
+            adminRevenue: item.adminAmount,
+            instructorRevenue: item.instructorAmount,
+            transactions: 1,
+          });
+        }
+
+        const providerBucket = acc.providerBreakdown.find((entry: any) => entry.provider === item.provider);
+        if (providerBucket) {
+          providerBucket.revenue += item.grossAmount;
+          providerBucket.adminRevenue += item.adminAmount;
+          providerBucket.instructorRevenue += item.instructorAmount;
+          providerBucket.transactions += 1;
+        } else {
+          acc.providerBreakdown.push({
+            provider: item.provider,
+            revenue: item.grossAmount,
+            adminRevenue: item.adminAmount,
+            instructorRevenue: item.instructorAmount,
+            transactions: 1,
+          });
+        }
+
+        return acc;
+      },
+      {
+        totalGrossRevenue: 0,
+        totalAdminRevenue: 0,
+        totalInstructorRevenue: 0,
+        totalTransactions: 0,
+        monthlyData: [] as Array<{ month: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
+        providerBreakdown: [] as Array<{ provider: PaymentProvider; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
+        courseBreakdown: [] as Array<{ courseId: string; courseTitle: string; slug: string; grossRevenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
+      }
+    );
+
+    summary.monthlyData.sort((a: any, b: any) => a.month.localeCompare(b.month));
+    summary.courseBreakdown.sort((a: any, b: any) => b.instructorRevenue - a.instructorRevenue);
+
+    return summary;
+  }
+
+  public async getFinanceSplitConfig(): Promise<RevenueSplitConfig> {
+    return this.ensureFinanceSplitConfig();
+  }
+
+  public async updateFinanceSplitConfig(input: RevenueSplitConfig): Promise<RevenueSplitConfig> {
+    const adminPercent = Number(input.adminPercent);
+    const instructorPercent = Number(input.instructorPercent);
+
+    if (!Number.isInteger(adminPercent) || !Number.isInteger(instructorPercent)) {
+      throw new Error('Tỷ lệ chia doanh thu phải là số nguyên.');
+    }
+    if (adminPercent < 0 || instructorPercent < 0 || adminPercent > 100 || instructorPercent > 100) {
+      throw new Error('Tỷ lệ chia doanh thu phải nằm trong khoảng 0-100%.');
+    }
+    if (adminPercent + instructorPercent !== 100) {
+      throw new Error('Tổng tỷ lệ chia doanh thu phải bằng 100%.');
+    }
+
+    const config = await FinanceConfig.findOneAndUpdate(
+      { configKey: this.financeConfigKey },
+      {
+        $set: {
+          adminPercent,
+          instructorPercent,
+        },
+        $setOnInsert: {
+          configKey: this.financeConfigKey,
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    return {
+      adminPercent: config.adminPercent,
+      instructorPercent: config.instructorPercent,
+    };
+  }
+
+  public async getAdminFinanceOverview(query?: { startDate?: string; endDate?: string; provider?: string; status?: string; page?: number; limit?: number }) {
+    const { transactions, total } = await this.queryTransactions(query);
+    await Promise.all(
+      transactions
+        .filter((transaction) => transaction.status === 'SUCCEEDED')
+        .map((transaction) => this.ensureRevenueSnapshot(transaction))
+    );
+    const summary = await this.buildRevenueSummary(transactions);
+    const succeededTransactions = transactions.filter((transaction) => transaction.status === 'SUCCEEDED');
+    const totalAmount = succeededTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
+    const splitTotals = transactions.reduce(
+      (acc, transaction) => {
+        if (transaction.status !== 'SUCCEEDED') {
+          return acc;
+        }
+        const split = this.calculateTransactionSplitTotals(transaction);
+        acc.adminAmount += split.adminAmount;
+        acc.instructorAmount += split.instructorAmount;
+        return acc;
+      },
+      { adminAmount: 0, instructorAmount: 0 }
+    );
+
+    return {
+      ...summary,
+      transactions: transactions.map((transaction) => this.mapTransaction(transaction)),
+      total,
+      totalAmount,
+      totalAdminAmount: splitTotals.adminAmount,
+      totalInstructorAmount: splitTotals.instructorAmount,
+      page: Number(query?.page || 1),
+      limit: Number(query?.limit || 20),
+    };
+  }
+
+  public async getInstructorFinanceOverview(instructorId: string, query?: { startDate?: string; endDate?: string }) {
+    const filter: Record<string, any> = { status: 'SUCCEEDED' };
+    if (query?.startDate || query?.endDate) {
+      filter.paidAt = {};
+      if (query.startDate) filter.paidAt.$gte = new Date(query.startDate);
+      if (query.endDate) filter.paidAt.$lte = new Date(query.endDate);
+    }
+
+    const transactions = await PaymentTransaction.find(filter).sort({ paidAt: -1, createdAt: -1 });
+    await Promise.all(transactions.map((transaction) => this.ensureRevenueSnapshot(transaction)));
+    const items = transactions.flatMap((transaction) => {
+      const paidAt = transaction.paidAt || transaction.createdAt;
+      return transaction.items
+        .filter((item) => item.instructorId === instructorId)
+        .map((item) => ({
+          transactionCode: transaction.transactionCode,
+          transactionId: transaction._id.toString(),
+          provider: transaction.provider,
+          paymentMethod: transaction.paymentMethod,
+          paidAt,
+          courseId: item.courseId,
+          courseTitle: item.title,
+          slug: item.slug,
+          instructorId: item.instructorId || instructorId,
+          instructorName: item.instructorName || '',
+          grossAmount: item.price,
+          adminPercent: item.adminPercent ?? 0,
+          instructorPercent: item.instructorPercent ?? 0,
+          adminAmount: item.adminAmount ?? 0,
+          instructorAmount: item.instructorAmount ?? 0,
+        }));
+    });
+
+    const summary = this.buildInstructorSummary(items);
+    const splitConfig = await this.ensureFinanceSplitConfig();
+    return {
+      ...summary,
+      adminPercent: splitConfig.adminPercent,
+      instructorPercent: splitConfig.instructorPercent,
+    };
+  }
+
   private generateTransactionCode(provider: PaymentProvider): string {
     const prefix = provider === 'MOMO' ? 'MM' : provider === 'VNPAY' ? 'VNP' : 'PM';
     return `${prefix}${Date.now()}${Math.floor(Math.random() * 900000 + 100000)}`;
@@ -630,11 +1028,8 @@ class PaymentService {
     return paymentMethod === 'MOMO' ? 'MOMO' : 'VNPAY';
   }
 
-  private buildOrderInfo(fullName: string, items: PaymentCourseItem[]): string {
-    const titles = items.map((item) => item.title).slice(0, 3);
-    const summary = titles.join(', ');
-    const suffix = items.length > 3 ? ` và ${items.length - 3} khóa học khác` : '';
-    return `SecureLearn thanh toan khoa hoc cho ${fullName}${summary ? `: ${summary}${suffix}` : ''}`;
+  private buildOrderInfo(transactionCode: string, itemCount: number): string {
+    return `SecureLearn payment ${transactionCode}${itemCount > 1 ? ` (${itemCount} courses)` : ''}`;
   }
 
   private parseVnpayDate(value: string): Date {

@@ -18,6 +18,11 @@ export interface PaymentCourseItem {
   price: number;
   thumbnail?: string;
   instructorName?: string;
+  instructorId?: string;
+  adminPercent?: number;
+  instructorPercent?: number;
+  adminAmount?: number;
+  instructorAmount?: number;
 }
 
 export interface IPaymentTransaction extends Document {
@@ -45,8 +50,13 @@ const paymentCourseItemSchema = new Schema<PaymentCourseItem>(
     slug: { type: String, required: true },
     title: { type: String, required: true },
     price: { type: Number, required: true, min: 0 },
-    thumbnail: { type: String, default: '' },
-    instructorName: { type: String, default: '' },
+  thumbnail: { type: String, default: '' },
+  instructorName: { type: String, default: '' },
+  instructorId: { type: String, default: '' },
+  adminPercent: { type: Number, min: 0, max: 100 },
+  instructorPercent: { type: Number, min: 0, max: 100 },
+  adminAmount: { type: Number, min: 0 },
+  instructorAmount: { type: Number, min: 0 },
   },
   { _id: false }
 );

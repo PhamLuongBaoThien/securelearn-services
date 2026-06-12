@@ -9,7 +9,7 @@
 import crypto from 'crypto';
 import { getVnpayConfig } from './vnpay.config';
 
-// Phải khớp 100% với builder — cùng logic encode mới verify đúng
+// Phải khớp 100% với builder — cùng logic encode thì verify mới đúng
 const phpUrlEncode = (value: string): string =>
   encodeURIComponent(value)
     .replace(/%20/g, '+')
@@ -33,7 +33,7 @@ export const verifyVnpaySignature = (payload: Record<string, unknown>): boolean 
   }
 
   const sortedKeys = Object.keys(params).sort();
-  // Hash data: key thô (không encode) = phpUrlEncode(value) — đúng theo PHP demo VNPay
+  // Hash data: key=phpUrlEncode(value) — khớp với builder
   const hashData = sortedKeys
     .map((key) => `${key}=${phpUrlEncode(params[key])}`)
     .join('&');

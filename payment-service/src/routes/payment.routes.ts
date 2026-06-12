@@ -13,6 +13,7 @@
 
 import { Router } from 'express';
 import paymentController from '../controllers/payment.controller';
+import financeController from '../controllers/finance.controller';
 import { extractUser } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -22,6 +23,16 @@ router.post('/course-checkout', extractUser, paymentController.courseCheckout);
 router.get('/transactions/code/:transactionCode', extractUser, paymentController.getTransactionByCode);
 // Route để lấy thông tin giao dịch
 router.get('/transactions/:id', extractUser, paymentController.getTransaction);
+
+// Finance: Admin config/report
+router.get('/admin/finance/split-config', extractUser, financeController.getSplitConfig);
+router.put('/admin/finance/split-config', extractUser, financeController.updateSplitConfig);
+router.get('/admin/finance/revenue', extractUser, financeController.getAdminRevenue);
+router.get('/admin/finance/transactions', extractUser, financeController.getAdminTransactions);
+
+// Finance: Instructor report
+router.get('/instructor/finance/revenue', extractUser, financeController.getInstructorRevenue);
+
 // Route để xử lý IPN từ VNPay
 router.get('/webhooks/vnpay', paymentController.webhookVnpay);
 router.post('/webhooks/vnpay', paymentController.webhookVnpay);
