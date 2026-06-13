@@ -32,6 +32,18 @@ router.get('/admin/finance/transactions', extractUser, financeController.getAdmi
 
 // Finance: Instructor report
 router.get('/instructor/finance/revenue', extractUser, financeController.getInstructorRevenue);
+router.get('/instructor/finance/subscriptions', extractUser, subscriptionController.instructorFinance);
+
+router.get('/admin/subscription-plans', extractUser, subscriptionController.adminPlans);
+router.put('/admin/subscription-plans', extractUser, subscriptionController.upsertPlan);
+router.get('/admin/subscriptions/terms', extractUser, subscriptionController.adminTerms);
+router.post('/admin/subscriptions/terms/:termId/refund', extractUser, subscriptionController.refund);
+router.get('/admin/subscriptions/settlements', extractUser, subscriptionController.settlements);
+router.post('/admin/subscriptions/settlements/:period/calculate', extractUser, subscriptionController.calculateSettlement);
+router.patch('/admin/subscriptions/settlements/:period/status', extractUser, subscriptionController.updateSettlementStatus);
+
+// Course-service dùng route nội bộ này để đẩy qualified usage sau khi đã qua entitlement check.
+router.post('/internal/subscription-usage', subscriptionController.internalUsage);
 
 // Route để xử lý IPN từ VNPay
 router.get('/webhooks/vnpay', paymentController.webhookVnpay);

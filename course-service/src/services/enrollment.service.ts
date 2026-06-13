@@ -37,6 +37,7 @@ class EnrollmentService {
       userId,
       courseId,
       status: EnrollmentStatus.ACTIVE,
+      source: EnrollmentSource.PURCHASE,
     });
     await enrollment.save();
 

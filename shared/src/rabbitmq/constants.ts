@@ -1,6 +1,8 @@
 // ========================
-// RabbitMQ Constants: Exchange, Routing Key, Event Payloads
-// Chỉ định nghĩa những gì đang dùng — thêm dần khi build service mới
+// RabbitMQ Constants
+// Mục đích:
+// - định nghĩa exchange, routing key và payload dùng chung giữa các service
+// - bổ sung event thuê bao để course và identity đồng bộ entitlement/projection
 // ========================
 
 /**
@@ -39,6 +41,8 @@ export enum RoutingKey {
   // --- Payment Events ---
   PAYMENT_COURSE_SUCCEEDED = 'payment.course.succeeded',
   PAYMENT_COURSE_FAILED = 'payment.course.failed',
+  // Term thuê bao đổi trạng thái sẽ được fan-out sang course/identity để đồng bộ quyền học và projection UI.
+  SUBSCRIPTION_TERM_CHANGED = 'payment.subscription.term-changed',
 
   // --- Asset Cleanup Events (course-service → media-service) ---
   VIDEO_ASSET_CLEANUP = 'media.video.cleanup',
@@ -149,4 +153,17 @@ export interface PaymentCourseFailedPayload {
   amount: number;
   reason: string;
   failedAt: string;
+}
+
+export type SubscriptionTermStatus = 'SCHEDULED' | 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'REFUNDED';
+
+export interface SubscriptionTermChangedPayload {
+  termId: string;
+  userId: string;
+  planId: string;
+  planType: 'MONTHLY' | 'YEARLY';
+  status: SubscriptionTermStatus;
+  startsAt: string;
+  endsAt: string;
+  transactionCode: string;
 }

@@ -183,7 +183,6 @@ class PaymentService {
       rawPayload: { providerRef: transaction.providerRef },
     });
 
-    await publishPaymentCourseSucceeded(this.toSucceededPayload(transaction));
     return this.mapTransaction(transaction);
   }
 
@@ -210,7 +209,7 @@ class PaymentService {
       rawPayload: { reason },
     });
 
-    await publishPaymentCourseFailed({
+    if (transaction.productType === 'COURSE') await publishPaymentCourseFailed({
       transactionId: transaction._id.toString(),
       transactionCode: transaction.transactionCode,
       userId,
@@ -302,7 +301,7 @@ class PaymentService {
 
     // Trường hợp giao dịch đã ở trạng thái thành công trong DB (được xử lý bởi cổng kia trước)
     if (transaction.status === 'SUCCEEDED') {
-      await this.ensureRevenueSnapshot(transaction);
+      await this.finalizeSuccessfulTransaction(transaction);
       await PaymentWebhookEvent.create({
         provider: 'VNPAY',
         eventId,
@@ -334,7 +333,7 @@ class PaymentService {
         rawPayload: payload,
       });
 
-      await publishPaymentCourseFailed({
+      if (transaction.productType === 'COURSE') await publishPaymentCourseFailed({
         transactionId: transaction._id.toString(),
         transactionCode,
         userId: transaction.userId,
@@ -368,7 +367,7 @@ class PaymentService {
     transaction.paidAt = payDate ? this.parseVnpayDate(payDate) : new Date();
     transaction.failureReason = '';
     await transaction.save();
-    await this.ensureRevenueSnapshot(transaction);
+    await this.finalizeSuccessfulTransaction(transaction);
 
     await PaymentAttempt.create({
       transactionId: transaction._id.toString(),
@@ -381,8 +380,6 @@ class PaymentService {
       message: `VNPay ${action} success`,
       rawPayload: payload,
     });
-
-    await publishPaymentCourseSucceeded(this.toSucceededPayload(transaction));
 
     await PaymentWebhookEvent.create({
       provider: 'VNPAY',
@@ -469,7 +466,7 @@ class PaymentService {
         rawPayload: payload,
       });
 
-      await publishPaymentCourseFailed({
+      if (transaction.productType === 'COURSE') await publishPaymentCourseFailed({
         transactionId: transaction._id.toString(),
         transactionCode: transaction.transactionCode,
         userId: transaction.userId,
@@ -501,7 +498,7 @@ class PaymentService {
     transaction.paidAt = responseTime ? new Date(Number(responseTime)) : new Date();
     transaction.failureReason = '';
     await transaction.save();
-    await this.ensureRevenueSnapshot(transaction);
+    await this.finalizeSuccessfulTransaction(transaction);
 
     await PaymentAttempt.create({
       transactionId: transaction._id.toString(),
@@ -514,8 +511,6 @@ class PaymentService {
       message: `MoMo ${action} success`,
       rawPayload: payload,
     });
-
-    await publishPaymentCourseSucceeded(this.toSucceededPayload(transaction));
 
     await PaymentWebhookEvent.create({
       provider: 'MOMO',

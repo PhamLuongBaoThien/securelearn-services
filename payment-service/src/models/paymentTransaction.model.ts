@@ -8,7 +8,7 @@
 // - confirm
 // - tra cứu transaction
 
-import { Schema, model, Document, Types } from 'mongoose';
+import { Schema, model, Document} from 'mongoose';
 import { PaymentMethod, PaymentProvider, PaymentStatus } from '@securelearn/common';
 
 export interface PaymentCourseItem {
@@ -33,6 +33,17 @@ export interface IPaymentTransaction extends Document {
   email: string;
   items: PaymentCourseItem[];
   amount: number;
+  productType: 'COURSE' | 'SUBSCRIPTION';
+  subscriptionSnapshot?: {
+    planId: string;
+    planType: 'MONTHLY' | 'YEARLY';
+    name: string;
+    durationDays: number;
+    adminPercent: number;
+    instructorPercent: number;
+    adminAmount: number;
+    instructorPoolAmount: number;
+  };
   provider: PaymentProvider;
   paymentMethod: PaymentMethod;
   status: PaymentStatus;
@@ -70,6 +81,18 @@ const paymentTransactionSchema = new Schema<IPaymentTransaction>(
     email: { type: String, required: true },
     items: { type: [paymentCourseItemSchema], required: true },
     amount: { type: Number, required: true, min: 0 },
+    // productType giúp callback/payment return biết giao dịch này cần enroll course hay tạo term thuê bao.
+    productType: { type: String, enum: ['COURSE', 'SUBSCRIPTION'], default: 'COURSE', index: true },
+    subscriptionSnapshot: {
+      planId: { type: String },
+      planType: { type: String, enum: ['MONTHLY', 'YEARLY'] },
+      name: { type: String },
+      durationDays: { type: Number, min: 1 },
+      adminPercent: { type: Number, min: 0, max: 100 },
+      instructorPercent: { type: Number, min: 0, max: 100 },
+      adminAmount: { type: Number, min: 0 },
+      instructorPoolAmount: { type: Number, min: 0 },
+    },
     provider: { type: String, required: true, enum: ['VNPAY', 'MOMO'] },
     paymentMethod: { type: String, required: true, enum: ['VNPAY', 'MOMO'] },
     status: { type: String, required: true, enum: ['PENDING', 'SUCCEEDED', 'FAILED'], default: 'PENDING' },

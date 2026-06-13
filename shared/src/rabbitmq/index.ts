@@ -1,4 +1,9 @@
-// Barrel export cho module rabbitmq
+// ========================
+// RabbitMQ Barrel Export
+// Mục đích:
+// - gom export của connection, publisher, subscriber và constants dùng chung
+// - giúp các service import một điểm duy nhất cho hạ tầng event
+// ========================
 export { default as RabbitMQConnection } from './connection';
 export { publishMessage } from './publisher';
 export { subscribeMessage } from './subscriber';
@@ -19,4 +24,6 @@ export {
   type PaymentCourseItemPayload,
   type PaymentCourseSucceededPayload,
   type PaymentCourseFailedPayload,
+  type SubscriptionTermStatus,
+  type SubscriptionTermChangedPayload,
 } from './constants';

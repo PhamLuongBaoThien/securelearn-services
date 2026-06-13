@@ -1,11 +1,8 @@
 // ========================
-// File này đăng ký các event handler mà course-service cần lắng nghe.
-// Hiện tại có 2 nhóm chính:
-// - Identity events để đồng bộ/xóa dữ liệu course khi user thay đổi
-// - Media events để cập nhật trạng thái lesson video
-// Lưu ý:
-// - video asset events đã được consume
-// - document asset events hiện chưa được consume ở course-service
+// Course Event Handlers
+// Mục đích:
+// - consume event từ identity, media và payment
+// - đồng bộ instructor/course data, trạng thái asset và entitlement thuê bao trong course-service
 // ========================
 import {
   subscribeMessage,
@@ -27,6 +24,18 @@ import { QuizAttempt } from '../models/quizAttempt.model';
 import lessonService from '../services/lesson.service';
 import cartService from '../services/cart.service';
 import enrollmentService from '../services/enrollment.service';
+import { SubscriptionEntitlement } from '../models/subscriptionEntitlement.model';
+
+type SubscriptionTermChangedPayload = {
+  termId: string;
+  userId: string;
+  planId: string;
+  planType: 'MONTHLY' | 'YEARLY';
+  status: 'SCHEDULED' | 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'REFUNDED';
+  startsAt: string;
+  endsAt: string;
+  transactionCode: string;
+};
 
 /**
  * Đăng ký lắng nghe tất cả events mà Course Service quan tâm.
@@ -153,6 +162,31 @@ export const registerEventHandlers = async (): Promise<void> => {
       } else {
         console.warn(`[CourseEvent] Thanh toán ${payload.transactionCode} hoàn tất nhưng có ít nhất 1 khóa học chưa ghi danh thành công.`);
       }
+    }
+  );
+
+  await subscribeMessage<SubscriptionTermChangedPayload>(
+    Exchange.PAYMENT,
+    'payment.subscription.term-changed' as RoutingKey,
+    'course-service.subscription-term-changed',
+    async (payload) => {
+      // Mirror term local để course-service tự check entitlement mà không cần hỏi payment mỗi request học.
+      await SubscriptionEntitlement.findOneAndUpdate(
+        { termId: payload.termId },
+        {
+          $set: {
+            userId: payload.userId,
+            planId: payload.planId,
+            planType: payload.planType,
+            status: payload.status,
+            startsAt: new Date(payload.startsAt),
+            endsAt: new Date(payload.endsAt),
+            transactionCode: payload.transactionCode,
+          },
+        },
+        { upsert: true, new: true }
+      );
+      console.log(`[CourseEvent] Subscription term ${payload.termId} -> ${payload.status}`);
     }
   );
 
