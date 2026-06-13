@@ -1,12 +1,8 @@
 // ========================
-// File này là controller chính của course-service cho domain Course.
-// Vai trò:
-// - nhận request từ instructor/public
-// - gọi sang courseService
-// - trả response thống nhất cho course editor, list public và publish flow
-// Lưu ý:
-// - validate publish là endpoint riêng trước khi publish thật
-// - curriculum chi tiết hiện được tách sang section/lesson/quiz controllers
+// Course Controller
+// Mục đích:
+// - nhận request cho catalog, review, manage và learning của course-service
+// - trả response thống nhất cho public flow, instructor editor và learning flow có entitlement
 // ========================
 import { Request, Response } from 'express';
 import { CategoryResolutionStatus, CourseLevel } from '../models/course.model';
@@ -261,6 +257,15 @@ class CourseController {
       res.status(200).json({ status: 'OK', data: course });
     } catch (error: any) {
       res.status(404).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async getCourseForLearning(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const course = await courseService.getCourseForLearning(String(req.params.id), req.userId!);
+      res.status(200).json({ status: 'OK', data: course });
+    } catch (error: any) {
+      res.status(error.message.includes('quyền') ? 403 : 404).json({ status: 'ERR', message: error.message });
     }
   }
 

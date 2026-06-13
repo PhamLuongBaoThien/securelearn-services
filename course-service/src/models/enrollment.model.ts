@@ -10,11 +10,19 @@ export enum EnrollmentStatus {
   CANCELLED = 'CANCELLED',
 }
 
+export enum EnrollmentSource {
+  PURCHASE = 'PURCHASE',
+  SUBSCRIPTION = 'SUBSCRIPTION',
+}
+
 export interface IEnrollment extends Document {
   userId: string;            // ID học viên (từ Identity Service)
   courseId: Types.ObjectId;   // Ref đến Course
   status: EnrollmentStatus;
   enrolledAt: Date;
+  source: EnrollmentSource;
+  subscriptionTermId?: string;
+  accessEndsAt?: Date;
 }
 
 const enrollmentSchema = new Schema<IEnrollment>(
@@ -27,6 +35,10 @@ const enrollmentSchema = new Schema<IEnrollment>(
       default: EnrollmentStatus.ACTIVE,
     },
     enrolledAt: { type: Date, default: Date.now },
+    // source giúp phân biệt quyền vĩnh viễn (PURCHASE) với quyền theo kỳ hạn (SUBSCRIPTION).
+    source: { type: String, enum: Object.values(EnrollmentSource), default: EnrollmentSource.PURCHASE, index: true },
+    subscriptionTermId: { type: String, default: '', index: true },
+    accessEndsAt: { type: Date },
   },
   {
     timestamps: true,

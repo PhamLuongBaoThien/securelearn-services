@@ -27,6 +27,14 @@ export enum CategoryResolutionStatus {
   NEEDS_ADMIN_CLASSIFICATION = 'NEEDS_ADMIN_CLASSIFICATION',
 }
 
+export enum SubscriptionCatalogStatus {
+  NOT_OPTED_IN = 'NOT_OPTED_IN',
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  REMOVED = 'REMOVED',
+}
+
 export interface ICourse extends Document {
   title: string;
   slug: string;
@@ -50,6 +58,9 @@ export interface ICourse extends Document {
   totalLessons: number;
   totalSections: number;
   enrollmentCount: number;
+  subscriptionStatus: SubscriptionCatalogStatus;
+  subscriptionReviewReason: string;
+  subscriptionReviewedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -94,6 +105,15 @@ const courseSchema = new Schema<ICourse>(
     totalLessons: { type: Number, default: 0 },
     totalSections: { type: Number, default: 0 },
     enrollmentCount: { type: Number, default: 0 },
+    // Trạng thái này quyết định course có được xuất hiện trong catalog thuê bao hay không.
+    subscriptionStatus: {
+      type: String,
+      enum: Object.values(SubscriptionCatalogStatus),
+      default: SubscriptionCatalogStatus.NOT_OPTED_IN,
+      index: true,
+    },
+    subscriptionReviewReason: { type: String, default: '' },
+    subscriptionReviewedAt: { type: Date, default: null },
   },
   {
     timestamps: true,

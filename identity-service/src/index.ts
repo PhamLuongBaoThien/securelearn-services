@@ -1,5 +1,8 @@
 // ========================
-// Entry Point: Khởi động Identity Service
+// Identity Service Entry
+// Mục đích:
+// - khởi động identity-service, seed role permission và kết nối RabbitMQ
+// - lắng nghe event thuê bao để đồng bộ projection subscriptionStatus cho UI
 // ========================
 import dotenv from 'dotenv';
 dotenv.config();
@@ -8,6 +11,7 @@ import { connectDB } from './config/db';
 import { RabbitMQConnection } from '@securelearn/common';
 import app from './app';
 import { seedRolePermissions } from './models/rolePermission.model';
+import { registerEventHandlers } from './events/handlers';
 
 const PORT = process.env.PORT || 5001;
 
@@ -24,6 +28,8 @@ const bootServer = async () => {
     // Kết nối RabbitMQ (Message Broker)
     const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
     await RabbitMQConnection.getInstance().connect(rabbitmqUrl);
+    // Bật consumer để projection subscriptionStatus luôn theo kịp lifecycle term từ payment-service.
+    await registerEventHandlers();
 
     // Bật server Express
     app.listen(PORT, () => {

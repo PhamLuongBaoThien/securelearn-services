@@ -1,13 +1,8 @@
 // ========================
-// File này là route chính của course-service cho domain course.
-// Nó mount:
-// - public course APIs
-// - enrollment APIs
-// - instructor APIs cho course, section, lesson, quiz
-// Lưu ý:
-// - slug route phải đặt trước các router.use('/:courseId', ...) broad middleware.
-//   Nếu đặt sau, guest xem /api/courses/:slug sẽ bị extractUser chặn trước khi tới public route.
-// - section/lesson/quiz được mount dưới :courseId
+// Course Routes
+// Mục đích:
+// - khai báo route public, learner và instructor cho domain course
+// - giữ riêng các route entitlement/heartbeat của thuê bao cạnh flow học tập hiện có
 // ========================
 import { Router } from 'express';
 import courseController from '../controllers/course.controller';
@@ -17,6 +12,7 @@ import quizRoutes from './quiz.routes';
 import sectionRoutes from './section.routes';
 import { extractUser, requireInstructor, requireStudentOrInstructor } from '../middlewares/auth.middleware';
 import upload from '../middlewares/upload.middleware';
+import subscriptionAccessController from '../controllers/subscriptionAccess.controller';
 
 const router = Router();
 
@@ -24,14 +20,20 @@ const router = Router();
 
 // [GET] /api/courses — Danh sách khóa học đã publish (search, filter, pagination)
 router.get('/', courseController.getPublishedCourses);
+router.get('/subscription-catalog', subscriptionAccessController.catalog);
 
 // ========== STUDENT & INSTRUCTOR (Có thể mua/học khóa học, nhưng INSTRUCTOR không được ghi danh khóa của chính mình) ==========
 
 // [GET] /api/courses/enrolled — Danh sách khóa học đã ghi danh
 router.get('/enrolled', extractUser, requireStudentOrInstructor, enrollmentController.getEnrolledCourses);
+// Nhóm route thuê bao dùng cho entitlement check và usage tracking khi learner học thật.
+router.post('/subscription/heartbeat', extractUser, requireStudentOrInstructor, subscriptionAccessController.heartbeat);
+router.get('/:id/learning', extractUser, requireStudentOrInstructor, courseController.getCourseForLearning);
 
 // [POST] /api/courses/:id/enroll — Ghi danh vào khóa học
 router.post('/:id/enroll', extractUser, requireStudentOrInstructor, enrollmentController.enroll);
+router.post('/:id/subscription-enroll', extractUser, requireStudentOrInstructor, subscriptionAccessController.enroll);
+router.get('/:id/entitlement', extractUser, requireStudentOrInstructor, subscriptionAccessController.entitlement);
 
 // ========== INSTRUCTOR (Cần đăng nhập + role INSTRUCTOR) ==========
 
@@ -43,6 +45,8 @@ router.post('/', extractUser, requireInstructor, courseController.createCourse);
 
 // [POST] /api/courses/:id/submit-review — Gửi khóa học cho admin duyệt
 router.post('/:id/submit-review', extractUser, requireInstructor, courseController.submitCourseForReview);
+router.post('/:id/subscription-opt-in', extractUser, requireInstructor, subscriptionAccessController.optIn);
+router.post('/:id/subscription-withdraw', extractUser, requireInstructor, subscriptionAccessController.withdraw);
 
 // [POST] /api/courses/:id/revisions — Tạo/lấy bản nháp cập nhật cho khóa đã publish
 router.post('/:id/revisions', extractUser, requireInstructor, courseController.createOrGetRevision);

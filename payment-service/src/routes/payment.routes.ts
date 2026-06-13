@@ -1,24 +1,22 @@
+// ========================
 // Payment Routes
 // Mục đích:
-// - định nghĩa public/protected endpoints cho payment-service
-// - tách route theo đúng flow checkout / confirm / webhook
-// Routes chính:
-// - POST /course-checkout
-// - GET /transactions/code/:transactionCode
-// - GET /transactions/:id
-// - GET|POST /webhooks/vnpay
-// - GET|POST /webhooks/momo
-// - GET|POST /vnpay-return
-// - GET|POST /momo-return
-
+// - gom toàn bộ endpoint checkout, webhook, finance và subscription của payment-service
+// - tách rõ route public, route có auth và route nội bộ để các flow thanh toán dễ theo dõi
+// ========================
 import { Router } from 'express';
 import paymentController from '../controllers/payment.controller';
 import financeController from '../controllers/finance.controller';
+import subscriptionController from '../controllers/subscription.controller';
 import { extractUser } from '../middlewares/auth.middleware';
 
 const router = Router();
 // Route cho checkout khóa học
 router.post('/course-checkout', extractUser, paymentController.courseCheckout);
+// Nhóm route mới cho thuê bao: tách riêng khỏi mua khóa học để dễ quản trị quyền và settlement.
+router.get('/subscription-plans', subscriptionController.plans);
+router.post('/subscription-checkout', extractUser, subscriptionController.checkout);
+router.get('/subscriptions/me', extractUser, subscriptionController.me);
 // Route cụ thể phải đặt trước route :id để tránh bị match nhầm
 router.get('/transactions/code/:transactionCode', extractUser, paymentController.getTransactionByCode);
 // Route để lấy thông tin giao dịch

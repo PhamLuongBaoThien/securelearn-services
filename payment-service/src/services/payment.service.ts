@@ -1,18 +1,9 @@
 // ========================
-// Payment Service Layer
+// Payment Service
 // Mục đích:
-// - tạo checkout cho giỏ hàng khóa học
-// - tra cứu transaction
-// - xử lý IPN/return theo VNPay và MoMo
-// - phát event sang course-service khi thanh toán thành công
-// Hàm chính:
-// - createCourseCheckout()
-// - getTransactionForUser()
-// - getTransactionByCodeForUser()
-// - handleVnpayIpn()
-// - handleMomoIpn()
-// - handleMomoReturn()
-// - failTransaction()
+// - xử lý checkout, callback và tra cứu transaction cho mua khóa học và thuê bao
+// - snapshot chia doanh thu tại thời điểm thanh toán để downstream đọc số liệu ổn định
+// - phát event hoặc tạo subscription term tùy theo productType của giao dịch
 // ========================
 import { randomUUID } from 'crypto';
 import { PaymentMethod, PaymentProvider, PaymentStatus, type PaymentCourseSucceededPayload } from '@securelearn/common';
@@ -26,10 +17,16 @@ import { verifyVnpaySignature } from './vnpay/vnpay.verifier';
 import { createMomoPaymentSession, queryMomoTransaction } from './momo/momo.client';
 import { verifyMomoSignature } from './momo/momo.verifier';
 import { getMomoConfig } from './momo/momo.config';
+import { SubscriptionPlan } from '../models/subscriptionPlan.model';
+import subscriptionService from './subscription.service';
 
 type CheckoutRequest = {
   paymentMethod: PaymentMethod;
   provider?: PaymentProvider;
+};
+
+type SubscriptionCheckoutRequest = CheckoutRequest & {
+  planId: string;
 };
 
 type CartResponse = {
@@ -148,6 +145,102 @@ class PaymentService {
     };
   }
 
+  public async createSubscriptionCheckout(
+    user: { userId: string; userRole: string; fullName: string; email: string },
+    request: SubscriptionCheckoutRequest,
+    clientIp: string
+  ) {
+    if (user.userRole === 'ADMIN') {
+      throw new Error('Tài khoản Admin không thể mua gói thuê bao.');
+    }
+    if (!['STUDENT', 'INSTRUCTOR'].includes(user.userRole)) {
+      throw new Error('Tài khoản này không được phép mua gói thuê bao.');
+    }
+
+    await subscriptionService.ensureDefaultPlans();
+    const plan = await SubscriptionPlan.findOne({ _id: request.planId, isActive: true });
+    if (!plan) throw new Error('Gói thuê bao không tồn tại hoặc đã ngừng bán.');
+
+    const normalizedProvider = this.normalizeProvider(request.provider, request.paymentMethod);
+    // Snapshot tỷ lệ chia ngay tại checkout để config đổi sau này không làm lệch giao dịch cũ.
+    const split = await this.ensureFinanceSplitConfig();
+    const adminAmount = this.calculateSplitAmount(plan.price, split.adminPercent);
+    const transactionCode = this.generateTransactionCode(normalizedProvider);
+    const orderInfo = `SecureLearn subscription ${plan.type} ${transactionCode}`;
+    const transaction = await PaymentTransaction.create({
+      transactionCode,
+      userId: user.userId,
+      userRole: user.userRole,
+      fullName: user.fullName,
+      email: user.email,
+      items: [],
+      amount: plan.price,
+      productType: 'SUBSCRIPTION',
+      subscriptionSnapshot: {
+        planId: plan._id.toString(),
+        planType: plan.type,
+        name: plan.name,
+        durationDays: plan.durationDays,
+        adminPercent: split.adminPercent,
+        instructorPercent: split.instructorPercent,
+        adminAmount,
+        instructorPoolAmount: plan.price - adminAmount,
+      },
+      provider: normalizedProvider,
+      paymentMethod: request.paymentMethod,
+      status: 'PENDING' as PaymentStatus,
+    });
+
+    try {
+      const paymentUrl = normalizedProvider === 'MOMO'
+        ? await this.createMomoCheckoutUrl({
+            orderId: transactionCode,
+            amount: plan.price,
+            orderInfo,
+            redirectUrl: getMomoConfig().returnUrl,
+            ipnUrl: getMomoConfig().ipnUrl,
+            items: [{
+              id: plan._id.toString(),
+              name: plan.name,
+              description: plan.description || plan.name,
+              imageUrl: 'https://placehold.co/300x300/png?text=SecureLearn',
+              price: Math.round(plan.price),
+              quantity: 1,
+              totalPrice: Math.round(plan.price),
+              category: 'subscription',
+              unit: 'plan',
+              taxAmount: 0,
+            }],
+            userInfo: { name: user.fullName, email: user.email },
+          })
+        : buildVnpayPaymentUrl({
+            txnRef: transactionCode,
+            amount: plan.price,
+            orderInfo,
+            ipAddr: clientIp || '127.0.0.1',
+          });
+
+      await PaymentAttempt.create({
+        transactionId: transaction._id.toString(),
+        transactionCode,
+        userId: user.userId,
+        action: 'CHECKOUT',
+        provider: normalizedProvider,
+        paymentMethod: request.paymentMethod,
+        success: true,
+        message: 'Created subscription checkout session',
+        rawPayload: { planId: plan._id.toString(), clientIp, orderInfo, paymentUrl },
+      });
+      return { transaction: this.mapTransaction(transaction), paymentUrl };
+    } catch (error: any) {
+      transaction.status = 'FAILED';
+      transaction.failedAt = new Date();
+      transaction.failureReason = error.message || 'Không thể tạo phiên thanh toán thuê bao.';
+      await transaction.save();
+      throw error;
+    }
+  }
+
   public async getTransactionForUser(transactionId: string, userId: string) {
     const transaction = await this.findOwnedTransaction(transactionId, userId);
     return this.mapTransaction(transaction);
@@ -169,7 +262,7 @@ class PaymentService {
       await transaction.save();
     }
 
-    await this.ensureRevenueSnapshot(transaction);
+    await this.finalizeSuccessfulTransaction(transaction);
 
     await PaymentAttempt.create({
       transactionId: transaction._id.toString(),
@@ -434,7 +527,7 @@ class PaymentService {
     }
 
     if (transaction.status === 'SUCCEEDED') {
-      await this.ensureRevenueSnapshot(transaction);
+      await this.finalizeSuccessfulTransaction(transaction);
       await PaymentWebhookEvent.create({
         provider: 'MOMO',
         eventId,
@@ -579,7 +672,12 @@ class PaymentService {
   }
 
   private mapTransaction(transaction: any) {
-    const splitTotals = this.calculateTransactionSplitTotals(transaction);
+    const splitTotals = transaction.productType === 'SUBSCRIPTION' && transaction.subscriptionSnapshot
+      ? {
+          adminAmount: transaction.subscriptionSnapshot.adminAmount,
+          instructorAmount: transaction.subscriptionSnapshot.instructorPoolAmount,
+        }
+      : this.calculateTransactionSplitTotals(transaction);
     return {
       _id: transaction._id.toString(),
       transactionCode: transaction.transactionCode,
@@ -589,6 +687,8 @@ class PaymentService {
       email: transaction.email,
       items: transaction.items,
       amount: transaction.amount,
+      productType: transaction.productType || 'COURSE',
+      subscriptionSnapshot: transaction.subscriptionSnapshot || null,
       grossAmount: transaction.amount,
       adminAmount: splitTotals.adminAmount,
       instructorAmount: splitTotals.instructorAmount,
@@ -671,6 +771,16 @@ class PaymentService {
     }
   }
 
+  private async finalizeSuccessfulTransaction(transaction: IPaymentTransaction): Promise<void> {
+    if (transaction.productType === 'SUBSCRIPTION') {
+      // Subscription không phát event enroll course; nó tạo term để downstream tự mở quyền theo entitlement.
+      await subscriptionService.activatePaidTransaction(transaction);
+      return;
+    }
+    await this.ensureRevenueSnapshot(transaction);
+    await publishPaymentCourseSucceeded(this.toSucceededPayload(transaction));
+  }
+
   private async ensureFinanceSplitConfig(): Promise<RevenueSplitConfig> {
     const adminPercent = Number(process.env.DEFAULT_ADMIN_REVENUE_PERCENT || 25);
     const instructorPercent = Number(process.env.DEFAULT_INSTRUCTOR_REVENUE_PERCENT || 75);
@@ -694,6 +804,13 @@ class PaymentService {
   }
 
   private calculateTransactionSplitTotals(transaction: any) {
+    if (transaction.productType === 'SUBSCRIPTION' && transaction.subscriptionSnapshot) {
+      // Subscription lấy split từ snapshot cấp transaction thay vì từ danh sách course items.
+      return {
+        adminAmount: transaction.subscriptionSnapshot.adminAmount || 0,
+        instructorAmount: transaction.subscriptionSnapshot.instructorPoolAmount || 0,
+      };
+    }
     return transaction.items.reduce(
       (acc: { adminAmount: number; instructorAmount: number }, item: any) => {
         const adminAmount = item.adminAmount ?? this.calculateSplitAmount(item.price, item.adminPercent ?? 0);

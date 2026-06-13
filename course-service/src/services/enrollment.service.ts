@@ -1,7 +1,10 @@
 // ========================
-// Service Layer: Logic nghiệp vụ Ghi danh
+// Enrollment Service
+// Mục đích:
+// - quản lý ghi danh mua đứt và ghi danh bằng thuê bao
+// - giữ enrollment/progress ổn định khi user chuyển từ quyền thuê bao sang mua đứt
 // ========================
-import { Enrollment, IEnrollment, EnrollmentStatus } from '../models/enrollment.model';
+import { Enrollment, EnrollmentSource, IEnrollment, EnrollmentStatus } from '../models/enrollment.model';
 import { Course } from '../models/course.model';
 import { publishEnrollmentCreated } from '../events/publishers';
 
@@ -29,6 +32,15 @@ class EnrollmentService {
     // 3. Kiểm tra đã ghi danh chưa
     const existing = await Enrollment.findOne({ userId, courseId });
     if (existing) {
+      if (existing.source === EnrollmentSource.SUBSCRIPTION) {
+        // Nếu user đã học bằng thuê bao rồi mua đứt, giữ nguyên progress nhưng nâng enrollment lên quyền vĩnh viễn.
+        existing.source = EnrollmentSource.PURCHASE;
+        existing.subscriptionTermId = '';
+        existing.accessEndsAt = undefined;
+        existing.status = EnrollmentStatus.ACTIVE;
+        await existing.save();
+        return existing;
+      }
       throw new Error('Bạn đã ghi danh khóa học này rồi.');
     }
 
@@ -51,6 +63,42 @@ class EnrollmentService {
       courseId,
     });
 
+    return enrollment;
+  }
+
+  public async enrollSubscription(
+    userId: string,
+    courseId: string,
+    userRole: string,
+    subscriptionTermId: string,
+    accessEndsAt: Date
+  ): Promise<IEnrollment> {
+    const course = await Course.findById(courseId);
+    if (!course || course.status !== 'PUBLISHED') throw new Error('Khóa học không tồn tại hoặc chưa xuất bản.');
+    if (course.subscriptionStatus !== 'APPROVED') throw new Error('Khóa học không thuộc catalog thuê bao.');
+    if (userRole === 'INSTRUCTOR' && course.instructorId === userId) {
+      throw new Error('Giảng viên không thể học khóa học do chính mình tạo.');
+    }
+    const existing = await Enrollment.findOne({ userId, courseId });
+    if (existing?.source === EnrollmentSource.PURCHASE) return existing;
+    if (existing) {
+      // Gia hạn thuê bao chỉ cập nhật lại hạn truy cập, không tạo enrollment trùng.
+      existing.status = EnrollmentStatus.ACTIVE;
+      existing.subscriptionTermId = subscriptionTermId;
+      existing.accessEndsAt = accessEndsAt;
+      await existing.save();
+      return existing;
+    }
+    const enrollment = await Enrollment.create({
+      userId,
+      courseId,
+      status: EnrollmentStatus.ACTIVE,
+      source: EnrollmentSource.SUBSCRIPTION,
+      subscriptionTermId,
+      accessEndsAt,
+    });
+    await Course.findByIdAndUpdate(courseId, { $inc: { enrollmentCount: 1 } });
+    await publishEnrollmentCreated({ enrollmentId: enrollment._id.toString(), userId, courseId });
     return enrollment;
   }
 

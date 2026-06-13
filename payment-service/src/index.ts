@@ -1,18 +1,16 @@
-// Entry Point: Khởi động Payment Service
+// ========================
+// Payment Service Entry
 // Mục đích:
-// - kết nối MongoDB và RabbitMQ
-// - mount Express app cho /api/payments
-// - giữ service sống/sạch khi shutdown
-// Hàm chính:
-// - bootServer(): khởi động toàn bộ service
-// - gracefulShutdown(): đóng RabbitMQ an toàn khi dừng app
-
+// - khởi động payment-service, kết nối MongoDB và RabbitMQ
+// - seed plan mặc định và bật scheduler cập nhật trạng thái term thuê bao
+// ========================
 import dotenv from 'dotenv';
 dotenv.config();
 
 import { connectDB } from './config/db';
 import { RabbitMQConnection } from '@securelearn/common';
 import app from './app';
+import subscriptionService from './services/subscription.service';
 
 const PORT = process.env.PORT || 5004;
 
@@ -24,6 +22,14 @@ const bootServer = async () => {
 
     const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
     await RabbitMQConnection.getInstance().connect(rabbitmqUrl);
+    // Seed plan mặc định và bật scheduler trạng thái term ngay khi service khởi động.
+    await subscriptionService.ensureDefaultPlans();
+    await subscriptionService.refreshTermStatuses();
+    setInterval(() => {
+      subscriptionService.refreshTermStatuses().catch((error) => {
+        console.error('[SubscriptionScheduler] Không thể cập nhật trạng thái kỳ thuê bao:', error);
+      });
+    }, 60_000).unref();
 
     app.listen(PORT, () => {
       console.log(`Payment Service đang chạy tại http://localhost:${PORT}`);

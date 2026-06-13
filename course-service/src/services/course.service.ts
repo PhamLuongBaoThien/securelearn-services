@@ -1,5 +1,11 @@
+// ========================
+// Course Service
+// Mục đích:
+// - xử lý nghiệp vụ catalog, review, publish và curriculum của khóa học
+// - phân tách public course detail với learning detail có entitlement để hỗ trợ flow thuê bao an toàn
+// ========================
 import { Types } from 'mongoose';
-import { CategoryResolutionStatus, Course, ICourse, CourseStatus } from '../models/course.model';
+import { CategoryResolutionStatus, Course, ICourse, CourseStatus, SubscriptionCatalogStatus } from '../models/course.model';
 import { CourseVersion, ICourseVersion } from '../models/courseVersion.model';
 import { Lesson, LessonStatus, LessonType } from '../models/lesson.model';
 import { Quiz } from '../models/quiz.model';
@@ -7,6 +13,7 @@ import { Section } from '../models/section.model';
 import { publishCourseCreated, publishCoursePublished } from '../events/publishers';
 import categoryService from './category.service';
 import mediaReferenceService from './mediaReference.service';
+import subscriptionAccessService from './subscriptionAccess.service';
 
 interface CourseLessonResponse {
   _id: string;
@@ -60,6 +67,8 @@ interface CourseResponse {
   totalLessons: number;
   totalSections: number;
   enrollmentCount: number;
+  subscriptionStatus: SubscriptionCatalogStatus;
+  subscriptionReviewReason: string;
   isRevision: boolean;  // true nếu là bản cập nhật (versionNumber > 1), false nếu là bản náp lần đầu chưa xuất bản
   createdAt: Date;
   updatedAt: Date;
@@ -117,6 +126,8 @@ type CourseShellLike = {
   currentVersionId?: Types.ObjectId | null;
   draftVersionId?: Types.ObjectId | null;
   enrollmentCount: number;
+  subscriptionStatus?: SubscriptionCatalogStatus;
+  subscriptionReviewReason?: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -656,7 +667,9 @@ class CourseService {
       Course.countDocuments(filter),
     ]);
 
-    const responses = await Promise.all(shells.map((shell) => this.buildVersionResponse(shell.currentVersionId!.toString(), shell as unknown as CourseShellLike, true)));
+    const responses = await Promise.all(shells.map(async (shell) =>
+      this.sanitizePublicCourse(await this.buildVersionResponse(shell.currentVersionId!.toString(), shell as unknown as CourseShellLike, true))
+    ));
     responses.forEach((response, index) => { response._id = shells[index]._id.toString(); });
     return { courses: responses, total, page, totalPages: Math.ceil(total / limit) };
   }
@@ -664,6 +677,17 @@ class CourseService {
   public async getCourseBySlug(slug: string): Promise<CourseResponse> {
     const shell = await Course.findOne({ slug, status: CourseStatus.PUBLISHED, currentVersionId: { $ne: null } }).lean();
     if (!shell) throw new Error('Khóa học không tồn tại hoặc chưa được xuất bản.');
+    const response = this.sanitizePublicCourse(await this.buildVersionResponse(shell.currentVersionId!.toString(), shell as unknown as CourseShellLike, true));
+    response._id = shell._id.toString();
+    return response;
+  }
+
+  public async getCourseForLearning(courseId: string, userId: string): Promise<CourseResponse> {
+    // Route học thật chỉ trả full curriculum sau khi entitlement đã pass.
+    const access = await subscriptionAccessService.entitlement(userId, courseId);
+    if (!access.allowed) throw new Error('Bạn không còn quyền truy cập nội dung khóa học.');
+    const shell = await Course.findOne({ _id: courseId, status: CourseStatus.PUBLISHED, currentVersionId: { $ne: null } }).lean();
+    if (!shell) throw new Error('Khóa học không tồn tại hoặc chưa xuất bản.');
     const response = await this.buildVersionResponse(shell.currentVersionId!.toString(), shell as unknown as CourseShellLike, true);
     response._id = shell._id.toString();
     return response;
@@ -898,9 +922,31 @@ class CourseService {
       totalLessons: version.totalLessons,
       totalSections: version.totalSections || 0,
       enrollmentCount: shell.enrollmentCount,
+      subscriptionStatus: shell.subscriptionStatus || SubscriptionCatalogStatus.NOT_OPTED_IN,
+      subscriptionReviewReason: shell.subscriptionReviewReason || '',
       isRevision: version.versionNumber > 1,
       createdAt: version.createdAt,
       updatedAt: version.updatedAt,
+    };
+  }
+
+  private sanitizePublicCourse(course: CourseResponse): CourseResponse {
+    // Public detail chỉ lộ preview metadata; asset/document/quiz thật phải đi qua entitlement riêng.
+    return {
+      ...course,
+      sections: course.sections.map((section) => ({
+        ...section,
+        lessons: section.lessons.map((lesson) => lesson.isFreePreview
+          ? lesson
+          : {
+              ...lesson,
+              content: '',
+              videoAssetId: null,
+              attachments: [],
+              quizId: null,
+              contentMeta: null,
+            }),
+      })),
     };
   }
 

@@ -1,9 +1,14 @@
+// ========================
+// Video Asset Access Middleware
+// Mục đích:
+// - bảo vệ route video asset theo owner hoặc entitlement học tập
+// - cho phép learner thuê bao đọc video mà không cần là người upload asset
+// ========================
 import { NextFunction, Response } from 'express';
 import { VideoAsset } from '../models/videoAsset.model';
 import { AuthRequest } from './auth.middleware';
+import { verifyCourseEntitlement } from './assetEntitlement.middleware';
 
-// Dùng cho mọi route có :videoAssetId trước khi controller chạy.
-// Tác dụng: đảm bảo user hiện tại là owner của asset, tránh poll/key/confirm/abort asset người khác.
 export const requireVideoAssetOwner = async (
   req: AuthRequest,
   res: Response,
@@ -22,4 +27,17 @@ export const requireVideoAssetOwner = async (
   }
 
   next();
+};
+
+export const requireVideoAssetAccess = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  const videoAssetId = req.params.videoAssetId as string | undefined;
+  const asset = videoAssetId
+    ? await VideoAsset.findById(videoAssetId).select('ownerUserId courseId isAttached status').lean()
+    : null;
+  // Cho learner đã có entitlement học đọc manifest/key mà không phải là owner upload của asset.
+  await verifyCourseEntitlement(req, res, next, asset);
 };

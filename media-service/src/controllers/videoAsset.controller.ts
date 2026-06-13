@@ -1,4 +1,9 @@
-// Controller cho video asset direct multipart upload.
+// ========================
+// Video Asset Controller
+// Mục đích:
+// - mở API upload, polling và đọc key/manifest cho video asset
+// - chỉ trả metadata an toàn sau khi middleware đã check owner hoặc learner entitlement
+// ========================
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import videoAssetService from '../services/videoAsset.service';
@@ -31,7 +36,9 @@ class VideoAssetController {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const asset = await videoAssetService.getAsset(videoAssetId);
-      res.status(200).json({ status: 'OK', data: asset });
+      // Không trả encryption key và multipart internals ở API metadata để tránh lộ thông tin nhạy cảm.
+      const { encryptionKey: _hiddenKey, rawObjectKey: _hiddenRawKey, multipartUploadId: _hiddenUploadId, ...safeAsset } = asset;
+      res.status(200).json({ status: 'OK', data: safeAsset });
     } catch (error: any) {
       res.status(404).json({ status: 'ERR', message: error.message });
     }

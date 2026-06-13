@@ -1,8 +1,12 @@
-// File này khai báo route video asset.
-// Video dùng direct multipart upload: initiate-upload → batch-part-urls → confirm-upload.
+// ========================
+// Video Asset Routes
+// Mục đích:
+// - khai báo route upload và đọc video asset của media-service
+// - tách route owner-only với route learner access đã qua entitlement check
+// ========================
 import { Router } from 'express';
 import videoAssetController from '../controllers/videoAsset.controller';
-import { requireVideoAssetOwner } from '../middlewares/videoAssetOwnership.middleware';
+import { requireVideoAssetAccess, requireVideoAssetOwner } from '../middlewares/videoAssetOwnership.middleware';
 
 const router = Router();
 
@@ -23,9 +27,10 @@ router.post('/:videoAssetId/abort-upload', requireVideoAssetOwner, videoAssetCon
 router.get('/:videoAssetId/batch-part-urls', requireVideoAssetOwner, videoAssetController.getBatchPartUrls);
 
 // [GET] /api/media/videos/:videoAssetId
-router.get('/:videoAssetId', requireVideoAssetOwner, videoAssetController.getAsset);
+// Polling trạng thái/video manifest cho cả owner và learner có entitlement hợp lệ.
+router.get('/:videoAssetId', requireVideoAssetAccess, videoAssetController.getAsset);
 
 // [GET] /api/media/videos/:videoAssetId/key
-router.get('/:videoAssetId/key', requireVideoAssetOwner, videoAssetController.getEncryptionKey);
+router.get('/:videoAssetId/key', requireVideoAssetAccess, videoAssetController.getEncryptionKey);
 
 export default router;
