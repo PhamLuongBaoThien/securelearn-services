@@ -11,10 +11,9 @@ import { PlaybackSession } from '../models/playbackSession.model';
 import { SubscriptionEntitlement } from '../models/subscriptionEntitlement.model';
 import enrollmentService from './enrollment.service';
 import { CourseVersion } from '../models/courseVersion.model';
+import { paymentGrpcClient } from '../grpc/payment.client';
 
 class SubscriptionAccessService {
-  private readonly paymentServiceUrl = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:5004';
-
   public async optIn(courseId: string, instructorId: string) {
     const course = await Course.findOne({ _id: courseId, instructorId });
     if (!course) throw new Error('Khóa học không tồn tại hoặc bạn không có quyền.');
@@ -163,27 +162,18 @@ class SubscriptionAccessService {
       { upsert: true, new: true }
     );
 
-    const response = await fetch(`${this.paymentServiceUrl}/api/payments/internal/subscription-usage`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-internal-service-token': process.env.INTERNAL_SERVICE_TOKEN || 'securelearn-internal',
-      },
-      body: JSON.stringify({
-        termId: access.termId,
-        userId,
-        courseId: input.courseId,
-        instructorId: course.instructorId,
-        lessonId: input.lessonId,
-        sessionId: input.sessionId,
-        segmentIndex,
-        qualifiedSeconds,
-        occurredAt: now.toISOString(),
-      }),
+    // Heartbeat là hot path nội bộ nên chuyển sang gRPC thay vì HTTP/JSON.
+    return paymentGrpcClient.recordSubscriptionUsage({
+      termId: access.termId,
+      userId,
+      courseId: input.courseId,
+      instructorId: course.instructorId,
+      lessonId: input.lessonId,
+      sessionId: input.sessionId,
+      segmentIndex,
+      qualifiedSeconds,
+      occurredAt: now.toISOString(),
     });
-    const data = await response.json() as { status?: string; message?: string; data?: unknown };
-    if (!response.ok || data.status === 'ERR') throw new Error(data.message || 'Không thể ghi nhận thời gian xem.');
-    return data.data;
   }
 }
 

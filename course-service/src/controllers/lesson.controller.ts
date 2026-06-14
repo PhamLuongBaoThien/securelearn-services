@@ -87,8 +87,7 @@ class LessonController {
         req.params.courseId as string,
         req.params.lessonId as string,
         req.userId!,
-        req.body.videoAssetId,
-        req.header('Authorization')
+        req.body.videoAssetId
       );
 
       res.status(200).json({ status: 'OK', message: 'Đã gắn video asset vào bài học.', data: lesson });
@@ -120,8 +119,7 @@ class LessonController {
         req.params.courseId as string,
         req.params.lessonId as string,
         req.userId!,
-        req.body.documentAssetId,
-        req.header('Authorization')
+        req.body.documentAssetId
       );
 
       res.status(200).json({ status: 'OK', message: 'Đã thêm tài liệu đính kèm vào bài học.', data: lesson });

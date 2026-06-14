@@ -68,6 +68,21 @@ class DocumentAssetService {
     return asset;
   }
 
+  public async getBindingSnapshot(documentAssetId: string) {
+    const asset = await DocumentAsset.findById(documentAssetId)
+      .select('_id ownerUserId courseId lessonId status isAttached')
+      .lean();
+    if (!asset) return null;
+    return {
+      assetId: asset._id.toString(),
+      ownerUserId: asset.ownerUserId,
+      courseId: asset.courseId,
+      lessonId: asset.lessonId,
+      status: asset.status,
+      isAttached: asset.isAttached,
+    };
+  }
+
   public async markAssetAttached(documentAssetId: string): Promise<void> {
     await DocumentAsset.updateOne(
       { _id: documentAssetId },

@@ -14,6 +14,7 @@ COPY shared/package*.json ./shared/
 WORKDIR /build/shared
 RUN npm ci
 COPY shared/tsconfig.json ./
+COPY shared/scripts ./scripts
 COPY shared/src ./src
 RUN npm run build
 

@@ -16,15 +16,14 @@ import {
   publishDocumentAssetAttached,
 } from '../events/publishers';
 import mediaReferenceService from './mediaReference.service';
+import { mediaGrpcClient } from '../grpc/media.client';
 
 interface MediaAssetBindingSnapshot {
-  _id: string;
+  assetId: string;
   ownerUserId: string;
   courseId: string;
   lessonId: string;
 }
-
-const MEDIA_SERVICE_URL = process.env.MEDIA_SERVICE_URL || 'http://media-service:5003';
 
 class LessonService {
   // Lesson mới mặc định là VIDEO và status DRAFT cho tới khi được bind nội dung hợp lệ.
@@ -191,13 +190,12 @@ class LessonService {
     lessonId: string,
     instructorId: string,
     videoAssetId: string,
-    authorizationHeader?: string,
   ) {
     await this.assertCourseOwnership(courseId, instructorId);
     const lesson = await Lesson.findOne({ _id: lessonId, courseId });
     if (!lesson) throw new Error('Bài học không tồn tại.');
     if (lesson.type !== LessonType.VIDEO) throw new Error('Chỉ bài học video mới được gắn video asset.');
-    await this.assertVideoAssetBinding(videoAssetId, courseId, lessonId, instructorId, authorizationHeader);
+    await this.assertVideoAssetBinding(videoAssetId, courseId, lessonId, instructorId);
 
     const previousVideoAssetId = lesson.videoAssetId?.toString() || null; // Lưu lại videoAssetId cũ để nếu có đổi video thì sẽ phát event cleanup cho video cũ
 
@@ -264,14 +262,13 @@ class LessonService {
     lessonId: string,
     instructorId: string,
     documentAssetId: string,
-    authorizationHeader?: string,
   ) {
     await this.assertCourseOwnership(courseId, instructorId);
     const lesson = await Lesson.findOne({ _id: lessonId, courseId });
     if (!lesson) throw new Error('Bài học không tồn tại.');
 
     // Xác minh document asset hợp lệ và thuộc về giảng viên/khóa học/bài học này
-    await this.assertDocumentAssetBinding(documentAssetId, courseId, lessonId, instructorId, authorizationHeader);
+    await this.assertDocumentAssetBinding(documentAssetId, courseId, lessonId, instructorId);
 
     // Tránh thêm trùng
     const assetObjectId = new Types.ObjectId(documentAssetId);
@@ -404,12 +401,10 @@ class LessonService {
     courseId: string,
     lessonId: string,
     instructorId: string,
-    authorizationHeader?: string,
   ): Promise<void> {
-    const asset = await this.fetchMediaAsset<MediaAssetBindingSnapshot>(
-      `/api/media/videos/${videoAssetId}`,
-      authorizationHeader,
-    );
+    // Asset lookup là internal synchronous RPC giữa service với service.
+    // Dùng gRPC ở đây để giữ schema chặt và bỏ lớp auth-forwarding qua HTTP.
+    const asset = await mediaGrpcClient.getVideoAssetBinding(videoAssetId);
     this.assertMediaAssetContext(asset, courseId, lessonId, instructorId, 'Video asset');
   }
 
@@ -418,32 +413,9 @@ class LessonService {
     courseId: string,
     lessonId: string,
     instructorId: string,
-    authorizationHeader?: string,
   ): Promise<void> {
-    const asset = await this.fetchMediaAsset<MediaAssetBindingSnapshot>(
-      `/api/media/documents/${documentAssetId}`,
-      authorizationHeader,
-    );
+    const asset = await mediaGrpcClient.getDocumentAssetBinding(documentAssetId);
     this.assertMediaAssetContext(asset, courseId, lessonId, instructorId, 'Document asset');
-  }
-
-  private async fetchMediaAsset<T>(path: string, authorizationHeader?: string): Promise<T> {
-    if (!authorizationHeader) {
-      throw new Error('Thiếu Authorization header để xác minh media asset.');
-    }
-
-    const response = await fetch(`${MEDIA_SERVICE_URL}${path}`, {
-      headers: {
-        Authorization: authorizationHeader,
-      },
-    });
-
-    const payload = (await response.json()) as { status: string; message?: string; data?: T };
-    if (!response.ok || payload.status === 'ERR' || !payload.data) {
-      throw new Error(payload.message || 'Không thể xác minh media asset.');
-    }
-
-    return payload.data;
   }
 
   private assertMediaAssetContext(

@@ -210,6 +210,21 @@ class VideoAssetService {
     };
   }
 
+  public async getBindingSnapshot(videoAssetId: string) {
+    const asset = await VideoAsset.findById(videoAssetId)
+      .select('_id ownerUserId courseId lessonId status isAttached')
+      .lean();
+    if (!asset) return null;
+    return {
+      assetId: asset._id.toString(),
+      ownerUserId: asset.ownerUserId,
+      courseId: asset.courseId,
+      lessonId: asset.lessonId,
+      status: asset.status,
+      isAttached: asset.isAttached,
+    };
+  }
+
   public async markAssetAttached(videoAssetId: string): Promise<void> {
     await VideoAsset.updateOne(
       { _id: videoAssetId },

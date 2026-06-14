@@ -39,3 +39,20 @@ export {
   type PaymentCourseSucceededPayload,
   type PaymentCourseFailedPayload,
 } from './rabbitmq';
+
+// --- gRPC ---
+export {
+  GrpcStatus,
+  createGrpcError,
+  startGrpcServer,
+  createMediaGrpcServer,
+  createCourseGrpcServer,
+  createPaymentGrpcServer,
+  createMediaGrpcClient,
+  createCourseGrpcClient,
+  createPaymentGrpcClient,
+  type MediaAssetBinding,
+  type CourseEntitlementResult,
+  type SubscriptionUsageRequest,
+  type SubscriptionUsageResult,
+} from './grpc';

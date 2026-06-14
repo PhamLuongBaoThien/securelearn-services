@@ -40,9 +40,6 @@ router.get('/admin/subscriptions/settlements', extractUser, subscriptionControll
 router.post('/admin/subscriptions/settlements/:period/calculate', extractUser, subscriptionController.calculateSettlement);
 router.patch('/admin/subscriptions/settlements/:period/status', extractUser, subscriptionController.updateSettlementStatus);
 
-// Course-service dùng route nội bộ này để đẩy qualified usage sau khi đã qua entitlement check.
-router.post('/internal/subscription-usage', subscriptionController.internalUsage);
-
 // Route để xử lý IPN từ VNPay
 router.get('/webhooks/vnpay', paymentController.webhookVnpay);
 router.post('/webhooks/vnpay', paymentController.webhookVnpay);

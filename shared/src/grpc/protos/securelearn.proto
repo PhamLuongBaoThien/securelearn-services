@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package securelearn;
+
+service MediaInternalService {
+  rpc GetVideoAssetBinding (AssetByIdRequest) returns (MediaAssetBindingReply);
+  rpc GetDocumentAssetBinding (AssetByIdRequest) returns (MediaAssetBindingReply);
+}
+
+service CourseInternalService {
+  rpc CheckCourseEntitlement (CourseEntitlementRequest) returns (CourseEntitlementReply);
+}
+
+service PaymentInternalService {
+  rpc RecordSubscriptionUsage (SubscriptionUsageRequest) returns (SubscriptionUsageReply);
+}
+
+message AssetByIdRequest {
+  string assetId = 1;
+}
+
+message MediaAssetBindingReply {
+  string assetId = 1;
+  string ownerUserId = 2;
+  string courseId = 3;
+  string lessonId = 4;
+  string status = 5;
+  bool isAttached = 6;
+}
+
+message CourseEntitlementRequest {
+  string userId = 1;
+  string courseId = 2;
+}
+
+message CourseEntitlementReply {
+  bool allowed = 1;
+  string source = 2;
+  string reason = 3;
+  string termId = 4;
+  string accessEndsAt = 5;
+}
+
+message SubscriptionUsageRequest {
+  string termId = 1;
+  string userId = 2;
+  string courseId = 3;
+  string instructorId = 4;
+  string lessonId = 5;
+  string sessionId = 6;
+  int32 segmentIndex = 7;
+  int32 qualifiedSeconds = 8;
+  string occurredAt = 9;
+}
+
+message SubscriptionUsageReply {
+  string usageId = 1;
+  bool duplicate = 2;
+}

@@ -2,7 +2,7 @@
 // Subscription Controller
 // Mục đích:
 // - mở API public/admin cho gói thuê bao
-// - nhận checkout thuê bao, settlement, refund và internal usage
+// - nhận checkout thuê bao, settlement và refund
 // - giữ controller mỏng, dồn nghiệp vụ về subscriptionService/paymentService
 // ========================
 import { Request, Response } from 'express';
@@ -135,19 +135,6 @@ class SubscriptionController {
     }
   };
 
-  public internalUsage = async (req: Request, res: Response) => {
-    try {
-      const expected = process.env.INTERNAL_SERVICE_TOKEN || 'securelearn-internal';
-      if (req.header('x-internal-service-token') !== expected) {
-        res.status(403).json({ status: 'ERR', message: 'Internal service token không hợp lệ.' });
-        return;
-      }
-      const data = await subscriptionService.recordUsage(req.body);
-      res.status(200).json({ status: 'OK', data });
-    } catch (error: any) {
-      res.status(400).json({ status: 'ERR', message: error.message });
-    }
-  };
 }
 
 export default new SubscriptionController();

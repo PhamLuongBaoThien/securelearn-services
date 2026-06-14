@@ -8,11 +8,14 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { connectDB } from './config/db';
-import { RabbitMQConnection } from '@securelearn/common';
+import { RabbitMQConnection, startGrpcServer } from '@securelearn/common';
 import app from './app';
 import subscriptionService from './services/subscription.service';
+import { createInternalGrpcServer } from './grpc/server';
 
 const PORT = process.env.PORT || 5004;
+const GRPC_BIND = process.env.PAYMENT_GRPC_BIND || '0.0.0.0:6004';
+let grpcServer: { forceShutdown: () => void } | null = null;
 
 const bootServer = async () => {
   try {
@@ -30,10 +33,12 @@ const bootServer = async () => {
         console.error('[SubscriptionScheduler] Không thể cập nhật trạng thái kỳ thuê bao:', error);
       });
     }, 60_000).unref();
+    grpcServer = await startGrpcServer(createInternalGrpcServer(), GRPC_BIND);
 
     app.listen(PORT, () => {
       console.log(`Payment Service đang chạy tại http://localhost:${PORT}`);
       console.log(`API Payments: http://localhost:${PORT}/api/payments`);
+      console.log(`Payment gRPC đang chạy tại ${GRPC_BIND}`);
     });
   } catch (error) {
     console.error('Khởi động payment service thất bại:', error);
@@ -43,6 +48,7 @@ const bootServer = async () => {
 
 const gracefulShutdown = async () => {
   console.log('\nĐang tắt Payment Service...');
+  grpcServer?.forceShutdown();
   await RabbitMQConnection.getInstance().close();
   process.exit(0);
 };

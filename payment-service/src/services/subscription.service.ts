@@ -214,20 +214,28 @@ class SubscriptionService {
     if (!term) throw new Error('Kỳ thuê bao không còn hiệu lực.');
 
     try {
-      return await SubscriptionUsage.create({
+      const usage = await SubscriptionUsage.create({
         ...input,
         segmentIndex: Math.max(0, Math.floor(Number(input.segmentIndex))),
         qualifiedSeconds: seconds,
         occurredAt,
       });
+      return {
+        usageId: usage._id.toString(),
+        duplicate: false,
+      };
     } catch (error: any) {
       if (error?.code === 11000) {
-        return SubscriptionUsage.findOne({
+        const usage = await SubscriptionUsage.findOne({
           termId: input.termId,
           userId: input.userId,
           lessonId: input.lessonId,
           segmentIndex: input.segmentIndex,
         });
+        return {
+          usageId: usage?._id.toString() || '',
+          duplicate: true,
+        };
       }
       throw error;
     }

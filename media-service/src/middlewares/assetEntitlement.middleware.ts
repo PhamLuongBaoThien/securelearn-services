@@ -6,8 +6,7 @@
 // ========================
 import { NextFunction, Response } from 'express';
 import { AuthRequest } from './auth.middleware';
-
-const courseServiceUrl = process.env.COURSE_SERVICE_URL || 'http://course-service:5002';
+import { courseGrpcClient } from '../grpc/course.client';
 
 export const verifyCourseEntitlement = async (
   req: AuthRequest,
@@ -27,18 +26,17 @@ export const verifyCourseEntitlement = async (
     res.status(403).json({ status: 'ERR', message: 'Tài nguyên chưa sẵn sàng để học.' });
     return;
   }
-  const authorization = req.header('Authorization');
   try {
-    const response = await fetch(`${courseServiceUrl}/api/courses/${asset.courseId}/entitlement`, {
-      headers: authorization ? { Authorization: authorization } : {},
+    const access = await courseGrpcClient.checkCourseEntitlement({
+      userId: req.userId,
+      courseId: asset.courseId,
     });
-    const data = await response.json() as { data?: { allowed?: boolean } };
-    if (response.ok && data.data?.allowed) {
+    if (access.allowed) {
       next();
       return;
     }
   } catch (error) {
-    console.warn('[MediaEntitlement] Không thể kiểm tra quyền học:', error);
+    console.warn('[MediaEntitlement] Không thể kiểm tra quyền học qua gRPC:', error);
   }
   res.status(403).json({ status: 'ERR', message: 'Bạn không có quyền truy cập tài nguyên này.' });
 };
