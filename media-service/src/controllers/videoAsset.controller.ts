@@ -61,6 +61,17 @@ class VideoAssetController {
     }
   }
 
+  public async getPlaybackManifest(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const manifest = await videoAssetService.getPlaybackManifest(String(req.params.videoAssetId));
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(manifest);
+    } catch (error: any) {
+      res.status(404).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   // [GET] /api/media/videos/:videoAssetId/batch-part-urls?totalParts=N
   // Tạo toàn bộ presigned URLs cho 1 file trong 1 request duy nhất.
   public async getBatchPartUrls(req: AuthRequest, res: Response): Promise<void> {

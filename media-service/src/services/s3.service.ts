@@ -171,6 +171,17 @@ class S3Service {
     return url;
   }
 
+  public async getDownloadPresignedUrl(objectKey: string, expiresIn: number = 300): Promise<string> {
+    const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: objectKey });
+    return getSignedUrl(presignClient, command, { expiresIn });
+  }
+
+  public async getObjectText(objectKey: string): Promise<string> {
+    const response = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: objectKey }));
+    if (!response.Body) throw new Error(`Không thể đọc object: ${objectKey}`);
+    return response.Body.transformToString('utf-8');
+  }
+
   /** Hoàn tất multipart upload sau khi tất cả parts đã PUT xong. */
   public async completeMultipartUpload(
     objectKey: string,

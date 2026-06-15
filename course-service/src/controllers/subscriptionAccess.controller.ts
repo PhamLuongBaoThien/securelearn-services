@@ -30,7 +30,7 @@ class SubscriptionAccessController {
     try {
       const data = await subscriptionAccessService.withdraw(
         String(req.params.id),
-        req.userId!,
+        { id: req.userId!, name: req.userName, email: req.userEmail },
         String(req.body.reason || '')
       );
       res.status(200).json({ status: 'OK', message: 'Đã rút khóa học khỏi catalog thuê bao.', data });
@@ -44,6 +44,7 @@ class SubscriptionAccessController {
       const data = await subscriptionAccessService.review(
         String(req.params.id),
         req.body.action,
+        { id: req.userId!, name: req.userName, email: req.userEmail },
         String(req.body.reason || '')
       );
       res.status(200).json({ status: 'OK', data });

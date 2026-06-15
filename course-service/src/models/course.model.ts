@@ -61,11 +61,36 @@ export interface ICourse extends Document {
   subscriptionStatus: SubscriptionCatalogStatus;
   subscriptionReviewReason: string;
   subscriptionReviewedAt?: Date | null;
+  subscriptionReviewedBy: string;
+  subscriptionReviewedByName: string;
+  subscriptionReviewedByEmail: string;
+  subscriptionReviewHistory: Array<{
+    action: 'APPROVE' | 'REJECT' | 'REMOVE' | 'WITHDRAW';
+    actorId: string;
+    actorRole: 'ADMIN' | 'INSTRUCTOR';
+    actorName: string;
+    actorEmail: string;
+    reason: string;
+    reviewedAt: Date;
+  }>;
   createdAt: Date;
   updatedAt: Date;
 }
 
 // ===== Schema =====
+
+const subscriptionReviewHistorySchema = new Schema(
+  {
+    action: { type: String, enum: ['APPROVE', 'REJECT', 'REMOVE', 'WITHDRAW'], required: true },
+    actorId: { type: String, required: true },
+    actorRole: { type: String, enum: ['ADMIN', 'INSTRUCTOR'], required: true },
+    actorName: { type: String, default: '' },
+    actorEmail: { type: String, default: '' },
+    reason: { type: String, default: '' },
+    reviewedAt: { type: Date, required: true },
+  },
+  { _id: false }
+);
 
 const courseSchema = new Schema<ICourse>(
   {
@@ -114,6 +139,10 @@ const courseSchema = new Schema<ICourse>(
     },
     subscriptionReviewReason: { type: String, default: '' },
     subscriptionReviewedAt: { type: Date, default: null },
+    subscriptionReviewedBy: { type: String, default: '' },
+    subscriptionReviewedByName: { type: String, default: '' },
+    subscriptionReviewedByEmail: { type: String, default: '' },
+    subscriptionReviewHistory: { type: [subscriptionReviewHistorySchema], default: [] },
   },
   {
     timestamps: true,

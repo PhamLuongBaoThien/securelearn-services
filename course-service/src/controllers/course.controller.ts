@@ -262,7 +262,11 @@ class CourseController {
 
   public async getCourseForLearning(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const course = await courseService.getCourseForLearning(String(req.params.id), req.userId!);
+      const course = await courseService.getCourseForLearning(
+        String(req.params.id),
+        req.userId!,
+        req.userRole!,
+      );
       res.status(200).json({ status: 'OK', data: course });
     } catch (error: any) {
       res.status(error.message.includes('quyền') ? 403 : 404).json({ status: 'ERR', message: error.message });
@@ -296,6 +300,30 @@ class CourseController {
     try {
       const course = await courseService.getCourseReviewDetail(req.params.id as string);
       res.status(200).json({ status: 'OK', message: 'Lấy chi tiết khóa học thành công.', data: course });
+    } catch (error: any) {
+      res.status(404).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async getSubscriptionReviewCourses(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { page, limit, search, status } = req.query;
+      const result = await courseService.getSubscriptionReviewCourses({
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+        search: search as string,
+        status: status as any,
+      });
+      res.status(200).json({ status: 'OK', data: result });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async getSubscriptionReviewDetail(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const course = await courseService.getSubscriptionReviewDetail(String(req.params.id));
+      res.status(200).json({ status: 'OK', data: course });
     } catch (error: any) {
       res.status(404).json({ status: 'ERR', message: error.message });
     }

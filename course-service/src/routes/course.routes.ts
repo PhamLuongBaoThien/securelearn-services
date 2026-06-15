@@ -13,6 +13,7 @@ import sectionRoutes from './section.routes';
 import { extractUser, requireInstructor, requireStudentOrInstructor } from '../middlewares/auth.middleware';
 import upload from '../middlewares/upload.middleware';
 import subscriptionAccessController from '../controllers/subscriptionAccess.controller';
+import learningInteractionController from '../controllers/learningInteraction.controller';
 
 const router = Router();
 
@@ -29,6 +30,10 @@ router.get('/enrolled', extractUser, requireStudentOrInstructor, enrollmentContr
 // Nhóm route thuê bao dùng cho entitlement check và usage tracking khi learner học thật.
 router.post('/subscription/heartbeat', extractUser, requireStudentOrInstructor, subscriptionAccessController.heartbeat);
 router.get('/:id/learning', extractUser, requireStudentOrInstructor, courseController.getCourseForLearning);
+router.get('/:id/lessons/:lessonId/note', extractUser, requireStudentOrInstructor, learningInteractionController.getNote);
+router.put('/:id/lessons/:lessonId/note', extractUser, requireStudentOrInstructor, learningInteractionController.saveNote);
+router.get('/:id/lessons/:lessonId/discussions', extractUser, requireStudentOrInstructor, learningInteractionController.listDiscussions);
+router.post('/:id/lessons/:lessonId/discussions', extractUser, requireStudentOrInstructor, learningInteractionController.createDiscussion);
 
 // [POST] /api/courses/:id/enroll — Ghi danh vào khóa học
 router.post('/:id/enroll', extractUser, requireStudentOrInstructor, enrollmentController.enroll);

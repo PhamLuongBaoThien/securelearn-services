@@ -30,6 +30,9 @@ router.get('/:videoAssetId/batch-part-urls', requireVideoAssetOwner, videoAssetC
 // Polling trạng thái/video manifest cho cả owner và learner có entitlement hợp lệ.
 router.get('/:videoAssetId', requireVideoAssetAccess, videoAssetController.getAsset);
 
+// [GET] /api/media/videos/:videoAssetId/manifest
+router.get('/:videoAssetId/manifest', requireVideoAssetAccess, videoAssetController.getPlaybackManifest);
+
 // [GET] /api/media/videos/:videoAssetId/key
 router.get('/:videoAssetId/key', requireVideoAssetAccess, videoAssetController.getEncryptionKey);
 

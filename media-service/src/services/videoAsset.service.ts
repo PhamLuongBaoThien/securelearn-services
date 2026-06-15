@@ -206,8 +206,26 @@ class VideoAssetService {
     if (!asset) throw new Error(`Video asset không tồn tại khi đọc trạng thái: ${videoAssetId}.`);
     return {
       ...asset,
-      manifestPath: asset.manifestKey ? s3Service.getFileUrl(asset.manifestKey) : undefined,
+      // Player lấy manifest qua media-service để từng segment cũng được ký ngắn hạn.
+      manifestPath: asset.manifestKey ? `/api/media/videos/${videoAssetId}/manifest` : undefined,
     };
+  }
+
+  public async getPlaybackManifest(videoAssetId: string) {
+    const asset = await VideoAsset.findById(videoAssetId).lean();
+    if (!asset?.manifestKey || asset.status !== 'READY') {
+      throw new Error('Video chưa sẵn sàng để phát.');
+    }
+    const manifest = await s3Service.getObjectText(asset.manifestKey);
+    const baseKey = asset.manifestKey.slice(0, asset.manifestKey.lastIndexOf('/') + 1);
+    const lines = await Promise.all(
+      manifest.split(/\r?\n/).map(async (line) => {
+        const value = line.trim();
+        if (!value || value.startsWith('#') || /^https?:\/\//i.test(value)) return line;
+        return s3Service.getDownloadPresignedUrl(`${baseKey}${value}`, 300);
+      })
+    );
+    return lines.join('\n');
   }
 
   public async getBindingSnapshot(videoAssetId: string) {

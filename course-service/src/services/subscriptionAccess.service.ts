@@ -14,6 +14,14 @@ import { CourseVersion } from '../models/courseVersion.model';
 import { paymentGrpcClient } from '../grpc/payment.client';
 
 class SubscriptionAccessService {
+  private async resolveCourseShellId(courseOrVersionId: string): Promise<string> {
+    const shell = await Course.findById(courseOrVersionId).select('_id').lean();
+    if (shell) return shell._id.toString();
+
+    const version = await CourseVersion.findById(courseOrVersionId).select('courseId').lean();
+    return version?.courseId?.toString() || courseOrVersionId;
+  }
+
   public async optIn(courseId: string, instructorId: string) {
     const course = await Course.findOne({ _id: courseId, instructorId });
     if (!course) throw new Error('Khóa học không tồn tại hoặc bạn không có quyền.');
@@ -31,7 +39,12 @@ class SubscriptionAccessService {
     return course;
   }
 
-  public async withdraw(courseId: string, instructorId: string, reason = '') {
+  public async withdraw(
+    courseId: string,
+    instructor: { id: string; name?: string; email?: string },
+    reason = ''
+  ) {
+    const instructorId = instructor.id;
     const course = await Course.findOne({ _id: courseId, instructorId });
     if (!course) throw new Error('Khóa học không tồn tại hoặc bạn không có quyền.');
     if (![SubscriptionCatalogStatus.PENDING, SubscriptionCatalogStatus.APPROVED, SubscriptionCatalogStatus.REJECTED].includes(course.subscriptionStatus)) {
@@ -39,31 +52,72 @@ class SubscriptionAccessService {
     }
     // Rút khỏi catalog chỉ chặn enroll mới; learner đã học bằng thuê bao vẫn được học tới hết term đang active.
     course.subscriptionStatus = SubscriptionCatalogStatus.REMOVED;
-    course.subscriptionReviewReason = reason.trim() || 'Instructor withdrew the course from subscription catalog.';
-    course.subscriptionReviewedAt = new Date();
+    const reviewedAt = new Date();
+    const normalizedReason = reason.trim() || 'Giảng viên chủ động rút khóa học khỏi gói thuê bao.';
+    course.subscriptionReviewReason = normalizedReason;
+    course.subscriptionReviewedAt = reviewedAt;
+    course.subscriptionReviewedBy = instructorId;
+    course.subscriptionReviewedByName = instructor.name || course.instructorName || '';
+    course.subscriptionReviewedByEmail = instructor.email || '';
+    course.subscriptionReviewHistory.push({
+      action: 'WITHDRAW',
+      actorId: instructorId,
+      actorRole: 'INSTRUCTOR',
+      actorName: instructor.name || course.instructorName || '',
+      actorEmail: instructor.email || '',
+      reason: normalizedReason,
+      reviewedAt,
+    });
     await course.save();
     return course;
   }
 
-  public async review(courseId: string, action: 'APPROVE' | 'REJECT' | 'REMOVE', reason = '') {
+  public async review(
+    courseId: string,
+    action: 'APPROVE' | 'REJECT' | 'REMOVE',
+    reviewer: { id: string; name?: string; email?: string },
+    reason = ''
+  ) {
     let course = await Course.findById(courseId);
     if (!course) {
       const version = await CourseVersion.findById(courseId).select('courseId').lean();
       course = version ? await Course.findById(version.courseId) : null;
     }
     if (!course) throw new Error('Khóa học không tồn tại.');
+    const normalizedReason = reason.trim();
     if (action === 'APPROVE') {
       if (course.status !== CourseStatus.PUBLISHED || course.subscriptionStatus !== SubscriptionCatalogStatus.PENDING) {
         throw new Error('Chỉ khóa học đã xuất bản và đang chờ duyệt mới được thêm vào catalog.');
       }
       course.subscriptionStatus = SubscriptionCatalogStatus.APPROVED;
     } else if (action === 'REJECT') {
+      if (course.subscriptionStatus !== SubscriptionCatalogStatus.PENDING) {
+        throw new Error('Chỉ khóa học đang chờ duyệt mới có thể bị từ chối.');
+      }
+      if (!normalizedReason) throw new Error('Vui lòng nhập lý do từ chối.');
       course.subscriptionStatus = SubscriptionCatalogStatus.REJECTED;
     } else {
+      if (course.subscriptionStatus !== SubscriptionCatalogStatus.APPROVED) {
+        throw new Error('Chỉ khóa học đang nằm trong gói mới có thể bị rút.');
+      }
+      if (!normalizedReason) throw new Error('Vui lòng nhập lý do rút khóa học khỏi gói.');
       course.subscriptionStatus = SubscriptionCatalogStatus.REMOVED;
     }
-    course.subscriptionReviewReason = reason.trim();
-    course.subscriptionReviewedAt = new Date();
+    const reviewedAt = new Date();
+    course.subscriptionReviewReason = normalizedReason;
+    course.subscriptionReviewedAt = reviewedAt;
+    course.subscriptionReviewedBy = reviewer.id;
+    course.subscriptionReviewedByName = reviewer.name || '';
+    course.subscriptionReviewedByEmail = reviewer.email || '';
+    course.subscriptionReviewHistory.push({
+      action,
+      actorId: reviewer.id,
+      actorRole: 'ADMIN',
+      actorName: reviewer.name || '',
+      actorEmail: reviewer.email || '',
+      reason: normalizedReason,
+      reviewedAt,
+    });
     await course.save();
     return course;
   }
@@ -89,7 +143,13 @@ class SubscriptionAccessService {
   }
 
   public async entitlement(userId: string, courseId: string) {
-    const enrollment = await Enrollment.findOne({ userId, courseId, status: EnrollmentStatus.ACTIVE });
+    // Media assets are bound to a CourseVersion while enrollments are bound to the stable Course shell.
+    const shellCourseId = await this.resolveCourseShellId(courseId);
+    const enrollment = await Enrollment.findOne({
+      userId,
+      courseId: shellCourseId,
+      status: EnrollmentStatus.ACTIVE,
+    });
     if (!enrollment) return { allowed: false, reason: 'NOT_ENROLLED' };
     if (enrollment.source === EnrollmentSource.PURCHASE) return { allowed: true, source: EnrollmentSource.PURCHASE };
     const now = new Date();
@@ -151,7 +211,9 @@ class SubscriptionAccessService {
       );
       return { accepted: false, reason: 'SESSION_STARTED' };
     }
-    const qualifiedSeconds = Math.min(15, Math.max(1, Math.floor(Number(input.qualifiedSeconds))));
+    const remainingSeconds = Math.max(1, Math.ceil(lesson.duration - segmentIndex * 15));
+    // Segment cuối chỉ được ghi nhận phần thời lượng thật còn lại của video.
+    const qualifiedSeconds = Math.min(15, remainingSeconds, Math.max(1, Math.floor(Number(input.qualifiedSeconds))));
     const elapsedSeconds = (now.getTime() - activeSession.lastSeenAt.getTime()) / 1000;
     if (elapsedSeconds + 2 < qualifiedSeconds) {
       throw new Error('Heartbeat đến sớm hơn thời gian xem thực tế.');

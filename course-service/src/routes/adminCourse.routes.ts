@@ -6,16 +6,18 @@
 // ========================
 import { Router } from 'express';
 import courseController from '../controllers/course.controller';
-import { extractUser, requireAdmin } from '../middlewares/auth.middleware';
+import { extractUser, requireAdmin, requirePermission } from '../middlewares/auth.middleware';
 import subscriptionAccessController from '../controllers/subscriptionAccess.controller';
 
 const router = Router();
 
-router.get('/review', extractUser, requireAdmin, courseController.getCoursesForReview);
-router.get('/:id/review', extractUser, requireAdmin, courseController.getCourseReviewDetail);
-router.patch('/:id/approve', extractUser, requireAdmin, courseController.approveCourse);
-router.patch('/:id/reject', extractUser, requireAdmin, courseController.rejectCourse);
+router.get('/review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getCoursesForReview);
+router.get('/subscription-review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getSubscriptionReviewCourses);
+router.get('/:id/subscription-review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getSubscriptionReviewDetail);
+router.get('/:id/review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getCourseReviewDetail);
+router.patch('/:id/approve', extractUser, requireAdmin, requirePermission('course:approve'), courseController.approveCourse);
+router.patch('/:id/reject', extractUser, requireAdmin, requirePermission('course:approve'), courseController.rejectCourse);
 // Admin duyệt/từ chối/rút course khỏi catalog thuê bao bằng route riêng để không trộn với publish review.
-router.patch('/:id/subscription-review', extractUser, requireAdmin, subscriptionAccessController.review);
+router.patch('/:id/subscription-review', extractUser, requireAdmin, requirePermission('course:approve'), subscriptionAccessController.review);
 
 export default router;
