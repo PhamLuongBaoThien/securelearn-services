@@ -1,9 +1,5 @@
-// ========================
-// Learning Note Model
-// Mục đích:
 // - lưu ghi chú cá nhân của từng học viên theo bài học
 // - giữ mốc thời gian video gần nhất để học viên quay lại nhanh
-// ========================
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export interface ILearningNote extends Document {

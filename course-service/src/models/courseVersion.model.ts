@@ -1,3 +1,5 @@
+// - lưu phiên bản nội dung cụ thể của khóa học
+// - hỗ trợ versioning để giảng viên chỉnh sửa nội dung mà không ảnh hưởng học viên đang học
 import mongoose, { Document, Schema, Types } from 'mongoose';
 import { CategoryResolutionStatus, CourseLevel, CourseStatus } from './course.model';
 import slugify from 'slugify';

@@ -1,5 +1,5 @@
-// File này chứa model Category.
-// Category được dùng để gắn metadata cho course và dựng cây danh mục cho editor/public.
+// - phân loại danh mục khóa học
+// - giúp tổ chức và tìm kiếm khóa học dễ dàng hơn
 import mongoose, { Document, Schema } from 'mongoose';
 import slugify from 'slugify';
 

@@ -1,9 +1,5 @@
-// ========================
-// SubscriptionPlan Model
-// Mục đích:
-// - lưu hai gói thuê bao chuẩn của hệ thống
-// - cho Admin đổi tên, giá, mô tả, trạng thái bán mà không làm lệch lịch sử giao dịch
-// ========================
+// - lưu thông tin các gói thuê bao (tháng, năm) của nền tảng
+// - hỗ trợ cấu hình gói (giá, tên) mà không làm ảnh hưởng đến dữ liệu quá khứ
 import { Schema, model, Document } from 'mongoose';
 
 export type SubscriptionPlanType = 'MONTHLY' | 'YEARLY';

@@ -1,7 +1,5 @@
-// PaymentAttempt Model
-// Mục đích:
-// - ghi log từng lần thao tác trên giao dịch
-// - phục vụ debug, phân tích sau này, đặc biệt là với các giao dịch thất bại
+// - ghi log chi tiết từng bước thao tác của một giao dịch thanh toán
+// - phục vụ kiểm tra lỗi (debug) và phân tích các giao dịch thất bại
 // Hàm/luồng sử dụng:
 // - checkout
 // - confirm

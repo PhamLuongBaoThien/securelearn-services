@@ -1,7 +1,5 @@
-// ========================
-// Model: RolePermission — Lưu role với permissions, label, color
-// Hỗ trợ tạo role động — không cố định enum.
-// ========================
+// - định nghĩa các role (vai trò) động trong hệ thống kèm theo permission (quyền hạn)
+// - phục vụ hệ thống phân quyền (RBAC) linh hoạt thay vì fix cứng enum
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IRolePermissionDoc extends Document {

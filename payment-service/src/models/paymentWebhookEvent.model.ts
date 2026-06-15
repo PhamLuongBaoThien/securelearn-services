@@ -1,7 +1,5 @@
-// PaymentWebhookEvent Model
-// Mục đích:
-// - chống xử lý trùng webhook/IPN từ cổng thanh toán
-// - lưu dấu event đã nhận để bảo đảm idempotency
+// - lưu ID của các event webhook từ cổng thanh toán để chống xử lý trùng
+// - đảm bảo tính duy nhất (idempotency) khi nhận callback thanh toán
 // Luồng sử dụng:
 // - webhook handler kiểm tra eventId trước khi xử lý
 

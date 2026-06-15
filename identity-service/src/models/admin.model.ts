@@ -1,3 +1,5 @@
+// - lưu trữ tài khoản và thông tin quản trị viên (Admin)
+// - quản lý trạng thái khóa/mở và phân quyền cơ bản cho admin
 import mongoose, { Schema, Document } from 'mongoose';
 
 // ===== Admin Role Type =====

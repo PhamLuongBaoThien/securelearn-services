@@ -1,9 +1,5 @@
-// ========================
-// UserSubscriptionTerm Model
-// Mục đích:
-// - lưu từng kỳ thuê bao đã mua của user
-// - dùng làm source of truth cho ACTIVE/SCHEDULED/EXPIRED/REFUNDED
-// ========================
+// - lưu từng kỳ hạn thuê bao mà user đã mua
+// - quản lý trạng thái gói (ACTIVE/SCHEDULED/EXPIRED/REFUNDED) của người dùng
 import { Schema, model, Document } from 'mongoose';
 import type { SubscriptionPlanType } from './subscriptionPlan.model';
 

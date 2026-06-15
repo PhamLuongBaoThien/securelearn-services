@@ -1,9 +1,5 @@
-// ========================
-// SubscriptionUsage Model
-// Mục đích:
-// - lưu các heartbeat đã hợp lệ của người học thuê bao
-// - chống tính trùng bằng unique key theo term + lesson + segment
-// ========================
+// - lưu các heartbeat hợp lệ của học viên thuê bao
+// - tính toán thời lượng học chính xác và chống tính trùng để chia sẻ doanh thu
 import { Schema, model, Document } from 'mongoose';
 
 export interface ISubscriptionUsage extends Document {

@@ -1,5 +1,5 @@
-// File này chứa model VideoAsset.
-// Asset này là nguồn sự thật cho trạng thái upload/xử lý video bên media-service.
+// - là nguồn dữ liệu chuẩn cho trạng thái upload và xử lý video của media-service
+// - quản lý các file video bài học
 import mongoose, { Document, Schema } from 'mongoose';
 
 export enum VideoAssetStatus {

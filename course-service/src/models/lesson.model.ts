@@ -1,6 +1,5 @@
-// File này chứa model Lesson.
-// Đây là model trung tâm của curriculum vì mỗi lesson sẽ trỏ sang video/quiz tùy type.
-// Tài liệu đính kèm (attachments) được lưu trong mảng attachments[] — áp dụng cho cả VIDEO lẫn QUIZ.
+// - đại diện cho một bài học cụ thể trong khóa học (có thể là video hoặc quiz)
+// - lưu trữ tài liệu đính kèm và thông tin chi tiết bài học
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export enum LessonType {

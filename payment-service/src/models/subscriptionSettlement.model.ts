@@ -1,9 +1,5 @@
-// ========================
-// SubscriptionSettlement Model
-// Mục đích:
-// - chốt doanh thu thuê bao theo kỳ tháng
-// - lưu recognized revenue, pool của instructor và phân bổ theo usage
-// ========================
+// - chốt số liệu doanh thu thuê bao theo từng tháng
+// - tính toán ngân sách và tỷ lệ phân chia tiền cho giảng viên dựa trên thời lượng học
 import { Schema, model, Document } from 'mongoose';
 
 export type SubscriptionSettlementStatus = 'OPEN' | 'CALCULATED' | 'LOCKED' | 'AVAILABLE';

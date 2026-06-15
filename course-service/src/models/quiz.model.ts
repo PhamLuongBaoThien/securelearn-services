@@ -1,5 +1,5 @@
-// File này chứa model Quiz.
-// Quiz là domain riêng gắn 1-1 với lesson type QUIZ.
+// - lưu trữ câu hỏi và đáp án cho bài kiểm tra trắc nghiệm
+// - đánh giá kiến thức của học viên
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export enum QuizQuestionType {

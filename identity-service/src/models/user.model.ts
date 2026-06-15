@@ -1,3 +1,5 @@
+// - lưu thông tin định danh và tài khoản của người dùng chung (học viên, giảng viên)
+// - quản lý thông tin đăng nhập, xác thực và trạng thái tài khoản
 import mongoose, { Schema, Document } from 'mongoose';
 
 export enum Role {

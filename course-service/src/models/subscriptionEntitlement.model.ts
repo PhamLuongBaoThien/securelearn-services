@@ -1,9 +1,5 @@
-// ========================
-// SubscriptionEntitlement Model
-// Mục đích:
-// - mirror trạng thái term từ payment-service sang course-service
-// - dùng local entitlement này để check quyền học mà không phụ thuộc projection ở identity-service
-// ========================
+// - đồng bộ trạng thái gói thuê bao từ payment-service sang course-service
+// - dùng làm dữ liệu local để kiểm tra quyền truy cập khóa học nhanh chóng
 import mongoose, { Document, Schema } from 'mongoose';
 
 export interface ISubscriptionEntitlement extends Document {

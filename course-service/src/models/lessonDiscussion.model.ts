@@ -1,9 +1,5 @@
-// ========================
-// Lesson Discussion Model
-// Mục đích:
 // - lưu trao đổi giữa học viên đã ghi danh và giảng viên khóa học
 // - gắn nội dung với bài học và mốc thời gian video
-// ========================
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export interface ILessonDiscussion extends Document {

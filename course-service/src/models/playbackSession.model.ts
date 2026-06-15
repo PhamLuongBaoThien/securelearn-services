@@ -1,9 +1,5 @@
-// ========================
-// PlaybackSession Model
-// Mục đích:
-// - theo dõi playback session hiện tại của mỗi user
-// - giúp chặn nhiều tab/session đồng thời và heartbeat đến nhanh hơn thời gian thực
-// ========================
+// - theo dõi phiên học hiện tại của user để chống học cùng lúc trên nhiều tab
+// - xử lý heartbeat định kỳ để ghi nhận thời gian học thực tế
 import mongoose, { Schema } from 'mongoose';
 
 const schema = new Schema(

@@ -1,5 +1,5 @@
-// File này chứa model QuizAttempt.
-// Nó lưu từng lượt làm bài của học viên cho một quiz cụ thể.
+// - ghi nhận chi tiết mỗi lần học viên làm bài quiz
+// - lưu trữ câu trả lời, điểm số và trạng thái (đang làm/đã nộp)
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export enum QuizAttemptStatus {

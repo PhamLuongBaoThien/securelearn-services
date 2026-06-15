@@ -1,3 +1,5 @@
+// - cấu hình tỷ lệ phân chia lợi nhuận giữa nền tảng (Admin) và Giảng viên
+// - thiết lập thông số tài chính cho hệ thống
 import { Schema, model, Document } from 'mongoose';
 
 export interface IFinanceConfig extends Document {

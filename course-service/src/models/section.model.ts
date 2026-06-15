@@ -1,5 +1,5 @@
-// File này chứa model Section.
-// Section chỉ là container sắp xếp lesson trong một CourseVersion.
+// - là cấu trúc chứa và nhóm các bài học (lesson) lại với nhau trong một phiên bản khóa học
+// - giúp tổ chức nội dung khóa học theo từng phần mạch lạc
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export interface ISection extends Document {

@@ -1,3 +1,5 @@
+// - quản lý giỏ hàng của user
+// - lưu trữ các khóa học user định mua trước khi thanh toán
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export interface ICartItem {

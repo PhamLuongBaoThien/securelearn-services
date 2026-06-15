@@ -1,8 +1,5 @@
-// PaymentTransaction Model
-// Mục đích:
-// - lưu đơn thanh toán chính của phase 1
-// - giữ trạng thái nghiệp vụ: PENDING / SUCCEEDED / FAILED
-// - làm source of truth cho order mua khóa học
+// - lưu đơn thanh toán chính, trạng thái nghiệp vụ (PENDING/SUCCEEDED/FAILED)
+// - là dữ liệu chuẩn để cấp quyền khóa học sau khi thanh toán xong
 // Dùng cho:
 // - checkout
 // - confirm

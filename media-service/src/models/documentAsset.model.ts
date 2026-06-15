@@ -1,5 +1,5 @@
-// File này chứa model DocumentAsset.
-// Asset này lưu metadata file tài liệu đính kèm cho lesson VIDEO hoặc QUIZ.
+// - quản lý siêu dữ liệu (metadata) của các file tài liệu đính kèm (PDF, DOCX...)
+// - theo dõi trạng thái xử lý/upload của file tài liệu
 import mongoose, { Document, Schema } from 'mongoose';
 
 export enum DocumentAssetStatus {

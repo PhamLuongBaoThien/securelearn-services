@@ -1,9 +1,5 @@
-// ========================
-// Subscription Audit Model
-// Mục đích:
-// - lưu audit log cho các thao tác nhạy cảm của thuê bao
-// - phục vụ tra cứu ai đã đổi plan, refund hoặc settlement
-// ========================
+// - lưu trữ dấu vết (audit log) của các thao tác nhạy cảm liên quan đến thuê bao
+// - tra cứu lịch sử thay đổi gói, hoàn tiền hoặc chốt đối soát
 import { Schema, model } from 'mongoose';
 
 const subscriptionAuditSchema = new Schema(

@@ -1,8 +1,5 @@
-// ========================
-// File này chứa model Course.
-// Course chỉ giữ metadata + số liệu tổng hợp.
-// Curriculum thật đã được tách sang Section và Lesson collections riêng.
-// ========================
+// - lưu thông tin tổng quan của một khóa học (tiêu đề, mô tả, giá, giảng viên)
+// - quản lý trạng thái hiển thị và luồng xét duyệt khóa học
 import mongoose, { Schema, Document, Types } from 'mongoose';
 import slugify from 'slugify';
 
