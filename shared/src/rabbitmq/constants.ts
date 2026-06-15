@@ -114,7 +114,7 @@ export interface AssetAttachedPayload {
 
 export type PaymentProvider = 'VNPAY' | 'MOMO';
 export type PaymentMethod = 'VNPAY' | 'MOMO';
-export type PaymentStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED';
+export type PaymentStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'REFUNDED';
 
 export interface PaymentCourseItemPayload {
   courseId: string;

@@ -21,6 +21,9 @@ export interface ISubscriptionSettlement extends Document {
   recognizedGross: number;
   adminRevenue: number;
   instructorPool: number;
+  refundGrossAdjustment: number;
+  refundAdminAdjustment: number;
+  refundInstructorPoolAdjustment: number;
   carriedIn: number;
   carriedOut: number;
   totalQualifiedSeconds: number;
@@ -49,6 +52,9 @@ const subscriptionSettlementSchema = new Schema<ISubscriptionSettlement>(
     recognizedGross: { type: Number, default: 0 },
     adminRevenue: { type: Number, default: 0 },
     instructorPool: { type: Number, default: 0 },
+    refundGrossAdjustment: { type: Number, default: 0 },
+    refundAdminAdjustment: { type: Number, default: 0 },
+    refundInstructorPoolAdjustment: { type: Number, default: 0 },
     carriedIn: { type: Number, default: 0 },
     carriedOut: { type: Number, default: 0 },
     totalQualifiedSeconds: { type: Number, default: 0 },

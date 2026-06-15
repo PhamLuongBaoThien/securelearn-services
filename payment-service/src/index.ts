@@ -11,6 +11,7 @@ import { connectDB } from './config/db';
 import { RabbitMQConnection, startGrpcServer } from '@securelearn/common';
 import app from './app';
 import subscriptionService from './services/subscription.service';
+import paymentService from './services/payment.service';
 import { createInternalGrpcServer } from './grpc/server';
 
 const PORT = process.env.PORT || 5004;
@@ -33,6 +34,15 @@ const bootServer = async () => {
         console.error('[SubscriptionScheduler] Không thể cập nhật trạng thái kỳ thuê bao:', error);
       });
     }, 60_000).unref();
+    // IPN local có thể gián đoạn khi tunnel đổi URL; query định kỳ giữ trạng thái MoMo đồng bộ.
+    paymentService.reconcilePendingMomoTransactions().catch((error) => {
+      console.error('[MomoReconcile] Không thể đối soát giao dịch lúc khởi động:', error);
+    });
+    setInterval(() => {
+      paymentService.reconcilePendingMomoTransactions().catch((error) => {
+        console.error('[MomoReconcile] Không thể đối soát giao dịch:', error);
+      });
+    }, 30_000).unref();
     grpcServer = await startGrpcServer(createInternalGrpcServer(), GRPC_BIND);
 
     app.listen(PORT, () => {

@@ -51,6 +51,9 @@ export interface IPaymentTransaction extends Document {
   failureReason?: string;
   paidAt?: Date;
   failedAt?: Date;
+  refundedAt?: Date;
+  refundedBy?: string;
+  refundReason?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -95,11 +98,14 @@ const paymentTransactionSchema = new Schema<IPaymentTransaction>(
     },
     provider: { type: String, required: true, enum: ['VNPAY', 'MOMO'] },
     paymentMethod: { type: String, required: true, enum: ['VNPAY', 'MOMO'] },
-    status: { type: String, required: true, enum: ['PENDING', 'SUCCEEDED', 'FAILED'], default: 'PENDING' },
+    status: { type: String, required: true, enum: ['PENDING', 'SUCCEEDED', 'FAILED', 'REFUNDED'], default: 'PENDING' },
     providerRef: { type: String, default: '' },
     failureReason: { type: String, default: '' },
     paidAt: { type: Date },
     failedAt: { type: Date },
+    refundedAt: { type: Date },
+    refundedBy: { type: String, default: '' },
+    refundReason: { type: String, default: '' },
   },
   { timestamps: true }
 );

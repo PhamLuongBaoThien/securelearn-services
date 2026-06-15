@@ -15,6 +15,7 @@ export interface AuthRequest extends Request {
   userRole?: string;
   userName?: string;
   userEmail?: string;
+  userPermissions?: string[];
 }
 
 export const extractUser = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
@@ -25,7 +26,13 @@ export const extractUser = async (req: AuthRequest, res: Response, next: NextFun
     return;
   }
 
-  const decoded = jwt.decode(token) as { id: string; role: string; fullName?: string; email?: string } | null;
+  const decoded = jwt.decode(token) as {
+    id: string;
+    role: string;
+    fullName?: string;
+    email?: string;
+    permissions?: string[];
+  } | null;
   if (!decoded) {
     res.status(401).json({ status: 'ERR', message: 'Token không hợp lệ.' });
     return;
@@ -35,6 +42,7 @@ export const extractUser = async (req: AuthRequest, res: Response, next: NextFun
   req.userRole = decoded.role;
   req.userName = decoded.fullName ?? '';
   req.userEmail = decoded.email ?? '';
+  req.userPermissions = decoded.permissions ?? [];
 
   if (decoded.role !== 'ADMIN') {
     const isLocked = await redisClient.get(`locked_user:${decoded.id}`);
@@ -46,3 +54,21 @@ export const extractUser = async (req: AuthRequest, res: Response, next: NextFun
 
   next();
 };
+
+export const requireRoles = (...roles: string[]) =>
+  (req: AuthRequest, res: Response, next: NextFunction): void => {
+    if (!req.userRole || !roles.includes(req.userRole)) {
+      res.status(403).json({ status: 'ERR', message: 'Bạn không có quyền thực hiện thao tác này.' });
+      return;
+    }
+    next();
+  };
+
+export const requirePermission = (permission: string) =>
+  (req: AuthRequest, res: Response, next: NextFunction): void => {
+    if (req.userRole !== 'ADMIN' || !req.userPermissions?.includes(permission)) {
+      res.status(403).json({ status: 'ERR', message: 'Bạn không có quyền thực hiện thao tác này.' });
+      return;
+    }
+    next();
+  };

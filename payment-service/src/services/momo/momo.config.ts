@@ -17,8 +17,6 @@ export type MomoConfig = {
   ipnUrl: string;
   lang: string;
   requestType: 'payWithMethod';
-  autoCapture: boolean;
-  orderExpireTime: number;
 };
 
 export const getMomoConfig = (): MomoConfig => {
@@ -31,8 +29,6 @@ export const getMomoConfig = (): MomoConfig => {
   const ipnUrl = process.env.MOMO_IPN_URL || '';
   const lang = process.env.MOMO_LANG || 'vi';
   const requestType = 'payWithMethod' as const;
-  const autoCapture = String(process.env.MOMO_AUTO_CAPTURE || 'true').toLowerCase() !== 'false';
-  const orderExpireTime = Number(process.env.MOMO_ORDER_EXPIRE_TIME || '30');
 
   if (!partnerCode) {
     throw new Error('MOMO_PARTNER_CODE is not defined in environment variables');
@@ -60,7 +56,5 @@ export const getMomoConfig = (): MomoConfig => {
     ipnUrl,
     lang,
     requestType,
-    autoCapture,
-    orderExpireTime: Number.isFinite(orderExpireTime) && orderExpireTime > 0 ? orderExpireTime : 30,
   };
 };

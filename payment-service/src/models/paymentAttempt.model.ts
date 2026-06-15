@@ -14,7 +14,7 @@ export interface IPaymentAttempt extends Document {
   transactionId: string;
   transactionCode: string;
   userId: string;
-  action: 'CHECKOUT' | 'CONFIRM' | 'WEBHOOK';
+  action: 'CHECKOUT' | 'CONFIRM' | 'WEBHOOK' | 'QUERY';
   provider: PaymentProvider;
   paymentMethod: PaymentMethod;
   success: boolean;
@@ -29,7 +29,7 @@ const paymentAttemptSchema = new Schema<IPaymentAttempt>(
     transactionId: { type: String, required: true, index: true },
     transactionCode: { type: String, required: true, index: true },
     userId: { type: String, required: true, index: true },
-    action: { type: String, required: true, enum: ['CHECKOUT', 'CONFIRM', 'WEBHOOK'] },
+    action: { type: String, required: true, enum: ['CHECKOUT', 'CONFIRM', 'WEBHOOK', 'QUERY'] },
     provider: { type: String, required: true, enum: ['VNPAY', 'MOMO'] },
     paymentMethod: { type: String, required: true, enum: ['VNPAY', 'MOMO'] },
     success: { type: Boolean, required: true },

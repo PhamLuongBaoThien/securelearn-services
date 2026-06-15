@@ -26,6 +26,11 @@ export interface IUserSubscriptionTerm extends Document {
   startsAt: Date;
   endsAt: Date;
   refundedAt?: Date;
+  refundReason?: string;
+  refundAdjustmentPeriod?: string;
+  refundGrossAdjustment: number;
+  refundAdminAdjustment: number;
+  refundInstructorPoolAdjustment: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -53,6 +58,11 @@ const userSubscriptionTermSchema = new Schema<IUserSubscriptionTerm>(
     startsAt: { type: Date, required: true, index: true },
     endsAt: { type: Date, required: true, index: true },
     refundedAt: { type: Date },
+    refundReason: { type: String, default: '' },
+    refundAdjustmentPeriod: { type: String, default: '', index: true },
+    refundGrossAdjustment: { type: Number, default: 0, min: 0 },
+    refundAdminAdjustment: { type: Number, default: 0, min: 0 },
+    refundInstructorPoolAdjustment: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

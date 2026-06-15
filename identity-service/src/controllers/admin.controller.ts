@@ -26,12 +26,14 @@ class AdminController {
       }
 
       const admin = await adminService.login(email, password);
+      const adminProfile = await adminService.getProfile(admin._id.toString());
 
       const access_token = generalAccessToken({
         id: admin._id.toString(),
         role: 'ADMIN',
         fullName: admin.fullName,
         email: admin.email,
+        permissions: adminProfile?.permissions || [],
       });
       const refresh_token = generalRefreshToken({ id: admin._id.toString(), role: 'ADMIN' });
 
@@ -89,6 +91,7 @@ class AdminController {
         role: result.decoded!.role,
         fullName: admin?.fullName ?? '',
         email: admin?.email ?? '',
+        permissions: admin?.permissions || [],
       });
 
       res.status(200).json({

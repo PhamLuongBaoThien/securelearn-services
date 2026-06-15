@@ -265,6 +265,19 @@ class SubscriptionService {
       instructorPool += Math.round(term.instructorPoolAmount * ratio);
     }
 
+    const refundAdjustments = await UserSubscriptionTerm.find({
+      refundAdjustmentPeriod: period,
+      status: 'REFUNDED',
+    }).lean();
+    const refundGrossAdjustment = refundAdjustments.reduce((sum, term) => sum + (term.refundGrossAdjustment || 0), 0);
+    const refundAdminAdjustment = refundAdjustments.reduce((sum, term) => sum + (term.refundAdminAdjustment || 0), 0);
+    const refundInstructorPoolAdjustment = refundAdjustments.reduce(
+      (sum, term) => sum + (term.refundInstructorPoolAdjustment || 0),
+      0
+    );
+    recognizedGross -= refundGrossAdjustment;
+    adminRevenue -= refundAdminAdjustment;
+
     const previous = await SubscriptionSettlement.findOne({ period: { $lt: period } }).sort({ period: -1 }).lean();
     const carriedIn = previous?.carriedOut || 0;
     // Pool của instructor chỉ được chia theo qualified usage đã qua heartbeat validation.
@@ -272,14 +285,20 @@ class SubscriptionService {
       _id: { instructorId: string; courseId: string };
       qualifiedSeconds: number;
     }>([
-      { $match: { occurredAt: { $gte: start, $lt: end } } },
+      {
+        $match: {
+          occurredAt: { $gte: start, $lt: end },
+          // Usage của term đã refund không được dùng để lấy tỷ trọng từ pool của các term còn hợp lệ.
+          termId: { $in: terms.map((term) => term._id.toString()) },
+        },
+      },
       { $group: { _id: { instructorId: '$instructorId', courseId: '$courseId' }, qualifiedSeconds: { $sum: '$qualifiedSeconds' } } },
       { $sort: { qualifiedSeconds: -1 } },
     ]);
     const totalQualifiedSeconds = usage.reduce((sum, item) => sum + item.qualifiedSeconds, 0);
-    const distributable = instructorPool + carriedIn;
+    const distributable = instructorPool + carriedIn - refundInstructorPoolAdjustment;
     let allocated = 0;
-    const allocations = usage.map((item, index) => {
+    const allocations = distributable <= 0 ? [] : usage.map((item, index) => {
       const amount = totalQualifiedSeconds === 0
         ? 0
         : index === usage.length - 1
@@ -302,8 +321,11 @@ class SubscriptionService {
           recognizedGross,
           adminRevenue,
           instructorPool,
+          refundGrossAdjustment,
+          refundAdminAdjustment,
+          refundInstructorPoolAdjustment,
           carriedIn,
-          carriedOut: totalQualifiedSeconds === 0 ? distributable : 0,
+          carriedOut: totalQualifiedSeconds === 0 || distributable <= 0 ? distributable : 0,
           totalQualifiedSeconds,
           allocations,
           calculatedAt: new Date(),
@@ -360,11 +382,60 @@ class SubscriptionService {
     const term = await UserSubscriptionTerm.findById(termId);
     if (!term) throw new Error('Kỳ thuê bao không tồn tại.');
     if (term.status === 'REFUNDED') return term;
+    const normalizedReason = reason.trim();
+    if (!normalizedReason) throw new Error('Vui lòng nhập lý do hoàn tiền.');
+    const refundDate = new Date();
+    const lockedSettlements = await SubscriptionSettlement.find({
+      status: { $in: ['LOCKED', 'AVAILABLE'] },
+    }).lean();
+    let recognizedRatio = 0;
+    for (const settlement of lockedSettlements) {
+      const { start, end } = this.periodBounds(settlement.period);
+      const overlapMs = Math.max(
+        0,
+        Math.min(term.endsAt.getTime(), end.getTime()) - Math.max(term.startsAt.getTime(), start.getTime())
+      );
+      recognizedRatio += overlapMs / (term.durationDays * 86400000);
+    }
+    recognizedRatio = Math.min(1, recognizedRatio);
+
     term.status = 'REFUNDED';
-    term.refundedAt = new Date();
+    term.refundedAt = refundDate;
+    term.refundReason = normalizedReason;
+    if (recognizedRatio > 0) {
+      term.refundAdjustmentPeriod = this.nextPeriod(refundDate);
+      term.refundGrossAdjustment = Math.round(term.price * recognizedRatio);
+      term.refundAdminAdjustment = Math.round(term.adminAmount * recognizedRatio);
+      term.refundInstructorPoolAdjustment = Math.round(term.instructorPoolAmount * recognizedRatio);
+    }
     await term.save();
-    await PaymentTransaction.updateOne({ _id: term.transactionId }, { $set: { failureReason: `REFUNDED: ${reason}` } });
-    await this.audit(actorId, 'ADMIN', 'SUBSCRIPTION_TERM_REFUNDED', 'UserSubscriptionTerm', term._id.toString(), { reason });
+    await PaymentTransaction.updateOne(
+      { _id: term.transactionId },
+      {
+        $set: {
+          status: 'REFUNDED',
+          refundedAt: refundDate,
+          refundedBy: actorId,
+          refundReason: normalizedReason,
+          failureReason: '',
+        },
+      }
+    );
+
+    const recalculableSettlements = await SubscriptionSettlement.find({ status: 'CALCULATED' }).lean();
+    for (const settlement of recalculableSettlements) {
+      const { start, end } = this.periodBounds(settlement.period);
+      if (term.startsAt < end && term.endsAt > start) {
+        await this.calculateSettlement(settlement.period, actorId);
+      }
+    }
+    await this.audit(actorId, 'ADMIN', 'SUBSCRIPTION_TERM_REFUNDED', 'UserSubscriptionTerm', term._id.toString(), {
+      reason: normalizedReason,
+      refundAdjustmentPeriod: term.refundAdjustmentPeriod || '',
+      refundGrossAdjustment: term.refundGrossAdjustment || 0,
+      refundAdminAdjustment: term.refundAdminAdjustment || 0,
+      refundInstructorPoolAdjustment: term.refundInstructorPoolAdjustment || 0,
+    });
     await this.publishTerm(term);
     return term;
   }
@@ -402,6 +473,11 @@ class SubscriptionService {
     const end = new Date(Date.UTC(year, month, 1));
     if (start.getUTCFullYear() !== year || start.getUTCMonth() !== month - 1) throw new Error('Kỳ settlement không hợp lệ.');
     return { start, end };
+  }
+
+  private nextPeriod(date: Date) {
+    const nextMonth = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
+    return `${nextMonth.getUTCFullYear()}-${String(nextMonth.getUTCMonth() + 1).padStart(2, '0')}`;
   }
 }
 

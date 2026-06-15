@@ -193,6 +193,13 @@ services:
           - GET
           - POST
 
+      - name: payment-momo-browser-return
+        paths:
+          - /api/payments/momo-browser-return
+        strip_path: false
+        methods:
+          - GET
+
       - name: payment-protected
         paths:
           - /api/payments

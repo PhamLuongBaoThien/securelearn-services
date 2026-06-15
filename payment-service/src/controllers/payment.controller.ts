@@ -10,6 +10,7 @@
 // - getTransactionByCode()
 // - webhookVnpay()
 // - webhookMomo()
+// - momoBrowserReturn()
 // - momoReturn()
 // ========================
 
@@ -57,7 +58,7 @@ class PaymentController {
 
   public async getTransaction(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const transaction = await paymentService.getTransactionForUser(String(req.params.id || ''), req.userId!);
+      const transaction = await paymentService.getTransactionForUser(String(req.params.id || ''), req.userId!, req.userRole);
       res.status(200).json({ status: 'OK', data: transaction });
     } catch (error: any) {
       const status = error.message.includes('quyền') ? 403 : 404;
@@ -73,7 +74,7 @@ class PaymentController {
         return;
       }
 
-      const transaction = await paymentService.getTransactionByCodeForUser(transactionCode, req.userId!);
+      const transaction = await paymentService.getTransactionByCodeForUser(transactionCode, req.userId!, req.userRole);
       res.status(200).json({ status: 'OK', data: transaction });
     } catch (error: any) {
       const status = error.message.includes('quyền') ? 403 : 400;
@@ -108,6 +109,16 @@ class PaymentController {
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }
+  }
+
+  public momoBrowserReturn(req: Request, res: Response): void {
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    const sourceUrl = new URL(req.originalUrl, 'http://payment-service.local');
+    const targetUrl = new URL('/payment/momo-return', clientUrl);
+
+    // Giữ nguyên query do MoMo gửi để frontend chuyển tiếp cho bước xác minh chữ ký.
+    targetUrl.search = sourceUrl.search;
+    res.redirect(302, targetUrl.toString());
   }
 
   public async vnpayReturn(req: AuthRequest, res: Response): Promise<void> {

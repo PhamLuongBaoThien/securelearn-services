@@ -7,37 +7,18 @@
 // - createMomoPaymentSession()
 // - queryMomoTransaction()
 // ========================
-import { randomUUID } from 'crypto';
 import { getMomoConfig } from './momo.config';
 import { buildMomoCreatePayload, buildMomoQueryPayload } from './momo.builder';
 
 export type MomoCreateSessionInput = {
+  requestId?: string;
   orderId: string;
   amount: number;
   orderInfo: string;
   redirectUrl: string;
   ipnUrl: string;
   extraData?: string;
-  autoCapture?: boolean;
   lang?: string;
-  orderExpireTime?: number;
-  items?: Array<{
-    id: string;
-    name: string;
-    description: string;
-    imageUrl?: string;
-    price: number;
-    quantity: number;
-    totalPrice: number;
-    category?: string;
-    unit?: string;
-    taxAmount?: number;
-  }>;
-  userInfo?: {
-    name: string;
-    email?: string;
-    phoneNumber?: string;
-  };
 };
 
 export type MomoCreateResponse = {
@@ -102,21 +83,17 @@ const postJson = async <T>(url: string, body: Record<string, unknown>): Promise<
 
 export const createMomoPaymentSession = async (input: MomoCreateSessionInput): Promise<MomoCreateResponse> => {
   const config = getMomoConfig();
+  const requestId = input.requestId || `${input.orderId}${Date.now()}`;
   const request = buildMomoCreatePayload({
-    requestId: input.orderId,
+    requestId,
     orderId: input.orderId,
     amount: input.amount,
     orderInfo: input.orderInfo,
     redirectUrl: input.redirectUrl,
     ipnUrl: input.ipnUrl,
     extraData: input.extraData || '',
-    autoCapture: input.autoCapture,
     lang: input.lang,
-    orderExpireTime: input.orderExpireTime,
-    items: input.items,
-    userInfo: input.userInfo,
   });
-
   const response = await postJson<MomoCreateResponse>(config.apiUrl, request);
 
   if ((response.resultCode ?? 0) !== 0 || !response.payUrl) {
@@ -129,7 +106,7 @@ export const createMomoPaymentSession = async (input: MomoCreateSessionInput): P
 export const queryMomoTransaction = async (orderId: string, lang?: string): Promise<MomoQueryResponse> => {
   const config = getMomoConfig();
   const request = buildMomoQueryPayload({
-    requestId: randomUUID(),
+    requestId: `${orderId}${Date.now()}`,
     orderId,
     lang,
   });

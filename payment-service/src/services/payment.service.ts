@@ -55,6 +55,7 @@ class PaymentService {
   private readonly courseServiceUrl = process.env.COURSE_SERVICE_URL || 'http://course-service:5002';
   private readonly clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
   private readonly financeConfigKey = 'COURSE_REVENUE_SPLIT';
+  private readonly momoPendingResultCodes = new Set([1000, 7000, 7002]);
 
   public async createCourseCheckout(
     user: { userId: string; userRole: string; fullName: string; email: string },
@@ -95,8 +96,6 @@ class PaymentService {
           orderInfo,
           redirectUrl: momoConfig.returnUrl,
           ipnUrl: momoConfig.ipnUrl,
-          items: this.toMomoItems(cart.items),
-          userInfo: { name: user.fullName, email: user.email },
         });
       } else {
         paymentUrl = buildVnpayPaymentUrl({
@@ -199,19 +198,6 @@ class PaymentService {
             orderInfo,
             redirectUrl: getMomoConfig().returnUrl,
             ipnUrl: getMomoConfig().ipnUrl,
-            items: [{
-              id: plan._id.toString(),
-              name: plan.name,
-              description: plan.description || plan.name,
-              imageUrl: 'https://placehold.co/300x300/png?text=SecureLearn',
-              price: Math.round(plan.price),
-              quantity: 1,
-              totalPrice: Math.round(plan.price),
-              category: 'subscription',
-              unit: 'plan',
-              taxAmount: 0,
-            }],
-            userInfo: { name: user.fullName, email: user.email },
           })
         : buildVnpayPaymentUrl({
             txnRef: transactionCode,
@@ -241,19 +227,22 @@ class PaymentService {
     }
   }
 
-  public async getTransactionForUser(transactionId: string, userId: string) {
-    const transaction = await this.findOwnedTransaction(transactionId, userId);
+  public async getTransactionForUser(transactionId: string, userId: string, userRole?: string) {
+    const transaction = await this.findOwnedTransaction(transactionId, userId, userRole);
     return this.mapTransaction(transaction);
   }
 
-  public async getTransactionByCodeForUser(transactionCode: string, userId: string) {
-    const transaction = await this.findOwnedTransactionByCode(transactionCode, userId);
+  public async getTransactionByCodeForUser(transactionCode: string, userId: string, userRole?: string) {
+    const transaction = await this.findOwnedTransactionByCode(transactionCode, userId, userRole);
     return this.mapTransaction(transaction);
   }
 
   private async confirmTransaction(transactionId: string, user: { userId: string; userRole: string; fullName: string; email: string }, providerRef?: string) {
     const transaction = await this.findOwnedTransaction(transactionId, user.userId);
 
+    if (transaction.status === 'REFUNDED') {
+      throw new Error('Giao dịch đã được hoàn tiền và không thể xác nhận lại.');
+    }
     if (transaction.status !== 'SUCCEEDED') {
       transaction.status = 'SUCCEEDED';
       transaction.providerRef = providerRef || transaction.providerRef || randomUUID();
@@ -393,6 +382,9 @@ class PaymentService {
     }
 
     // Trường hợp giao dịch đã ở trạng thái thành công trong DB (được xử lý bởi cổng kia trước)
+    if (transaction.status === 'REFUNDED') {
+      return { success: true, rspCode: '00', message: 'Giao dịch đã được hoàn tiền.', data: this.mapTransaction(transaction) };
+    }
     if (transaction.status === 'SUCCEEDED') {
       await this.finalizeSuccessfulTransaction(transaction);
       await PaymentWebhookEvent.create({
@@ -522,10 +514,9 @@ class PaymentService {
       };
     }
 
-    if (Math.round(transaction.amount) !== Math.round(amount)) {
-      return { success: false, message: 'Số tiền thanh toán không khớp với giao dịch.' };
+    if (transaction.status === 'REFUNDED') {
+      return { success: true, message: 'Giao dịch đã được hoàn tiền.', data: this.mapTransaction(transaction) };
     }
-
     if (transaction.status === 'SUCCEEDED') {
       await this.finalizeSuccessfulTransaction(transaction);
       await PaymentWebhookEvent.create({
@@ -540,10 +531,22 @@ class PaymentService {
       return { success: true, message: 'Thành công', data: this.mapTransaction(transaction) };
     }
 
+    if (this.momoPendingResultCodes.has(resultCode)) {
+      transaction.failureReason = String(payload.message || 'Giao dịch MoMo đang được xử lý.');
+      transaction.providerRef = transId || transaction.providerRef;
+      await transaction.save();
+      return {
+        success: true,
+        pending: true,
+        message: transaction.failureReason,
+        data: this.mapTransaction(transaction),
+      };
+    }
+
     if (![0, 9000].includes(resultCode)) {
       transaction.status = 'FAILED';
       transaction.failedAt = new Date();
-      transaction.failureReason = String(payload.message || 'Thanh toán MoMo thất bại.');
+      transaction.failureReason = String(payload.message || `Thanh toán MoMo thất bại (Mã phản hồi: ${resultCode}).`);
       transaction.providerRef = transId || transaction.providerRef || randomUUID();
       await transaction.save();
 
@@ -584,6 +587,10 @@ class PaymentService {
         message: `Thanh toán MoMo thất bại (Mã phản hồi: ${resultCode}).`,
         data: this.mapTransaction(transaction),
       };
+    }
+
+    if (Math.round(transaction.amount) !== Math.round(amount)) {
+      return { success: false, message: 'Số tiền thanh toán không khớp với giao dịch.' };
     }
 
     transaction.status = 'SUCCEEDED';
@@ -631,6 +638,29 @@ class PaymentService {
     return this.processMomoResult(payload, 'QUERY');
   }
 
+  public async reconcilePendingMomoTransactions() {
+    const transactions = await PaymentTransaction.find({
+      provider: 'MOMO',
+      status: 'PENDING',
+      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    })
+      .sort({ createdAt: 1 })
+      .limit(50)
+      .select('transactionCode')
+      .lean();
+
+    for (const transaction of transactions) {
+      try {
+        await this.reconcileMomoTransaction(transaction.transactionCode);
+      } catch (error: any) {
+        console.warn(
+          `[MomoReconcile] Không thể đối soát ${transaction.transactionCode}:`,
+          error.message
+        );
+      }
+    }
+  }
+
   private async fetchCart(token: string): Promise<{ items: PaymentCourseItem[]; totalPrice: number }> {
     const response = await fetch(`${this.courseServiceUrl}/api/cart`, {
       headers: {
@@ -649,23 +679,23 @@ class PaymentService {
     };
   }
 
-  private async findOwnedTransaction(transactionId: string, userId: string): Promise<IPaymentTransaction> {
+  private async findOwnedTransaction(transactionId: string, userId: string, userRole?: string): Promise<IPaymentTransaction> {
     const transaction = await PaymentTransaction.findById(transactionId);
     if (!transaction) {
       throw new Error('Giao dịch không tồn tại.');
     }
-    if (transaction.userId !== userId) {
+    if (userRole !== 'ADMIN' && transaction.userId !== userId) {
       throw new Error('Bạn không có quyền truy cập giao dịch này.');
     }
     return transaction;
   }
 
-  private async findOwnedTransactionByCode(transactionCode: string, userId: string): Promise<IPaymentTransaction> {
+  private async findOwnedTransactionByCode(transactionCode: string, userId: string, userRole?: string): Promise<IPaymentTransaction> {
     const transaction = await PaymentTransaction.findOne({ transactionCode });
     if (!transaction) {
       throw new Error('Giao dịch không tồn tại.');
     }
-    if (transaction.userId !== userId) {
+    if (userRole !== 'ADMIN' && transaction.userId !== userId) {
       throw new Error('Bạn không có quyền truy cập giao dịch này.');
     }
     return transaction;
@@ -695,6 +725,9 @@ class PaymentService {
       provider: transaction.provider,
       paymentMethod: transaction.paymentMethod,
       status: transaction.status,
+      refundedAt: transaction.refundedAt || null,
+      refundedBy: transaction.refundedBy || '',
+      refundReason: transaction.refundReason || '',
       providerRef: transaction.providerRef || '',
       failureReason: transaction.failureReason || '',
       paidAt: transaction.paidAt || null,
@@ -1163,33 +1196,14 @@ class PaymentService {
     orderInfo: string;
     redirectUrl: string;
     ipnUrl: string;
-    items: Array<{
-      id: string;
-      name: string;
-      description: string;
-      imageUrl?: string;
-      price: number;
-      quantity: number;
-      totalPrice: number;
-      category?: string;
-      unit?: string;
-      taxAmount?: number;
-    }>;
-    userInfo: {
-      name: string;
-      email?: string;
-      phoneNumber?: string;
-    };
   }) {
     const session = await createMomoPaymentSession({
+      requestId: `${input.orderId}${Date.now()}`,
       orderId: input.orderId,
       amount: input.amount,
       orderInfo: input.orderInfo,
       redirectUrl: input.redirectUrl,
       ipnUrl: input.ipnUrl,
-      orderExpireTime: Number(process.env.MOMO_ORDER_EXPIRE_TIME || '30'),
-      items: input.items,
-      userInfo: input.userInfo,
     });
 
     if (!session.payUrl) {
@@ -1199,20 +1213,6 @@ class PaymentService {
     return session.payUrl;
   }
 
-  private toMomoItems(items: PaymentCourseItem[]) {
-    return items.map((item) => ({
-      id: item.courseId,
-      name: item.title,
-      description: item.title,
-      imageUrl: item.thumbnail || 'https://placehold.co/300x300/png?text=SecureLearn',
-      price: Math.round(item.price),
-      quantity: 1,
-      totalPrice: Math.round(item.price),
-      category: 'education',
-      unit: 'course',
-      taxAmount: 0,
-    }));
-  }
 }
 
 export default new PaymentService();

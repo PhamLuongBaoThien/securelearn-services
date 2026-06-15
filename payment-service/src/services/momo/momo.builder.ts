@@ -1,7 +1,7 @@
 // ========================
 // MoMo Request Builder
 // Mục đích:
-// - build body request cho MoMo captureWallet/query
+// - build body request cho MoMo payWithMethod/query
 // - tạo chữ ký Hmac_SHA256 đúng chuẩn MoMo
 // Hàm chính:
 // - buildMomoCreatePayload()
@@ -40,26 +40,7 @@ export const buildMomoCreatePayload = (input: {
   redirectUrl: string;
   ipnUrl: string;
   extraData?: string;
-  autoCapture?: boolean;
   lang?: string;
-  orderExpireTime?: number;
-  items?: Array<{
-    id: string;
-    name: string;
-    description: string;
-    imageUrl?: string;
-    price: number;
-    quantity: number;
-    totalPrice: number;
-    category?: string;
-    unit?: string;
-    taxAmount?: number;
-  }>;
-  userInfo?: {
-    name: string;
-    email?: string;
-    phoneNumber?: string;
-  };
 }) => {
   const config = getMomoConfig();
   const payload: Record<string, Primitive> = {
@@ -73,11 +54,7 @@ export const buildMomoCreatePayload = (input: {
     ipnUrl: input.ipnUrl,
     requestType: config.requestType,
     extraData: input.extraData || '',
-    autoCapture: typeof input.autoCapture === 'boolean' ? input.autoCapture : config.autoCapture,
     lang: input.lang || config.lang,
-    orderExpireTime: input.orderExpireTime || config.orderExpireTime,
-    items: input.items || [],
-    userInfo: input.userInfo || {},
   };
 
   const signatureKeys = [
@@ -103,11 +80,7 @@ export const buildMomoCreatePayload = (input: {
     ipnUrl: String(payload.ipnUrl),
     requestType: String(payload.requestType),
     extraData: String(payload.extraData || ''),
-    autoCapture: Boolean(payload.autoCapture),
     lang: String(payload.lang || config.lang),
-    orderExpireTime: Number(payload.orderExpireTime || config.orderExpireTime),
-    items: Array.isArray(payload.items) ? payload.items : [],
-    userInfo: payload.userInfo || {},
     signature: createMomoSignature(payload, config.secretKey, signatureKeys),
   };
 };
