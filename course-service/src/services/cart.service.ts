@@ -11,6 +11,9 @@ export interface CartCourseItem {
   instructorName: string;
   instructorId: string;
   addedAt: Date;
+  level?: string;
+  totalLessons?: number;
+  totalDuration?: number;
 }
 
 export interface CartResponse {
@@ -124,7 +127,7 @@ class CartService {
       _id: { $in: courseIds },
       status: CourseStatus.PUBLISHED,
     })
-      .select('slug title price thumbnail instructorName instructorId')
+      .select('slug title price thumbnail instructorName instructorId level totalLessons totalDuration')
       .lean();
 
     const coursesById = new Map(courses.map((course) => [course._id.toString(), course]));
@@ -140,6 +143,9 @@ class CartService {
           instructorName: course.instructorName,
           instructorId: course.instructorId,
           addedAt: item.addedAt,
+          level: course.level,
+          totalLessons: course.totalLessons,
+          totalDuration: course.totalDuration,
         });
         return result;
       }, []);
