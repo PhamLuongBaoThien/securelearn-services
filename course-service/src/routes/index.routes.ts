@@ -13,11 +13,12 @@ const routes = (app: Application) => {
   // Admin review APIs phải mount riêng để không bị slug route của /api/courses bắt nhầm.
   app.use('/api/admin/courses', adminCourseRoutes);
 
+  // Route này xử lý quiz attempt cho student.
+  // Đặt trước courseRoutes để không bị các nested route (route "lồng nhau") quản lý của instructor chặn nhầm.
+  app.use('/api/courses', quizAttemptRoutes);
+
   // Route này xử lý cả public course routes và authenticated course routes
   app.use('/api/courses', courseRoutes);
-
-  // Route này xử lý quiz attempt cho student
-  app.use('/api/courses', quizAttemptRoutes);
 
   // Route giỏ hàng cho learner đã đăng nhập
   app.use('/api/cart', cartRoutes);

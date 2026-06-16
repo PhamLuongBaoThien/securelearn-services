@@ -1429,9 +1429,6 @@ class CourseService {
         lessonId: targetLessonId,
         title: quiz.title,
         passingScore: quiz.passingScore,
-        shuffleQuestions: quiz.shuffleQuestions,
-        shuffleOptions: quiz.shuffleOptions,
-        timeLimitSec: quiz.timeLimitSec ?? null,
         questions: quiz.questions,
       });
     }

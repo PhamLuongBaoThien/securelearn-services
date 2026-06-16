@@ -27,9 +27,6 @@ export interface IQuiz extends Document {
   lessonId: Types.ObjectId;
   title: string;
   passingScore: number;
-  shuffleQuestions: boolean;
-  shuffleOptions: boolean;
-  timeLimitSec?: number | null;
   questions: IQuizQuestion[];
   createdAt: Date;
   updatedAt: Date;
@@ -66,9 +63,6 @@ const quizSchema = new Schema<IQuiz>(
     lessonId: { type: Schema.Types.ObjectId, ref: 'Lesson', required: true, unique: true, index: true },// unique -> Mỗi lesson chỉ có 1 quiz
     title: { type: String, required: true, trim: true }, // Tiêu đề bài quiz
     passingScore: { type: Number, default: 70, min: 0, max: 100 }, // Điểm tối thiểu để qua bài quiz (%)
-    shuffleQuestions: { type: Boolean, default: false }, // Trộn thứ tự câu hỏi
-    shuffleOptions: { type: Boolean, default: false }, // Trộn thứ tự đáp án
-    timeLimitSec: { type: Number, default: null, min: 0 }, // Thời gian làm bài (giây)
     questions: { type: [quizQuestionSchema], default: [] }, // Danh sách câu hỏi
   },
   {

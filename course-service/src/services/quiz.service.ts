@@ -14,9 +14,6 @@ import lessonService from './lesson.service';
 interface QuizPayload {
   title?: string;
   passingScore?: number;
-  shuffleQuestions?: boolean;
-  shuffleOptions?: boolean;
-  timeLimitSec?: number | null;
   questions?: Array<{
     questionId?: string;
     type?: QuizQuestionType;
@@ -43,9 +40,6 @@ class QuizService {
       lessonId: lesson._id,
       title: payload.title?.trim() || lesson.title,
       passingScore: payload.passingScore ?? 70, // điểm chuẩn
-      shuffleQuestions: Boolean(payload.shuffleQuestions), //xáo trộn câu hỏi
-      shuffleOptions: Boolean(payload.shuffleOptions), // xáo trộn đáp án
-      timeLimitSec: payload.timeLimitSec ?? null, // giới hạn thời gian
       questions: normalizedQuestions, // câu hỏi
     });
 
@@ -60,9 +54,6 @@ class QuizService {
 
     if (payload.title !== undefined) quiz.title = payload.title.trim() || lesson.title;
     if (payload.passingScore !== undefined) quiz.passingScore = payload.passingScore;
-    if (payload.shuffleQuestions !== undefined) quiz.shuffleQuestions = Boolean(payload.shuffleQuestions);
-    if (payload.shuffleOptions !== undefined) quiz.shuffleOptions = Boolean(payload.shuffleOptions);
-    if (payload.timeLimitSec !== undefined) quiz.timeLimitSec = payload.timeLimitSec ?? null;
     if (payload.questions !== undefined) quiz.questions = this.normalizeQuestions(payload.questions);
 
     await quiz.save();
@@ -91,9 +82,6 @@ class QuizService {
       _id: quiz._id.toString(),
       title: quiz.title,
       passingScore: quiz.passingScore,
-      shuffleQuestions: quiz.shuffleQuestions,
-      shuffleOptions: quiz.shuffleOptions,
-      timeLimitSec: quiz.timeLimitSec,
       questions: quiz.questions.map((question) => ({
         questionId: question.questionId,
         type: question.type,

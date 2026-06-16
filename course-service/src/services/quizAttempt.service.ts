@@ -53,18 +53,20 @@ class QuizAttemptService {
       throw new Error('Lượt làm bài này đã được nộp.');
     }
 
-    const normalizedAnswers = answers.map((answer) => ({
-      questionId: answer.questionId,
-      selectedIndexes: Array.from(
-        new Set(
-          Array.isArray(answer.selectedIndexes)
-            ? answer.selectedIndexes
-            : typeof answer.selectedIndex === 'number'
-              ? [answer.selectedIndex]
-              : []
-        )
-      ).sort((a, b) => a - b),
-    }));
+    const normalizedAnswers = answers
+      .map((answer) => ({
+        questionId: answer.questionId,
+        selectedIndexes: Array.from(
+          new Set(
+            Array.isArray(answer.selectedIndexes)
+              ? answer.selectedIndexes
+              : typeof answer.selectedIndex === 'number'
+                ? [answer.selectedIndex]
+                : []
+          )
+        ).sort((a, b) => a - b),
+      }))
+      .filter((answer) => answer.selectedIndexes.length > 0);
 
     const answersByQuestionId = new Map(
       normalizedAnswers.map((answer) => [answer.questionId, answer.selectedIndexes] as const)
@@ -73,10 +75,9 @@ class QuizAttemptService {
     let earnedPoints = 0;
     let maxPoints = 0;
 
-    for (const question of quiz.questions) {
+    const results = quiz.questions.map((question) => {
       maxPoints += question.points;
-      const selectedIndexes = answersByQuestionId.get(question.questionId);
-      if (!selectedIndexes || selectedIndexes.length === 0) continue;
+      const selectedIndexes = answersByQuestionId.get(question.questionId) || [];
 
       const correctIndexes = [...question.correctOptionIndexes].sort((a, b) => a - b);
       const isExactMatch =
@@ -86,7 +87,20 @@ class QuizAttemptService {
       if (isExactMatch) {
         earnedPoints += question.points;
       }
-    }
+
+      return {
+        questionId: question.questionId,
+        type: question.type,
+        prompt: question.prompt,
+        options: question.options,
+        selectedIndexes,
+        correctOptionIndexes: correctIndexes,
+        isCorrect: isExactMatch,
+        points: question.points,
+        earnedPoints: isExactMatch ? question.points : 0,
+        explanation: question.explanation || '',
+      };
+    });
 
     const score = maxPoints > 0 ? Math.round((earnedPoints / maxPoints) * 100) : 0;
 
@@ -97,7 +111,14 @@ class QuizAttemptService {
     attempt.completedAt = new Date();
     await attempt.save();
 
-    return attempt;
+    return {
+      attemptId: attempt._id.toString(),
+      score: attempt.score,
+      passed: attempt.passed,
+      status: attempt.status,
+      completedAt: attempt.completedAt,
+      results,
+    };
   }
 
   private async resolveCourseQuizContext(courseId: string): Promise<{ courseId: string; versionId: string }> {
