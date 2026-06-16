@@ -9,9 +9,9 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 import learningInteractionService from '../services/learningInteraction.service';
 
 class LearningInteractionController {
-  public getNote = async (req: AuthRequest, res: Response) => {
+  public listNotes = async (req: AuthRequest, res: Response) => {
     try {
-      const data = await learningInteractionService.getNote(
+      const data = await learningInteractionService.listNotes(
         req.userId!,
         req.userRole!,
         String(req.params.id),
@@ -23,15 +23,47 @@ class LearningInteractionController {
     }
   };
 
-  public saveNote = async (req: AuthRequest, res: Response) => {
+  public createNote = async (req: AuthRequest, res: Response) => {
     try {
-      const data = await learningInteractionService.saveNote(
+      const data = await learningInteractionService.createNote(
         req.userId!,
         req.userRole!,
         String(req.params.id),
         String(req.params.lessonId),
         String(req.body.content || ''),
         Number(req.body.timestampSec || 0),
+      );
+      res.status(201).json({ status: 'OK', data });
+    } catch (error: any) {
+      res.status(error.message.includes('quyền') ? 403 : 400).json({ status: 'ERR', message: error.message });
+    }
+  };
+
+  public updateNote = async (req: AuthRequest, res: Response) => {
+    try {
+      const data = await learningInteractionService.updateNote(
+        req.userId!,
+        req.userRole!,
+        String(req.params.id),
+        String(req.params.lessonId),
+        String(req.params.noteId),
+        String(req.body.content || ''),
+        Number(req.body.timestampSec || 0),
+      );
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) {
+      res.status(error.message.includes('quyền') ? 403 : 400).json({ status: 'ERR', message: error.message });
+    }
+  };
+
+  public deleteNote = async (req: AuthRequest, res: Response) => {
+    try {
+      const data = await learningInteractionService.deleteNote(
+        req.userId!,
+        req.userRole!,
+        String(req.params.id),
+        String(req.params.lessonId),
+        String(req.params.noteId),
       );
       res.status(200).json({ status: 'OK', data });
     } catch (error: any) {

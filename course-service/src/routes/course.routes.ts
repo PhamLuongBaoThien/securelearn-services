@@ -30,8 +30,10 @@ router.get('/enrolled', extractUser, requireStudentOrInstructor, enrollmentContr
 // Nhóm route thuê bao dùng cho entitlement check và usage tracking khi learner học thật.
 router.post('/subscription/heartbeat', extractUser, requireStudentOrInstructor, subscriptionAccessController.heartbeat);
 router.get('/:id/learning', extractUser, requireStudentOrInstructor, courseController.getCourseForLearning);
-router.get('/:id/lessons/:lessonId/note', extractUser, requireStudentOrInstructor, learningInteractionController.getNote);
-router.put('/:id/lessons/:lessonId/note', extractUser, requireStudentOrInstructor, learningInteractionController.saveNote);
+router.get('/:id/lessons/:lessonId/notes', extractUser, requireStudentOrInstructor, learningInteractionController.listNotes);
+router.post('/:id/lessons/:lessonId/notes', extractUser, requireStudentOrInstructor, learningInteractionController.createNote);
+router.put('/:id/lessons/:lessonId/notes/:noteId', extractUser, requireStudentOrInstructor, learningInteractionController.updateNote);
+router.delete('/:id/lessons/:lessonId/notes/:noteId', extractUser, requireStudentOrInstructor, learningInteractionController.deleteNote);
 router.get('/:id/lessons/:lessonId/discussions', extractUser, requireStudentOrInstructor, learningInteractionController.listDiscussions);
 router.post('/:id/lessons/:lessonId/discussions', extractUser, requireStudentOrInstructor, learningInteractionController.createDiscussion);
 

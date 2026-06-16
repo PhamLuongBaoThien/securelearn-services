@@ -7,11 +7,31 @@
 import { Types } from 'mongoose';
 import { Course } from '../models/course.model';
 import { Lesson } from '../models/lesson.model';
-import { LearningNote } from '../models/learningNote.model';
+import { ILearningNote, LearningNote } from '../models/learningNote.model';
 import { LessonDiscussion } from '../models/lessonDiscussion.model';
 import subscriptionAccessService from './subscriptionAccess.service';
 
 class LearningInteractionService {
+  private stripHtml(html: string) {
+    return html
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private normalizeTimestamp(timestampSec: number) {
+    return Math.max(0, Math.floor(timestampSec || 0));
+  }
+
+  private normalizeNoteContent(content: string) {
+    const normalizedContent = content.slice(0, 10_000);
+    if (!this.stripHtml(normalizedContent)) {
+      throw new Error('Vui lòng nhập nội dung ghi chú.');
+    }
+    return normalizedContent;
+  }
+
   private async assertAccess(userId: string, userRole: string, courseId: string, lessonId: string) {
     const course = await Course.findById(courseId).select('_id instructorId currentVersionId').lean();
     if (!course?.currentVersionId) throw new Error('Khóa học không tồn tại.');
@@ -35,12 +55,60 @@ class LearningInteractionService {
     };
   }
 
-  public async getNote(userId: string, userRole: string, courseId: string, lessonId: string) {
-    const access = await this.assertAccess(userId, userRole, courseId, lessonId);
-    return LearningNote.findOne({ userId, courseId: access.courseId, lessonId: access.lessonId }).lean();
+  private async getOrMigrateNoteDocument(
+    userId: string,
+    courseId: Types.ObjectId,
+    lessonId: Types.ObjectId,
+  ) {
+    const document = await LearningNote.findOne({ userId, courseId, lessonId });
+    if (!document) return null;
+
+    const hasLegacyNote = this.stripHtml(document.content || '');
+    if (!document.notes.length && hasLegacyNote) {
+      document.notes = [
+        {
+          _id: new Types.ObjectId(),
+          content: document.content!,
+          timestampSec: this.normalizeTimestamp(document.timestampSec || 0),
+          createdAt: document.createdAt,
+          updatedAt: document.updatedAt,
+        },
+      ];
+      document.content = '';
+      document.timestampSec = 0;
+      await document.save();
+    }
+
+    return document;
   }
 
-  public async saveNote(
+  private sortNotesByTimestamp(notes: Array<{ timestampSec: number; createdAt?: Date }>) {
+    return [...notes].sort((a, b) => {
+      if (a.timestampSec !== b.timestampSec) return a.timestampSec - b.timestampSec;
+      return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+    });
+  }
+
+  private serializeNotes(document: ILearningNote | null) {
+    if (!document) return [];
+    return this.sortNotesByTimestamp(
+      document.notes.map((note) => ({
+        _id: String(note._id),
+        content: note.content,
+        timestampSec: note.timestampSec,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+      })),
+    );
+  }
+
+  public async listNotes(userId: string, userRole: string, courseId: string, lessonId: string) {
+    const access = await this.assertAccess(userId, userRole, courseId, lessonId);
+    const document = await this.getOrMigrateNoteDocument(userId, access.courseId, access.lessonId);
+    return this.serializeNotes(document);
+  }
+
+  public async createNote(
     userId: string,
     userRole: string,
     courseId: string,
@@ -49,16 +117,73 @@ class LearningInteractionService {
     timestampSec: number,
   ) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
-    return LearningNote.findOneAndUpdate(
-      { userId, courseId: access.courseId, lessonId: access.lessonId },
-      {
-        $set: {
-          content: content.slice(0, 10_000),
-          timestampSec: Math.max(0, Math.floor(timestampSec || 0)),
-        },
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    ).lean();
+    const normalizedContent = this.normalizeNoteContent(content);
+    const normalizedTimestamp = this.normalizeTimestamp(timestampSec);
+    let document = await this.getOrMigrateNoteDocument(userId, access.courseId, access.lessonId);
+
+    if (!document) {
+      document = await LearningNote.create({
+        userId,
+        courseId: access.courseId,
+        lessonId: access.lessonId,
+        notes: [],
+      });
+    }
+
+    document.notes.push({
+      _id: new Types.ObjectId(),
+      content: normalizedContent,
+      timestampSec: normalizedTimestamp,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await document.save();
+
+    return this.serializeNotes(document);
+  }
+
+  public async updateNote(
+    userId: string,
+    userRole: string,
+    courseId: string,
+    lessonId: string,
+    noteId: string,
+    content: string,
+    timestampSec: number,
+  ) {
+    const access = await this.assertAccess(userId, userRole, courseId, lessonId);
+    const document = await this.getOrMigrateNoteDocument(userId, access.courseId, access.lessonId);
+    if (!document) throw new Error('Ghi chú không tồn tại.');
+
+    const note = document.notes.find((item) => String(item._id) === noteId);
+    if (!note) throw new Error('Ghi chú không tồn tại.');
+
+    note.content = this.normalizeNoteContent(content);
+    note.timestampSec = this.normalizeTimestamp(timestampSec);
+    await document.save();
+
+    return this.serializeNotes(document);
+  }
+
+  public async deleteNote(
+    userId: string,
+    userRole: string,
+    courseId: string,
+    lessonId: string,
+    noteId: string,
+  ) {
+    const access = await this.assertAccess(userId, userRole, courseId, lessonId);
+    const document = await this.getOrMigrateNoteDocument(userId, access.courseId, access.lessonId);
+    if (!document) throw new Error('Ghi chú không tồn tại.');
+
+    const noteIndex = document.notes.findIndex((item) => String(item._id) === noteId);
+    const note = noteIndex >= 0 ? document.notes[noteIndex] : null;
+    if (!note) throw new Error('Ghi chú không tồn tại.');
+
+    document.notes.splice(noteIndex, 1);
+    await document.save();
+
+    return this.serializeNotes(document);
   }
 
   public async listDiscussions(userId: string, userRole: string, courseId: string, lessonId: string) {
@@ -87,7 +212,7 @@ class LearningInteractionService {
       authorName: user.name || (access.isOwner ? 'Giảng viên' : 'Học viên'),
       authorRole: access.isOwner ? 'INSTRUCTOR' : 'STUDENT',
       content: normalizedContent,
-      timestampSec: Math.max(0, Math.floor(timestampSec || 0)),
+      timestampSec: this.normalizeTimestamp(timestampSec),
     });
   }
 }
