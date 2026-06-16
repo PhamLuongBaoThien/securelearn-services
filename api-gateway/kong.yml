@@ -44,6 +44,7 @@ services:
           - /api/auth/verify-reset-otp
           - /api/auth/reset-password
           - /api/auth/google
+          - ~/api/auth/instructors/[^/]+/public-profile$
         strip_path: false
 
       - name: identity-preflight

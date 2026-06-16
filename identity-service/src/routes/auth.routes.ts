@@ -23,6 +23,9 @@ router.post('/logout', authController.logout);
 // [GET] /api/auth/me — Lấy thông tin user đang đăng nhập (cần Access Token)
 router.get('/me', extractUser, authController.getMe);
 
+// [GET] /api/auth/instructors/:id/public-profile — Public profile tối giản của giảng viên
+router.get('/instructors/:id/public-profile', authController.getPublicInstructorProfile);
+
 // [PUT] /api/auth/profile — Cập nhật thông tin và avatar
 router.put('/profile', extractUser, upload.single('avatar'), authController.updateProfile);
 

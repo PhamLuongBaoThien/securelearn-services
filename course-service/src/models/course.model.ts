@@ -42,6 +42,8 @@ export interface ICourse extends Document {
   requirements: string[];     // Điều kiện tiên quyết
   instructorId: string;       // userId từ Identity Service
   instructorName: string;     // Cache tên giảng viên (cập nhật qua event)
+  instructorAvatarUrl: string; // Cache avatar giảng viên (cập nhật qua event)
+  instructorBio: string;       // Cache tiểu sử giảng viên (cập nhật qua event)
   categoryId?: Types.ObjectId | null;
   categoryResolutionStatus: CategoryResolutionStatus;
   suggestedCategoryName: string;
@@ -100,6 +102,8 @@ const courseSchema = new Schema<ICourse>(
     requirements: { type: [String], default: [] },
     instructorId: { type: String, required: true, index: true },
     instructorName: { type: String, default: '' },
+    instructorAvatarUrl: { type: String, default: '' },
+    instructorBio: { type: String, default: '' },
     categoryId: { type: Schema.Types.ObjectId, ref: 'Category', default: null, index: true },
     categoryResolutionStatus: {
       type: String,

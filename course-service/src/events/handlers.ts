@@ -50,19 +50,31 @@ export const registerEventHandlers = async (): Promise<void> => {
     async (payload) => {
       console.log('[CourseEvent] User updated:', payload.userId, '| fields:', payload.updatedFields);
 
-      // Nếu giảng viên đổi tên → đồng bộ instructorName trong tất cả khóa học của họ
+      const instructorProfileUpdate: Record<string, string> = {};
       if (payload.updatedFields.includes('fullName') && payload.fullName) {
+        instructorProfileUpdate.instructorName = payload.fullName;
+      }
+      if (payload.updatedFields.includes('avatarUrl')) {
+        instructorProfileUpdate.instructorAvatarUrl = payload.avatarUrl || '';
+      }
+      if (payload.updatedFields.includes('bio')) {
+        instructorProfileUpdate.instructorBio = payload.bio || '';
+      }
+
+      if (Object.keys(instructorProfileUpdate).length > 0) {
         const [courseResult, versionResult] = await Promise.all([
           Course.updateMany(
             { instructorId: payload.userId },
-            { $set: { instructorName: payload.fullName } }
+            { $set: instructorProfileUpdate }
           ),
-          CourseVersion.updateMany(
-            { instructorId: payload.userId },
-            { $set: { instructorName: payload.fullName } }
-          ),
+          payload.fullName
+            ? CourseVersion.updateMany(
+                { instructorId: payload.userId },
+                { $set: { instructorName: payload.fullName } }
+              )
+            : Promise.resolve({ modifiedCount: 0 }),
         ]);
-        console.log(`[CourseEvent] Đã cập nhật instructorName thành "${payload.fullName}" cho ${courseResult.modifiedCount} khóa học và ${versionResult.modifiedCount} version của user ${payload.userId}`);
+        console.log(`[CourseEvent] Đã cập nhật instructor profile cho ${courseResult.modifiedCount} khóa học và ${versionResult.modifiedCount} version của user ${payload.userId}`);
       }
     }
   );

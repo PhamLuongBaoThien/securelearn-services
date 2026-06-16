@@ -67,6 +67,8 @@ export interface UserUpdatedPayload {
   userId: string;
   updatedFields: string[];
   fullName?: string; // Gửi kèm khi user đổi tên — dùng để đồng bộ instructorName trong course-service
+  avatarUrl?: string; // Cache avatar giảng viên cho course-service
+  bio?: string; // Cache tiểu sử giảng viên cho course-service
 }
 
 /** Payload khi user bị xóa */

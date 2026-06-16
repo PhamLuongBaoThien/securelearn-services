@@ -170,6 +170,24 @@ class AuthController {
   }
 
   /**
+   * [GET] /api/auth/instructors/:id/public-profile
+   * Public profile tối giản để trang chi tiết khóa học hiển thị avatar/bio giảng viên.
+   */
+  public async getPublicInstructorProfile(req: Request, res: Response): Promise<void> {
+    try {
+      const instructor = await authService.getPublicInstructorProfile(req.params.id as string);
+      if (!instructor) {
+        res.status(404).json({ status: 'ERR', message: 'Không tìm thấy giảng viên.' });
+        return;
+      }
+
+      res.status(200).json({ status: 'OK', data: instructor });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
    * Callback sau khi Google OAuth2 xác thực thành công.
    */
   public async googleCallback(req: Request, res: Response): Promise<void> {

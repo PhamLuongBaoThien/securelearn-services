@@ -51,6 +51,10 @@ interface CourseResponse {
   requirements: string[];
   instructorId: string;
   instructorName: string;
+  instructorProfile: {
+    avatarUrl: string;
+    bio: string;
+  };
   categoryId: string | null;
   category: {
     _id: string;
@@ -85,6 +89,8 @@ interface CourseResponse {
   totalDuration: number;
   totalLessons: number;
   totalSections: number;
+  totalQuizzes: number;
+  totalDocuments: number;
   enrollmentCount: number;
   subscriptionStatus: SubscriptionCatalogStatus;
   subscriptionReviewReason: string;
@@ -149,6 +155,8 @@ type CourseShellLike = {
   thumbnail: string;
   instructorId: string;
   instructorName: string;
+  instructorAvatarUrl?: string;
+  instructorBio?: string;
   status: string;
   currentVersionId?: Types.ObjectId | null;
   draftVersionId?: Types.ObjectId | null;
@@ -1515,6 +1523,15 @@ class CourseService {
           }
         : null;
     const reviewedByAdmin = this.mapReviewerSnapshot(version);
+    const totalQuizzes = sections.reduce(
+      (sum, section) => sum + section.lessons.filter((lesson) => lesson.type === LessonType.QUIZ).length,
+      0,
+    );
+    const totalDocuments = sections.reduce(
+      (sum, section) =>
+        sum + section.lessons.reduce((lessonSum, lesson) => lessonSum + lesson.attachments.length, 0),
+      0,
+    );
 
     return {
       _id: version._id.toString(),
@@ -1528,6 +1545,10 @@ class CourseService {
       requirements: version.requirements || [],
       instructorId: version.instructorId,
       instructorName: version.instructorName,
+      instructorProfile: {
+        avatarUrl: shell.instructorAvatarUrl || "",
+        bio: shell.instructorBio || "",
+      },
       categoryId:
         category?._id ||
         (version.categoryId ? version.categoryId.toString() : null),
@@ -1548,6 +1569,8 @@ class CourseService {
       totalDuration: version.totalDuration,
       totalLessons: version.totalLessons,
       totalSections: version.totalSections || 0,
+      totalQuizzes,
+      totalDocuments,
       enrollmentCount: shell.enrollmentCount,
       subscriptionStatus:
         shell.subscriptionStatus || SubscriptionCatalogStatus.NOT_OPTED_IN,

@@ -105,6 +105,31 @@ class AuthService {
     return user;
   }
 
+  public async getPublicInstructorProfile(userId: string): Promise<{
+    _id: string;
+    fullName: string;
+    profile: {
+      avatarUrl?: string;
+      bio?: string;
+      headline?: string;
+    };
+  } | null> {
+    const user = await User.findOne({ _id: userId, role: Role.INSTRUCTOR, isLocked: false })
+      .select('fullName profile.avatarUrl profile.bio profile.headline')
+      .lean();
+    if (!user) return null;
+
+    return {
+      _id: user._id.toString(),
+      fullName: user.fullName,
+      profile: {
+        avatarUrl: user.profile?.avatarUrl || '',
+        bio: user.profile?.bio || '',
+        headline: user.profile?.headline || '',
+      },
+    };
+  }
+
   /**
    * Cập nhật thông tin profile của user.
    */
@@ -137,6 +162,8 @@ class AuthService {
       userId,
       updatedFields,
       ...(data.fullName !== undefined && { fullName: user.fullName }),
+      ...(data.avatarUrl !== undefined && { avatarUrl: user.profile?.avatarUrl || '' }),
+      ...(data.bio !== undefined && { bio: user.profile?.bio || '' }),
     });
 
     return this.sanitizeUser(user) as any;
