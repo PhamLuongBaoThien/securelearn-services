@@ -12,6 +12,10 @@ import { requireDocumentAssetAccess } from '../middlewares/documentAssetOwnershi
 const router = Router();
 
 router.post('/upload', uploadDocument.single('file'), documentAssetController.uploadDocument);
+router.post('/:documentAssetId/view-session', requireDocumentAssetAccess, documentAssetController.createViewSession);
+router.post('/:documentAssetId/download-session', requireDocumentAssetAccess, documentAssetController.createDownloadSession);
+router.get('/:documentAssetId/view', requireDocumentAssetAccess, documentAssetController.viewDocument);
+router.get('/:documentAssetId/download', requireDocumentAssetAccess, documentAssetController.downloadDocument);
 router.get('/:documentAssetId', requireDocumentAssetAccess, documentAssetController.getAsset);
 
 export default router;
