@@ -92,6 +92,8 @@ interface CourseResponse {
   totalQuizzes: number;
   totalDocuments: number;
   enrollmentCount: number;
+  rating: number;
+  reviews: number;
   subscriptionStatus: SubscriptionCatalogStatus;
   subscriptionReviewReason: string;
   subscriptionReviewedAt: Date | null;
@@ -161,6 +163,8 @@ type CourseShellLike = {
   currentVersionId?: Types.ObjectId | null;
   draftVersionId?: Types.ObjectId | null;
   enrollmentCount: number;
+  ratingAverage?: number;
+  ratingCount?: number;
   subscriptionStatus?: SubscriptionCatalogStatus;
   subscriptionReviewReason?: string;
   subscriptionReviewedAt?: Date | null;
@@ -939,6 +943,7 @@ class CourseService {
     level?: string;
     minPrice?: number;
     maxPrice?: number;
+    rating?: number;
     minDuration?: number; // seconds
     maxDuration?: number; // seconds
     sort?: string;
@@ -1001,6 +1006,10 @@ class CourseService {
         (filter.price as any).$lte = query.maxPrice;
     }
 
+    if (query.rating !== undefined) {
+      filter.ratingAverage = { $gte: query.rating };
+    }
+
     if (query.minDuration !== undefined || query.maxDuration !== undefined) {
       filter.totalDuration = {};
       if (query.minDuration !== undefined)
@@ -1022,6 +1031,10 @@ class CourseService {
         break;
       case "price_desc":
         sortOption = { price: -1 };
+        break;
+      case "rating_desc":
+      case "top_rated":
+        sortOption = { ratingAverage: -1, ratingCount: -1, createdAt: -1 };
         break;
     }
 
@@ -1571,6 +1584,8 @@ class CourseService {
       totalQuizzes,
       totalDocuments,
       enrollmentCount: shell.enrollmentCount,
+      rating: shell.ratingAverage || 0,
+      reviews: shell.ratingCount || 0,
       subscriptionStatus:
         shell.subscriptionStatus || SubscriptionCatalogStatus.NOT_OPTED_IN,
       subscriptionReviewReason: shell.subscriptionReviewReason || "",

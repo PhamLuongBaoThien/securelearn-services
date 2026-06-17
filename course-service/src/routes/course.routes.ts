@@ -14,6 +14,7 @@ import { extractUser, requireInstructor, requireStudentOrInstructor } from '../m
 import upload from '../middlewares/upload.middleware';
 import subscriptionAccessController from '../controllers/subscriptionAccess.controller';
 import learningInteractionController from '../controllers/learningInteraction.controller';
+import courseReviewController from '../controllers/courseReview.controller';
 
 const router = Router();
 
@@ -22,6 +23,7 @@ const router = Router();
 // [GET] /api/courses — Danh sách khóa học đã publish (search, filter, pagination)
 router.get('/', courseController.getPublishedCourses);
 router.get('/subscription-catalog', subscriptionAccessController.catalog);
+router.get('/instructors/:instructorId/rating', courseReviewController.getInstructorRatingStats);
 
 // ========== STUDENT & INSTRUCTOR (Có thể mua/học khóa học, nhưng INSTRUCTOR không được ghi danh khóa của chính mình) ==========
 
@@ -36,6 +38,8 @@ router.put('/:id/lessons/:lessonId/notes/:noteId', extractUser, requireStudentOr
 router.delete('/:id/lessons/:lessonId/notes/:noteId', extractUser, requireStudentOrInstructor, learningInteractionController.deleteNote);
 router.get('/:id/lessons/:lessonId/discussions', extractUser, requireStudentOrInstructor, learningInteractionController.listDiscussions);
 router.post('/:id/lessons/:lessonId/discussions', extractUser, requireStudentOrInstructor, learningInteractionController.createDiscussion);
+router.get('/:id/reviews/me', extractUser, requireStudentOrInstructor, courseReviewController.getMyReview);
+router.post('/:id/reviews', extractUser, requireStudentOrInstructor, courseReviewController.upsertReview);
 
 // [POST] /api/courses/:id/enroll — Ghi danh vào khóa học
 router.post('/:id/enroll', extractUser, requireStudentOrInstructor, enrollmentController.enroll);
@@ -74,6 +78,7 @@ router.delete('/:id', extractUser, requireInstructor, courseController.deleteCou
 // ========== PUBLIC (Slug route — đặt trước broad nested routers để guest không bị middleware auth chặn) ==========
 
 // [GET] /api/courses/:slug — Chi tiết khóa học theo slug
+router.get('/:id/reviews', courseReviewController.listReviews);
 router.get('/:slug', courseController.getCourseBySlug);
 
 router.use('/:courseId/sections', extractUser, requireInstructor, sectionRoutes);

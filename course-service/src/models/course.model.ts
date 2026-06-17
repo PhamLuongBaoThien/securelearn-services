@@ -57,6 +57,8 @@ export interface ICourse extends Document {
   totalLessons: number;
   totalSections: number;
   enrollmentCount: number;
+  ratingAverage: number;
+  ratingCount: number;
   subscriptionStatus: SubscriptionCatalogStatus;
   subscriptionReviewReason: string;
   subscriptionReviewedAt?: Date | null;
@@ -131,6 +133,8 @@ const courseSchema = new Schema<ICourse>(
     totalLessons: { type: Number, default: 0 },
     totalSections: { type: Number, default: 0 },
     enrollmentCount: { type: Number, default: 0 },
+    ratingAverage: { type: Number, default: 0, min: 0, max: 5, index: true },
+    ratingCount: { type: Number, default: 0, min: 0 },
     // Trạng thái này quyết định course có được xuất hiện trong catalog thuê bao hay không.
     subscriptionStatus: {
       type: String,
