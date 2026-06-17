@@ -1176,6 +1176,8 @@ class CourseService {
     userId: string,
     userRole: string,
   ): Promise<CourseResponse> {
+    // Entry khi learner mở màn học.
+    // Hàm này chỉ trả curriculum thật nếu user còn entitlement; với mua đứt thì entitlement thường tới từ Enrollment source PURCHASE.
     const shell = await Course.findOne({
       _id: courseId,
       status: CourseStatus.PUBLISHED,

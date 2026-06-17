@@ -12,6 +12,7 @@ import { SubscriptionEntitlement } from '../models/subscriptionEntitlement.model
 import enrollmentService from './enrollment.service';
 import { CourseVersion } from '../models/courseVersion.model';
 import { paymentGrpcClient } from '../grpc/payment.client';
+import entitlementCacheService from './entitlementCache.service';
 
 class SubscriptionAccessService {
   private async resolveCourseShellId(courseOrVersionId: string): Promise<string> {
@@ -143,15 +144,48 @@ class SubscriptionAccessService {
   }
 
   public async entitlement(userId: string, courseId: string) {
+    // Hàm kiểm tra quyền học trung tâm cho cả flow mua đứt và thuê bao.
+    // Thứ tự là Redis cache trước, rồi mới fallback xuống Mongo Enrollment và SubscriptionEntitlement.
     // Media assets are bound to a CourseVersion while enrollments are bound to the stable Course shell.
     const shellCourseId = await this.resolveCourseShellId(courseId);
+    const cached = await entitlementCacheService.get(userId, courseId)
+      || (courseId !== shellCourseId ? await entitlementCacheService.get(userId, shellCourseId) : null);
+    if (cached) {
+      return cached.allowed
+        ? {
+            allowed: true,
+            source: cached.source,
+            termId: cached.termId,
+            accessEndsAt: cached.accessEndsAt || undefined,
+          }
+        : { allowed: false, reason: cached.reason || 'NOT_ENTITLED' };
+    }
+
     const enrollment = await Enrollment.findOne({
       userId,
       courseId: shellCourseId,
       status: EnrollmentStatus.ACTIVE,
     });
-    if (!enrollment) return { allowed: false, reason: 'NOT_ENROLLED' };
-    if (enrollment.source === EnrollmentSource.PURCHASE) return { allowed: true, source: EnrollmentSource.PURCHASE };
+    if (!enrollment) {
+      await entitlementCacheService.setDenied(userId, shellCourseId, 'NOT_ENROLLED');
+      if (courseId !== shellCourseId) await entitlementCacheService.setDenied(userId, courseId, 'NOT_ENROLLED');
+      return { allowed: false, reason: 'NOT_ENROLLED' };
+    }
+    if (enrollment.source === EnrollmentSource.PURCHASE) {
+      await entitlementCacheService.setAllowed({
+        userId,
+        courseId: shellCourseId,
+        source: EnrollmentSource.PURCHASE,
+      });
+      if (courseId !== shellCourseId) {
+        await entitlementCacheService.setAllowed({
+          userId,
+          courseId,
+          source: EnrollmentSource.PURCHASE,
+        });
+      }
+      return { allowed: true, source: EnrollmentSource.PURCHASE };
+    }
     const now = new Date();
     const term = await SubscriptionEntitlement.findOne({
       termId: enrollment.subscriptionTermId,
@@ -160,9 +194,28 @@ class SubscriptionAccessService {
       startsAt: { $lte: now },
       endsAt: { $gt: now },
     });
-    return term
-      ? { allowed: true, source: EnrollmentSource.SUBSCRIPTION, termId: term.termId, accessEndsAt: term.endsAt }
-      : { allowed: false, reason: 'SUBSCRIPTION_EXPIRED' };
+    if (!term) {
+      await entitlementCacheService.setDenied(userId, shellCourseId, 'SUBSCRIPTION_EXPIRED');
+      if (courseId !== shellCourseId) await entitlementCacheService.setDenied(userId, courseId, 'SUBSCRIPTION_EXPIRED');
+      return { allowed: false, reason: 'SUBSCRIPTION_EXPIRED' };
+    }
+    await entitlementCacheService.setAllowed({
+      userId,
+      courseId: shellCourseId,
+      source: EnrollmentSource.SUBSCRIPTION,
+      termId: term.termId,
+      accessEndsAt: term.endsAt,
+    });
+    if (courseId !== shellCourseId) {
+      await entitlementCacheService.setAllowed({
+        userId,
+        courseId,
+        source: EnrollmentSource.SUBSCRIPTION,
+        termId: term.termId,
+        accessEndsAt: term.endsAt,
+      });
+    }
+    return { allowed: true, source: EnrollmentSource.SUBSCRIPTION, termId: term.termId, accessEndsAt: term.endsAt };
   }
 
   public async heartbeat(userId: string, input: {
@@ -172,6 +225,8 @@ class SubscriptionAccessService {
     segmentIndex: number;
     qualifiedSeconds: number;
   }) {
+    // Hot path chỉ dành cho thuê bao.
+    // Mua đứt không đi qua phần usage tracking này; user mua đứt chỉ cần entitlement hợp lệ để mở video.
     // Heartbeat chỉ được ghi nhận khi learner đang học bằng quyền thuê bao còn hiệu lực.
     const access = await this.entitlement(userId, input.courseId);
     if (!access.allowed || access.source !== EnrollmentSource.SUBSCRIPTION || !access.termId) {

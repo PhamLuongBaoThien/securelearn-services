@@ -30,6 +30,14 @@ router.get('/:videoAssetId/batch-part-urls', requireVideoAssetOwner, videoAssetC
 // Polling trạng thái/video manifest cho cả owner và learner có entitlement hợp lệ.
 router.get('/:videoAssetId', requireVideoAssetAccess, videoAssetController.getAsset);
 
+// [POST] /api/media/videos/:videoAssetId/playback-session
+// Kiểm tra quyền Redis-first rồi sinh one-time URL để lấy manifest HLS.
+router.post('/:videoAssetId/playback-session', requireVideoAssetAccess, videoAssetController.createPlaybackSession);
+
+// [GET] /api/media/videos/:videoAssetId/playback?token=...
+// Consume one-time URL và trả manifest đã rewrite key session.
+router.get('/:videoAssetId/playback', videoAssetController.getOneTimePlaybackManifest);
+
 // [GET] /api/media/videos/:videoAssetId/manifest
 router.get('/:videoAssetId/manifest', requireVideoAssetAccess, videoAssetController.getPlaybackManifest);
 

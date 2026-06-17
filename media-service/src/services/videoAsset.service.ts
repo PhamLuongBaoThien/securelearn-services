@@ -9,12 +9,15 @@ import { processVideoToHLS, probeVideoMetadata } from './videoProcessor';
 import { VideoAsset, VideoAssetStatus } from '../models/videoAsset.model';
 import { publishVideoFailed, publishVideoReady } from '../events/publishers';
 import s3Service from './s3.service';
+import redisClient from '../config/redis';
 
 const MEDIA_ROOT = path.resolve(process.cwd(), 'tmp-media'); // thư mục tạm để lưu file raw và output HLS trong quá trình xử lý video. Cấu trúc: tmp-media/videos/<assetId>/raw_input, tmp-media/videos/<assetId>/hls/*.ts, *.m3u8 (process.cwd() là thư mục gốc của project, thường là backend/media-service) => đường dẫn tuyệt đối, tránh lỗi khi chạy ở môi trường khác nhau. Sau khi xử lý xong sẽ xóa toàn bộ thư mục này để dọn dẹp file tạm
 const ORPHAN_TTL_MS = Number(process.env.MEDIA_ORPHAN_TTL_MS || 30 * 60 * 1000);
 const PROCESSING_TIMEOUT_MS = Number(process.env.MEDIA_PROCESSING_TIMEOUT_MS || 45 * 60 * 1000);
 // #2 — Tăng lên 20 khi migrate lên Cloudflare R2
 const HLS_UPLOAD_CONCURRENCY = Number(process.env.HLS_UPLOAD_CONCURRENCY || 10);
+const PLAYBACK_MANIFEST_CACHE_TTL_SECONDS = Number(process.env.PLAYBACK_MANIFEST_CACHE_TTL_SECONDS || 240);
+const KEY_URI_PLACEHOLDER = '__SECURELEARN_KEY_URI__';
 
 // ===== GIỚI HẠN BẢO MẬT =====
 
@@ -204,28 +207,64 @@ class VideoAssetService {
   public async getAsset(videoAssetId: string) {
     const asset = await VideoAsset.findById(videoAssetId).lean();
     if (!asset) throw new Error(`Video asset không tồn tại khi đọc trạng thái: ${videoAssetId}.`);
-    return {
-      ...asset,
-      // Player lấy manifest qua media-service để từng segment cũng được ký ngắn hạn.
-      manifestPath: asset.manifestKey ? `/api/media/videos/${videoAssetId}/manifest` : undefined,
-    };
+    return asset;
   }
 
-  public async getPlaybackManifest(videoAssetId: string) {
+  public async getPlaybackManifest(videoAssetId: string, keyUri?: string) {
+    // Hàm này đọc manifest HLS từ storage và rewrite các line cần bảo vệ.
+    // Nếu có keyUri, manifest trả ra sẽ trỏ về API lấy key nội bộ thay vì lộ file key gốc.
     const asset = await VideoAsset.findById(videoAssetId).lean();
     if (!asset?.manifestKey || asset.status !== 'READY') {
       throw new Error('Video chưa sẵn sàng để phát.');
     }
+    if (keyUri) {
+      const cached = await this.getCachedPlaybackManifest(asset.manifestKey);
+      if (cached) return cached.replaceAll(KEY_URI_PLACEHOLDER, keyUri);
+    }
+
     const manifest = await s3Service.getObjectText(asset.manifestKey);
     const baseKey = asset.manifestKey.slice(0, asset.manifestKey.lastIndexOf('/') + 1);
     const lines = await Promise.all(
       manifest.split(/\r?\n/).map(async (line) => {
         const value = line.trim();
+        if (value.startsWith('#EXT-X-KEY') && keyUri) {
+          return line.includes('URI="')
+            ? line.replace(/URI="[^"]*"/, `URI="${KEY_URI_PLACEHOLDER}"`)
+            : `${line},URI="${KEY_URI_PLACEHOLDER}"`;
+        }
         if (!value || value.startsWith('#') || /^https?:\/\//i.test(value)) return line;
         return s3Service.getDownloadPresignedUrl(`${baseKey}${value}`, 300);
       })
     );
-    return lines.join('\n');
+    const rewritten = lines.join('\n');
+    if (!keyUri) return rewritten;
+    await this.cachePlaybackManifest(asset.manifestKey, rewritten);
+    return rewritten.replaceAll(KEY_URI_PLACEHOLDER, keyUri);
+  }
+
+  private playbackManifestCacheKey(manifestKey: string): string {
+    return `playback:manifest:v1:${manifestKey}`;
+  }
+
+  private async getCachedPlaybackManifest(manifestKey: string): Promise<string | null> {
+    try {
+      return await redisClient.get(this.playbackManifestCacheKey(manifestKey));
+    } catch (error) {
+      console.warn('[VideoAssetService] Không thể đọc cache manifest:', error);
+      return null;
+    }
+  }
+
+  private async cachePlaybackManifest(manifestKey: string, manifest: string): Promise<void> {
+    try {
+      await redisClient.setex(
+        this.playbackManifestCacheKey(manifestKey),
+        PLAYBACK_MANIFEST_CACHE_TTL_SECONDS,
+        manifest,
+      );
+    } catch (error) {
+      console.warn('[VideoAssetService] Không thể ghi cache manifest:', error);
+    }
   }
 
   public async getBindingSnapshot(videoAssetId: string) {

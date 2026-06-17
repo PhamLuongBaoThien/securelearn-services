@@ -7,14 +7,58 @@
 import { Enrollment, EnrollmentSource, IEnrollment, EnrollmentStatus } from '../models/enrollment.model';
 import { Course } from '../models/course.model';
 import { publishEnrollmentCreated } from '../events/publishers';
+import entitlementCacheService from './entitlementCache.service';
 
 class EnrollmentService {
+  private async cachePurchaseEntitlement(userId: string, courseId: string, versionId?: string | null): Promise<void> {
+    // Cache quyền mua đứt cho cả course shell và current version để các request học sau này qua Redis trước.
+    await entitlementCacheService.setAllowed({
+      userId,
+      courseId,
+      source: EnrollmentSource.PURCHASE,
+    });
+    if (versionId && versionId !== courseId) {
+      await entitlementCacheService.setAllowed({
+        userId,
+        courseId: versionId,
+        source: EnrollmentSource.PURCHASE,
+      });
+    }
+  }
+
+  private async cacheSubscriptionEntitlement(
+    userId: string,
+    courseId: string,
+    versionId: string | null | undefined,
+    subscriptionTermId: string,
+    accessEndsAt: Date,
+  ): Promise<void> {
+    await entitlementCacheService.setAllowed({
+      userId,
+      courseId,
+      source: EnrollmentSource.SUBSCRIPTION,
+      termId: subscriptionTermId,
+      accessEndsAt,
+    });
+    if (versionId && versionId !== courseId) {
+      await entitlementCacheService.setAllowed({
+        userId,
+        courseId: versionId,
+        source: EnrollmentSource.SUBSCRIPTION,
+        termId: subscriptionTermId,
+        accessEndsAt,
+      });
+    }
+  }
+
   /**
    * Ghi danh học viên vào khóa học.
    * Cả STUDENT lẫn INSTRUCTOR đều có thể ghi danh,
    * nhưng INSTRUCTOR không được ghi danh khóa học do chính mình tạo.
    */
   public async enroll(userId: string, courseId: string, userRole: string): Promise<IEnrollment> {
+    // Hàm ghi danh chuẩn cho mua đứt.
+    // Nếu user trước đó học bằng subscription thì record cũ được nâng lên PURCHASE để giữ progress nhưng chuyển quyền thành vĩnh viễn.
     // 1. Kiểm tra khóa học có tồn tại và đã PUBLISHED không
     const course = await Course.findById(courseId);
     if (!course) {
@@ -39,6 +83,7 @@ class EnrollmentService {
         existing.accessEndsAt = undefined;
         existing.status = EnrollmentStatus.ACTIVE;
         await existing.save();
+        await this.cachePurchaseEntitlement(userId, courseId, course.currentVersionId?.toString());
         return existing;
       }
       throw new Error('Bạn đã ghi danh khóa học này rồi.');
@@ -52,6 +97,7 @@ class EnrollmentService {
       source: EnrollmentSource.PURCHASE,
     });
     await enrollment.save();
+    await this.cachePurchaseEntitlement(userId, courseId, course.currentVersionId?.toString());
 
     // 5. Tăng enrollmentCount trên Course
     await Course.findByIdAndUpdate(courseId, { $inc: { enrollmentCount: 1 } });
@@ -87,6 +133,13 @@ class EnrollmentService {
       existing.subscriptionTermId = subscriptionTermId;
       existing.accessEndsAt = accessEndsAt;
       await existing.save();
+      await this.cacheSubscriptionEntitlement(
+        userId,
+        courseId,
+        course.currentVersionId?.toString(),
+        subscriptionTermId,
+        accessEndsAt,
+      );
       return existing;
     }
     const enrollment = await Enrollment.create({
@@ -97,6 +150,13 @@ class EnrollmentService {
       subscriptionTermId,
       accessEndsAt,
     });
+    await this.cacheSubscriptionEntitlement(
+      userId,
+      courseId,
+      course.currentVersionId?.toString(),
+      subscriptionTermId,
+      accessEndsAt,
+    );
     await Course.findByIdAndUpdate(courseId, { $inc: { enrollmentCount: 1 } });
     await publishEnrollmentCreated({ enrollmentId: enrollment._id.toString(), userId, courseId });
     return enrollment;

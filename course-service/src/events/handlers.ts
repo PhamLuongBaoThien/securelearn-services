@@ -16,7 +16,7 @@ import {
 import { Course } from '../models/course.model';
 import { CourseVersion } from '../models/courseVersion.model';
 import { LessonStatus } from '../models/lesson.model';
-import { Enrollment } from '../models/enrollment.model';
+import { Enrollment, EnrollmentSource, EnrollmentStatus } from '../models/enrollment.model';
 import { Lesson } from '../models/lesson.model';
 import { Section } from '../models/section.model';
 import { Quiz } from '../models/quiz.model';
@@ -25,6 +25,7 @@ import lessonService from '../services/lesson.service';
 import cartService from '../services/cart.service';
 import enrollmentService from '../services/enrollment.service';
 import { SubscriptionEntitlement } from '../models/subscriptionEntitlement.model';
+import entitlementCacheService from '../services/entitlementCache.service';
 
 type SubscriptionTermChangedPayload = {
   termId: string;
@@ -151,6 +152,8 @@ export const registerEventHandlers = async (): Promise<void> => {
     RoutingKey.PAYMENT_COURSE_SUCCEEDED,
     'course-service.payment-course-succeeded',
     async (payload) => {
+      // Đây là điểm mở quyền học cho flow mua đứt.
+      // payment-service chỉ xác nhận thanh toán; course-service mới là nơi tạo hoặc nâng cấp Enrollment sang PURCHASE.
       console.log(`[CourseEvent] Payment succeeded: ${payload.transactionCode} | user ${payload.userId}`);
 
       let allSucceeded = true;
@@ -198,6 +201,36 @@ export const registerEventHandlers = async (): Promise<void> => {
         },
         { upsert: true, new: true }
       );
+
+      const subscriptionEnrollments = await Enrollment.find({
+        userId: payload.userId,
+        subscriptionTermId: payload.termId,
+        source: EnrollmentSource.SUBSCRIPTION,
+        status: EnrollmentStatus.ACTIVE,
+      }).select('courseId').lean();
+
+      const courseIds = subscriptionEnrollments.map((enrollment) => enrollment.courseId);
+      const courses = await Course.find({ _id: { $in: courseIds } }).select('_id currentVersionId').lean();
+      const versionByCourseId = new Map(courses.map((course) => [
+        course._id.toString(),
+        course.currentVersionId?.toString() || '',
+      ]));
+
+      await Promise.all(subscriptionEnrollments.flatMap((enrollment) => {
+        const courseId = enrollment.courseId.toString();
+        const versionId = versionByCourseId.get(courseId);
+        const idsToCache = versionId && versionId !== courseId ? [courseId, versionId] : [courseId];
+        if (payload.status === 'ACTIVE') {
+          return idsToCache.map((id) => entitlementCacheService.setAllowed({
+            userId: payload.userId,
+            courseId: id,
+            source: EnrollmentSource.SUBSCRIPTION,
+            termId: payload.termId,
+            accessEndsAt: new Date(payload.endsAt),
+          }));
+        }
+        return idsToCache.map((id) => entitlementCacheService.del(payload.userId, id));
+      }));
       console.log(`[CourseEvent] Subscription term ${payload.termId} -> ${payload.status}`);
     }
   );

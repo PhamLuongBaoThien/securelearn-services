@@ -7,6 +7,12 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import videoAssetService from '../services/videoAsset.service';
+import playbackAccessService from '../services/playbackAccess.service';
+
+const sanitizeVideoAsset = (asset: Awaited<ReturnType<typeof videoAssetService.getAsset>>) => {
+  const { encryptionKey: _hiddenKey, rawObjectKey: _hiddenRawKey, multipartUploadId: _hiddenUploadId, ...safeAsset } = asset;
+  return safeAsset;
+};
 
 class VideoAssetController {
   // [POST] /api/media/videos/initiate-upload
@@ -37,8 +43,7 @@ class VideoAssetController {
       const videoAssetId = req.params.videoAssetId as string;
       const asset = await videoAssetService.getAsset(videoAssetId);
       // Không trả encryption key và multipart internals ở API metadata để tránh lộ thông tin nhạy cảm.
-      const { encryptionKey: _hiddenKey, rawObjectKey: _hiddenRawKey, multipartUploadId: _hiddenUploadId, ...safeAsset } = asset;
-      res.status(200).json({ status: 'OK', data: safeAsset });
+      res.status(200).json({ status: 'OK', data: sanitizeVideoAsset(asset) });
     } catch (error: any) {
       res.status(404).json({ status: 'ERR', message: error.message });
     }
@@ -49,6 +54,19 @@ class VideoAssetController {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const asset = await videoAssetService.getAsset(videoAssetId);
+      const session = typeof req.query.session === 'string' ? req.query.session : '';
+      // Đây là điểm cấp AES key cho player.
+      // Key chỉ được trả nếu request đi kèm key session hợp lệ hoặc user là owner hoặc admin.
+      if (session) {
+        const validSession = await playbackAccessService.validateKeySession(session, req.userId!, videoAssetId);
+        if (!validSession) {
+          res.status(403).send('Invalid key session');
+          return;
+        }
+      } else if (asset.ownerUserId !== req.userId && req.userRole !== 'ADMIN') {
+        res.status(403).send('Key requires playback session');
+        return;
+      }
       if (!asset.encryptionKey) {
         res.status(404).send('Key not found or not ready');
         return;
@@ -61,8 +79,67 @@ class VideoAssetController {
     }
   }
 
+  public async createPlaybackSession(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const videoAssetId = req.params.videoAssetId as string;
+      const asset = await videoAssetService.getAsset(videoAssetId);
+      // Không trả manifest hoặc key trực tiếp ở bước này.
+      // Backend chỉ cấp one-time playbackUrl để lần request tiếp theo mới được đổi sang manifest thật.
+      const token = await playbackAccessService.createOneTimePlayback({
+        userId: req.userId!,
+        videoAssetId,
+        courseId: String(asset.courseId),
+      });
+      res.status(201).json({
+        status: 'OK',
+        data: {
+          asset: sanitizeVideoAsset(asset),
+          playbackUrl: `/api/media/videos/${videoAssetId}/playback?token=${encodeURIComponent(token)}`,
+          expiresIn: 60,
+        },
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async getOneTimePlaybackManifest(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const videoAssetId = req.params.videoAssetId as string;
+      const token = typeof req.query.token === 'string' ? req.query.token : '';
+      if (!token) {
+        res.status(400).json({ status: 'ERR', message: 'Thiếu playback token.' });
+        return;
+      }
+      // Playback token hợp lệ sẽ được đổi lấy manifest HLS đã rewrite key URI bằng key session mới.
+      const playback = await playbackAccessService.consumeOneTimePlayback(token);
+      if (!playback || playback.userId !== req.userId || playback.videoAssetId !== videoAssetId) {
+        res.status(410).json({ status: 'ERR', message: 'Playback URL đã hết hạn hoặc đã được sử dụng.' });
+        return;
+      }
+      const keySession = await playbackAccessService.createKeySession({
+        userId: req.userId!,
+        videoAssetId,
+      });
+      const keyUri = `/api/media/videos/${videoAssetId}/key?session=${encodeURIComponent(keySession)}`;
+      const manifest = await videoAssetService.getPlaybackManifest(videoAssetId, keyUri);
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(manifest);
+    } catch (error: any) {
+      res.status(404).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   public async getPlaybackManifest(req: AuthRequest, res: Response): Promise<void> {
     try {
+      // Route này chủ yếu phục vụ owner hoặc admin hoặc trường hợp nội bộ cần xem manifest trực tiếp.
+      // Learner thông thường nên đi qua playback-session rồi dùng one-time playback URL.
+      const asset = await videoAssetService.getAsset(String(req.params.videoAssetId));
+      if (asset.ownerUserId !== req.userId && req.userRole !== 'ADMIN') {
+        res.status(403).json({ status: 'ERR', message: 'Vui lòng tạo playback session để xem video.' });
+        return;
+      }
       const manifest = await videoAssetService.getPlaybackManifest(String(req.params.videoAssetId));
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'private, no-store');
