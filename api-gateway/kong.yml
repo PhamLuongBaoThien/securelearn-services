@@ -8,6 +8,7 @@
 #   GET /api/courses/:slug
 #   GET /api/categories
 #   GET/POST/DELETE /api/cart...
+#   GET/POST/DELETE /api/wishlist...
 # - PROTECTED (JWT qua Kong, role check ở service):
 #   GET /api/courses/enrolled
 #   GET /api/courses/my-courses
@@ -170,6 +171,22 @@ services:
       - name: cart-protected
         paths:
           - /api/cart
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - DELETE
+
+      - name: wishlist-preflight
+        paths:
+          - /api/wishlist
+        strip_path: false
+        methods:
+          - OPTIONS
+
+      - name: wishlist-protected
+        paths:
+          - /api/wishlist
         strip_path: false
         methods:
           - GET
@@ -350,6 +367,13 @@ plugins:
 
   - name: jwt
     route: cart-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  - name: jwt
+    route: wishlist-protected
     config:
       key_claim_name: iss
       claims_to_verify:
