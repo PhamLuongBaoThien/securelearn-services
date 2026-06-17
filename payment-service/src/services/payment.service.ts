@@ -63,13 +63,17 @@ class PaymentService {
     request: CheckoutRequest,
     clientIp: string
   ) {
+    // Entry chính của flow mua đứt.
+    // Hàm này đọc cart hiện tại, tạo PaymentTransaction PENDING và sinh URL thanh toán cho VNPay hoặc MoMo.
     const cart = await this.fetchCart(token);
     if (cart.items.length === 0) {
       throw new Error('Giỏ hàng của bạn đang trống.');
     }
 
+    // Chuẩn hóa provider để dễ quản lý sau này khi thêm cổng thanh toán mới hoặc phương thức thanh toán mới.
     const normalizedProvider = this.normalizeProvider(request.provider, request.paymentMethod);
 
+    // Snapshot config chia doanh thu tại thời điểm checkout để đảm bảo tính nhất quán của transaction dù config có thể thay đổi sau này.
     const transactionCode = this.generateTransactionCode(normalizedProvider);
     const orderInfo = this.buildOrderInfo(transactionCode, cart.items.length);
     const transaction = await PaymentTransaction.create({
@@ -343,6 +347,8 @@ class PaymentService {
   }
 
   private async processVnpayResult(payload: Record<string, unknown>, action: 'WEBHOOK' | 'CONFIRM') {
+    // Điểm chốt trạng thái giao dịch VNPay.
+    // Sau khi verify chữ ký và amount hợp lệ, hàm này đổi transaction sang SUCCEEDED rồi gọi finalizeSuccessfulTransaction.
     if (!verifyVnpaySignature(payload)) {
       return { success: false, rspCode: '97', message: 'Chữ ký giao dịch không hợp lệ.' };
     }
@@ -484,6 +490,8 @@ class PaymentService {
   }
 
   private async processMomoResult(payload: Record<string, unknown>, action: 'WEBHOOK' | 'CONFIRM' | 'QUERY') {
+    // Điểm chốt trạng thái giao dịch MoMo.
+    // Logic tương tự VNPay nhưng có thêm nhánh QUERY để reconcile khi browser return đến trước IPN.
     const orderId = String(payload.orderId || payload.order_id || '');
     if (!orderId) {
       return { success: false, message: 'Thiếu mã đơn hàng (orderId).' };
@@ -662,6 +670,8 @@ class PaymentService {
   }
 
   private async fetchCart(token: string): Promise<{ items: PaymentCourseItem[]; totalPrice: number }> {
+    // payment-service không tự giữ cart.
+    // Trước khi tạo checkout, service gọi ngược sang course-service để chụp lại snapshot giỏ hàng hiện tại.
     const response = await fetch(`${this.courseServiceUrl}/api/cart`, {
       headers: {
         Authorization: token,
@@ -804,7 +814,10 @@ class PaymentService {
     }
   }
 
+  // Phân nhánh logic sau khi giao dịch được xác nhận thành công. Mục đích là tách biệt rõ ràng giữa việc ghi nhận giao dịch thành công và các bước xử lý nghiệp vụ tiếp theo như mở khóa khóa học hoặc kích hoạt thuê bao.
   private async finalizeSuccessfulTransaction(transaction: IPaymentTransaction): Promise<void> {
+    // Phân nhánh sau thanh toán thành công.
+    // Mua đứt sẽ phát event để course-service mở enrollment; subscription sẽ tạo term active thay vì enroll course.
     if (transaction.productType === 'SUBSCRIPTION') {
       // Subscription không phát event enroll course; nó tạo term để downstream tự mở quyền theo entitlement.
       await subscriptionService.activatePaidTransaction(transaction);
@@ -1163,6 +1176,7 @@ class PaymentService {
     };
   }
 
+  // Hàm này tạo mã giao dịch duy nhất dựa trên provider và timestamp. Nó giúp đảm bảo không bị trùng lặp mã giao dịch khi có nhiều cổng thanh toán hoặc phương thức thanh toán khác nhau.
   private generateTransactionCode(provider: PaymentProvider): string {
     const prefix = provider === 'MOMO' ? 'MM' : provider === 'VNPAY' ? 'VNP' : 'PM';
     return `${prefix}${Date.now()}${Math.floor(Math.random() * 900000 + 100000)}`;
@@ -1173,6 +1187,7 @@ class PaymentService {
     return paymentMethod === 'MOMO' ? 'MOMO' : 'VNPAY';
   }
 
+  // Hàm này xây dựng thông tin đơn hàng để gửi cho cổng thanh toán. Nó bao gồm mã giao dịch và số lượng khóa học để giúp người dùng dễ nhận biết giao dịch của họ khi xem lịch sử giao dịch trên cổng thanh toán.
   private buildOrderInfo(transactionCode: string, itemCount: number): string {
     return `SecureLearn payment ${transactionCode}${itemCount > 1 ? ` (${itemCount} courses)` : ''}`;
   }
