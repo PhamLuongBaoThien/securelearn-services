@@ -241,6 +241,52 @@ class PaymentService {
     return this.mapTransaction(transaction);
   }
 
+  public async getMyTransactions(
+    userId: string,
+    userRole: string | undefined,
+    query?: { search?: string; productType?: string; status?: string; page?: number; limit?: number }
+  ) {
+    if (userRole === 'ADMIN') {
+      throw new Error('Admin không dùng lịch sử thanh toán learner.');
+    }
+
+    const filter: Record<string, any> = { userId };
+    if (query?.productType && ['COURSE', 'SUBSCRIPTION'].includes(query.productType)) {
+      filter.productType = query.productType;
+    }
+    if (query?.status && ['PENDING', 'SUCCEEDED', 'FAILED', 'REFUNDED'].includes(query.status)) {
+      filter.status = query.status;
+    } else {
+      filter.status = { $in: ['SUCCEEDED', 'FAILED', 'REFUNDED'] };
+    }
+    const search = String(query?.search || '').trim();
+    if (search) {
+      const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(escapedSearch, 'i');
+      filter.$or = [
+        { transactionCode: searchRegex },
+        { 'items.title': searchRegex },
+        { 'subscriptionSnapshot.name': searchRegex },
+      ];
+    }
+
+    const page = Math.max(Number(query?.page || 1), 1);
+    const limit = Math.min(Math.max(Number(query?.limit || 10), 1), 100);
+    const skip = (page - 1) * limit;
+
+    const [transactions, total] = await Promise.all([
+      PaymentTransaction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      PaymentTransaction.countDocuments(filter),
+    ]);
+
+    return {
+      transactions: transactions.map((transaction) => this.mapTransaction(transaction)),
+      total,
+      page,
+      limit,
+    };
+  }
+
   private async confirmTransaction(transactionId: string, user: { userId: string; userRole: string; fullName: string; email: string }, providerRef?: string) {
     const transaction = await this.findOwnedTransaction(transactionId, user.userId);
 
@@ -869,10 +915,24 @@ class PaymentService {
     );
   }
 
-  private async queryTransactions(query?: { startDate?: string; endDate?: string; provider?: string; status?: string; page?: number; limit?: number }) {
+  private async queryTransactions(query?: { search?: string; startDate?: string; endDate?: string; provider?: string; status?: string; page?: number; limit?: number }) {
     const filter: Record<string, any> = {};
     if (query?.provider) filter.provider = query.provider;
-    if (query?.status) filter.status = query.status;
+    if (query?.status) {
+      filter.status = query.status;
+    }
+    const search = String(query?.search || '').trim();
+    if (search) {
+      const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(escapedSearch, 'i');
+      filter.$or = [
+        { transactionCode: searchRegex },
+        { fullName: searchRegex },
+        { email: searchRegex },
+        { 'items.title': searchRegex },
+        { 'subscriptionSnapshot.name': searchRegex },
+      ];
+    }
     if (query?.startDate || query?.endDate) {
       filter.createdAt = {};
       if (query.startDate) filter.createdAt.$gte = new Date(query.startDate);
@@ -880,7 +940,7 @@ class PaymentService {
     }
 
     const page = Math.max(Number(query?.page || 1), 1);
-    const limit = Math.min(Math.max(Number(query?.limit || 20), 1), 100);
+    const limit = Math.min(Math.max(Number(query?.limit || 10), 1), 100);
     const skip = (page - 1) * limit;
 
     const [transactions, total] = await Promise.all([
@@ -1099,7 +1159,7 @@ class PaymentService {
     };
   }
 
-  public async getAdminFinanceOverview(query?: { startDate?: string; endDate?: string; provider?: string; status?: string; page?: number; limit?: number }) {
+  public async getAdminFinanceOverview(query?: { search?: string; startDate?: string; endDate?: string; provider?: string; status?: string; page?: number; limit?: number }) {
     const { transactions, total } = await this.queryTransactions(query);
     await Promise.all(
       transactions

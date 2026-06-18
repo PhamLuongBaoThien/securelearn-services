@@ -82,6 +82,22 @@ class PaymentController {
     }
   }
 
+  public async getMyTransactions(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const data = await paymentService.getMyTransactions(req.userId!, req.userRole, {
+        search: String(req.query.search || ''),
+        productType: String(req.query.productType || ''),
+        status: String(req.query.status || ''),
+        page: req.query.page ? Number(req.query.page) : 1,
+        limit: req.query.limit ? Number(req.query.limit) : 10,
+      });
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) {
+      const status = error.message.includes('Admin') ? 403 : 400;
+      res.status(status).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   public async webhookVnpay(req: Request, res: Response): Promise<void> {
     try {
       const payload = {

@@ -18,6 +18,7 @@ router.get('/subscription-plans', subscriptionController.plans);
 router.post('/subscription-checkout', extractUser, requireRoles('STUDENT', 'INSTRUCTOR'), subscriptionController.checkout);
 router.get('/subscriptions/me', extractUser, requireRoles('STUDENT', 'INSTRUCTOR'), subscriptionController.me);
 // Route cụ thể phải đặt trước route :id để tránh bị match nhầm
+router.get('/transactions/me', extractUser, requireRoles('STUDENT', 'INSTRUCTOR'), paymentController.getMyTransactions);
 router.get('/transactions/code/:transactionCode', extractUser, paymentController.getTransactionByCode);
 // Route để lấy thông tin giao dịch
 router.get('/transactions/:id', extractUser, paymentController.getTransaction);
