@@ -14,6 +14,9 @@ const sanitizeDocumentAsset = (asset: Awaited<ReturnType<typeof documentAssetSer
   return safeAsset;
 };
 
+const isInlineViewableMimeType = (mimeType: string) =>
+  mimeType === 'application/pdf' || mimeType.startsWith('image/');
+
 class DocumentAssetController {
   public async uploadDocument(req: AuthRequest, res: Response): Promise<void> {
     try {
@@ -57,8 +60,8 @@ class DocumentAssetController {
         res.status(400).json({ status: 'ERR', message: 'Tài liệu chưa sẵn sàng để xem.' });
         return;
       }
-      if (asset.mimeType !== 'application/pdf') {
-        res.status(400).json({ status: 'ERR', message: 'Viewer bảo vệ hiện chỉ hỗ trợ tài liệu PDF.' });
+      if (!isInlineViewableMimeType(asset.mimeType || '')) {
+        res.status(400).json({ status: 'ERR', message: 'Chỉ tài liệu PDF hoặc hình ảnh mới hỗ trợ xem trực tiếp.' });
         return;
       }
 
@@ -101,14 +104,15 @@ class DocumentAssetController {
         res.status(404).send('Document not found or not ready');
         return;
       }
-      if (asset.mimeType !== 'application/pdf') {
-        res.status(415).send('Protected viewer only supports PDF');
+      if (!isInlineViewableMimeType(asset.mimeType || '')) {
+        res.status(415).send('Inline preview only supports PDF or image files');
         return;
       }
 
       const stream = await s3Service.getObjectStream(asset.objectKey);
-      res.setHeader('Content-Type', asset.mimeType || 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(asset.originalFileName || 'document.pdf')}"`);
+      const fallbackName = asset.mimeType === 'application/pdf' ? 'document.pdf' : 'document';
+      res.setHeader('Content-Type', asset.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(asset.originalFileName || fallbackName)}"`);
       res.setHeader('Cache-Control', 'private, no-store');
       stream.pipe(res);
     } catch (error: any) {
