@@ -227,6 +227,24 @@ services:
           - POST
           - PUT
 
+  - name: progress-service
+    url: http://progress-service:5005
+    routes:
+      - name: progress-preflight
+        paths:
+          - /api/progress
+        strip_path: false
+        methods:
+          - OPTIONS
+
+      - name: progress-protected
+        paths:
+          - /api/progress
+        strip_path: false
+        methods:
+          - GET
+          - POST
+
   - name: media-service
     url: http://media-service:5003
     routes:
@@ -381,6 +399,13 @@ plugins:
 
   - name: jwt
     route: payment-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  - name: jwt
+    route: progress-protected
     config:
       key_claim_name: iss
       claims_to_verify:

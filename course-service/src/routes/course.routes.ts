@@ -2,7 +2,7 @@
 // Course Routes
 // Mục đích:
 // - khai báo route public, learner và instructor cho domain course
-// - giữ riêng các route entitlement/heartbeat của thuê bao cạnh flow học tập hiện có
+// - giữ riêng các route entitlement của thuê bao cạnh flow học tập hiện có
 // ========================
 import { Router } from 'express';
 import courseController from '../controllers/course.controller';
@@ -29,8 +29,6 @@ router.get('/instructors/:instructorId/rating', courseReviewController.getInstru
 
 // [GET] /api/courses/enrolled — Danh sách khóa học đã ghi danh
 router.get('/enrolled', extractUser, requireStudentOrInstructor, enrollmentController.getEnrolledCourses);
-// Nhóm route thuê bao dùng cho entitlement check và usage tracking khi learner học thật.
-router.post('/subscription/heartbeat', extractUser, requireStudentOrInstructor, subscriptionAccessController.heartbeat);
 router.get('/:id/learning', extractUser, requireStudentOrInstructor, courseController.getCourseForLearning);
 router.get('/:id/lessons/:lessonId/notes', extractUser, requireStudentOrInstructor, learningInteractionController.listNotes);
 router.post('/:id/lessons/:lessonId/notes', extractUser, requireStudentOrInstructor, learningInteractionController.createNote);

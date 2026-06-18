@@ -47,6 +47,30 @@ export interface CourseEntitlementReply {
   accessEndsAt: string;
 }
 
+export interface CourseProgressContextRequest {
+  userId: string;
+  userRole: string;
+  courseId: string;
+}
+
+export interface CourseProgressLesson {
+  lessonId: string;
+  title: string;
+  type: string;
+  duration: number;
+  order: number;
+  sectionId: string;
+}
+
+export interface CourseProgressContextReply {
+  allowed: boolean;
+  reason: string;
+  courseId: string;
+  courseVersionId: string;
+  totalLessons: number;
+  lessons: CourseProgressLesson[];
+}
+
 export interface SubscriptionUsageRequest {
   termId: string;
   userId: string;
@@ -462,6 +486,380 @@ export const CourseEntitlementReply: MessageFns<CourseEntitlementReply> = {
   },
 };
 
+function createBaseCourseProgressContextRequest(): CourseProgressContextRequest {
+  return { userId: "", userRole: "", courseId: "" };
+}
+
+export const CourseProgressContextRequest: MessageFns<CourseProgressContextRequest> = {
+  encode(message: CourseProgressContextRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.userId !== "") {
+      writer.uint32(10).string(message.userId);
+    }
+    if (message.userRole !== "") {
+      writer.uint32(18).string(message.userRole);
+    }
+    if (message.courseId !== "") {
+      writer.uint32(26).string(message.courseId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CourseProgressContextRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCourseProgressContextRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.userId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.userRole = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.courseId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CourseProgressContextRequest {
+    return {
+      userId: isSet(object.userId) ? globalThis.String(object.userId) : "",
+      userRole: isSet(object.userRole) ? globalThis.String(object.userRole) : "",
+      courseId: isSet(object.courseId) ? globalThis.String(object.courseId) : "",
+    };
+  },
+
+  toJSON(message: CourseProgressContextRequest): unknown {
+    const obj: any = {};
+    if (message.userId !== "") {
+      obj.userId = message.userId;
+    }
+    if (message.userRole !== "") {
+      obj.userRole = message.userRole;
+    }
+    if (message.courseId !== "") {
+      obj.courseId = message.courseId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<CourseProgressContextRequest>): CourseProgressContextRequest {
+    return CourseProgressContextRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<CourseProgressContextRequest>): CourseProgressContextRequest {
+    const message = createBaseCourseProgressContextRequest();
+    message.userId = object.userId ?? "";
+    message.userRole = object.userRole ?? "";
+    message.courseId = object.courseId ?? "";
+    return message;
+  },
+};
+
+function createBaseCourseProgressLesson(): CourseProgressLesson {
+  return { lessonId: "", title: "", type: "", duration: 0, order: 0, sectionId: "" };
+}
+
+export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
+  encode(message: CourseProgressLesson, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.lessonId !== "") {
+      writer.uint32(10).string(message.lessonId);
+    }
+    if (message.title !== "") {
+      writer.uint32(18).string(message.title);
+    }
+    if (message.type !== "") {
+      writer.uint32(26).string(message.type);
+    }
+    if (message.duration !== 0) {
+      writer.uint32(32).int32(message.duration);
+    }
+    if (message.order !== 0) {
+      writer.uint32(40).int32(message.order);
+    }
+    if (message.sectionId !== "") {
+      writer.uint32(50).string(message.sectionId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CourseProgressLesson {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCourseProgressLesson();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.lessonId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.title = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.type = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.duration = reader.int32();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.order = reader.int32();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.sectionId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CourseProgressLesson {
+    return {
+      lessonId: isSet(object.lessonId) ? globalThis.String(object.lessonId) : "",
+      title: isSet(object.title) ? globalThis.String(object.title) : "",
+      type: isSet(object.type) ? globalThis.String(object.type) : "",
+      duration: isSet(object.duration) ? globalThis.Number(object.duration) : 0,
+      order: isSet(object.order) ? globalThis.Number(object.order) : 0,
+      sectionId: isSet(object.sectionId) ? globalThis.String(object.sectionId) : "",
+    };
+  },
+
+  toJSON(message: CourseProgressLesson): unknown {
+    const obj: any = {};
+    if (message.lessonId !== "") {
+      obj.lessonId = message.lessonId;
+    }
+    if (message.title !== "") {
+      obj.title = message.title;
+    }
+    if (message.type !== "") {
+      obj.type = message.type;
+    }
+    if (message.duration !== 0) {
+      obj.duration = Math.round(message.duration);
+    }
+    if (message.order !== 0) {
+      obj.order = Math.round(message.order);
+    }
+    if (message.sectionId !== "") {
+      obj.sectionId = message.sectionId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<CourseProgressLesson>): CourseProgressLesson {
+    return CourseProgressLesson.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<CourseProgressLesson>): CourseProgressLesson {
+    const message = createBaseCourseProgressLesson();
+    message.lessonId = object.lessonId ?? "";
+    message.title = object.title ?? "";
+    message.type = object.type ?? "";
+    message.duration = object.duration ?? 0;
+    message.order = object.order ?? 0;
+    message.sectionId = object.sectionId ?? "";
+    return message;
+  },
+};
+
+function createBaseCourseProgressContextReply(): CourseProgressContextReply {
+  return { allowed: false, reason: "", courseId: "", courseVersionId: "", totalLessons: 0, lessons: [] };
+}
+
+export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> = {
+  encode(message: CourseProgressContextReply, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.allowed !== false) {
+      writer.uint32(8).bool(message.allowed);
+    }
+    if (message.reason !== "") {
+      writer.uint32(18).string(message.reason);
+    }
+    if (message.courseId !== "") {
+      writer.uint32(26).string(message.courseId);
+    }
+    if (message.courseVersionId !== "") {
+      writer.uint32(34).string(message.courseVersionId);
+    }
+    if (message.totalLessons !== 0) {
+      writer.uint32(40).int32(message.totalLessons);
+    }
+    for (const v of message.lessons) {
+      CourseProgressLesson.encode(v!, writer.uint32(50).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CourseProgressContextReply {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCourseProgressContextReply();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.allowed = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.reason = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.courseId = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.courseVersionId = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.totalLessons = reader.int32();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.lessons.push(CourseProgressLesson.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CourseProgressContextReply {
+    return {
+      allowed: isSet(object.allowed) ? globalThis.Boolean(object.allowed) : false,
+      reason: isSet(object.reason) ? globalThis.String(object.reason) : "",
+      courseId: isSet(object.courseId) ? globalThis.String(object.courseId) : "",
+      courseVersionId: isSet(object.courseVersionId) ? globalThis.String(object.courseVersionId) : "",
+      totalLessons: isSet(object.totalLessons) ? globalThis.Number(object.totalLessons) : 0,
+      lessons: globalThis.Array.isArray(object?.lessons)
+        ? object.lessons.map((e: any) => CourseProgressLesson.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: CourseProgressContextReply): unknown {
+    const obj: any = {};
+    if (message.allowed !== false) {
+      obj.allowed = message.allowed;
+    }
+    if (message.reason !== "") {
+      obj.reason = message.reason;
+    }
+    if (message.courseId !== "") {
+      obj.courseId = message.courseId;
+    }
+    if (message.courseVersionId !== "") {
+      obj.courseVersionId = message.courseVersionId;
+    }
+    if (message.totalLessons !== 0) {
+      obj.totalLessons = Math.round(message.totalLessons);
+    }
+    if (message.lessons?.length) {
+      obj.lessons = message.lessons.map((e) => CourseProgressLesson.toJSON(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<CourseProgressContextReply>): CourseProgressContextReply {
+    return CourseProgressContextReply.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<CourseProgressContextReply>): CourseProgressContextReply {
+    const message = createBaseCourseProgressContextReply();
+    message.allowed = object.allowed ?? false;
+    message.reason = object.reason ?? "";
+    message.courseId = object.courseId ?? "";
+    message.courseVersionId = object.courseVersionId ?? "";
+    message.totalLessons = object.totalLessons ?? 0;
+    message.lessons = object.lessons?.map((e) => CourseProgressLesson.fromPartial(e)) || [];
+    return message;
+  },
+};
+
 function createBaseSubscriptionUsageRequest(): SubscriptionUsageRequest {
   return {
     termId: "",
@@ -820,10 +1218,22 @@ export const CourseInternalServiceService = {
       Buffer.from(CourseEntitlementReply.encode(value).finish()),
     responseDeserialize: (value: Buffer): CourseEntitlementReply => CourseEntitlementReply.decode(value),
   },
+  getCourseProgressContext: {
+    path: "/securelearn.CourseInternalService/GetCourseProgressContext" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: CourseProgressContextRequest): Buffer =>
+      Buffer.from(CourseProgressContextRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CourseProgressContextRequest => CourseProgressContextRequest.decode(value),
+    responseSerialize: (value: CourseProgressContextReply): Buffer =>
+      Buffer.from(CourseProgressContextReply.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CourseProgressContextReply => CourseProgressContextReply.decode(value),
+  },
 } as const;
 
 export interface CourseInternalServiceServer extends UntypedServiceImplementation {
   checkCourseEntitlement: handleUnaryCall<CourseEntitlementRequest, CourseEntitlementReply>;
+  getCourseProgressContext: handleUnaryCall<CourseProgressContextRequest, CourseProgressContextReply>;
 }
 
 export interface CourseInternalServiceClient extends Client {
@@ -841,6 +1251,21 @@ export interface CourseInternalServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: CourseEntitlementReply) => void,
+  ): ClientUnaryCall;
+  getCourseProgressContext(
+    request: CourseProgressContextRequest,
+    callback: (error: ServiceError | null, response: CourseProgressContextReply) => void,
+  ): ClientUnaryCall;
+  getCourseProgressContext(
+    request: CourseProgressContextRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CourseProgressContextReply) => void,
+  ): ClientUnaryCall;
+  getCourseProgressContext(
+    request: CourseProgressContextRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CourseProgressContextReply) => void,
   ): ClientUnaryCall;
 }
 

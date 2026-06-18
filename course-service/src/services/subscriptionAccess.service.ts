@@ -2,16 +2,13 @@
 // Subscription Access Service
 // Mục đích:
 // - quản lý catalog thuê bao, enroll bằng thuê bao và entitlement khi học
-// - validate heartbeat trước khi gửi usage hợp lệ sang payment-service
 // ========================
 import { Course, CourseStatus, SubscriptionCatalogStatus } from '../models/course.model';
 import { Enrollment, EnrollmentSource, EnrollmentStatus } from '../models/enrollment.model';
 import { Lesson, LessonStatus, LessonType } from '../models/lesson.model';
-import { PlaybackSession } from '../models/playbackSession.model';
 import { SubscriptionEntitlement } from '../models/subscriptionEntitlement.model';
 import enrollmentService from './enrollment.service';
 import { CourseVersion } from '../models/courseVersion.model';
-import { paymentGrpcClient } from '../grpc/payment.client';
 import entitlementCacheService from './entitlementCache.service';
 
 class SubscriptionAccessService {
@@ -216,81 +213,6 @@ class SubscriptionAccessService {
       });
     }
     return { allowed: true, source: EnrollmentSource.SUBSCRIPTION, termId: term.termId, accessEndsAt: term.endsAt };
-  }
-
-  public async heartbeat(userId: string, input: {
-    courseId: string;
-    lessonId: string;
-    sessionId: string;
-    segmentIndex: number;
-    qualifiedSeconds: number;
-  }) {
-    // Hot path chỉ dành cho thuê bao.
-    // Mua đứt không đi qua phần usage tracking này; user mua đứt chỉ cần entitlement hợp lệ để mở video.
-    // Heartbeat chỉ được ghi nhận khi learner đang học bằng quyền thuê bao còn hiệu lực.
-    const access = await this.entitlement(userId, input.courseId);
-    if (!access.allowed || access.source !== EnrollmentSource.SUBSCRIPTION || !access.termId) {
-      throw new Error('Không có quyền thuê bao hợp lệ cho heartbeat này.');
-    }
-    const course = await Course.findById(input.courseId).lean();
-    if (!course?.currentVersionId) throw new Error('Khóa học không tồn tại.');
-    if (course.instructorId === userId) throw new Error('Instructor không được tính usage cho khóa học của chính mình.');
-    const lesson = await Lesson.findOne({
-      _id: input.lessonId,
-      courseId: course.currentVersionId,
-      type: LessonType.VIDEO,
-      status: LessonStatus.READY,
-    }).lean();
-    if (!lesson) throw new Error('Video không hợp lệ.');
-
-    const segmentIndex = Math.max(0, Math.floor(Number(input.segmentIndex)));
-    if (segmentIndex * 15 >= lesson.duration) throw new Error('Đoạn xem vượt quá thời lượng video.');
-    const now = new Date();
-    const activeSession = await PlaybackSession.findOne({ userId });
-    if (activeSession && activeSession.sessionId !== input.sessionId && activeSession.lastSeenAt.getTime() > now.getTime() - 30_000) {
-      throw new Error('Tài khoản đang có một phiên phát khác hoạt động.');
-    }
-    if (!activeSession || activeSession.sessionId !== input.sessionId || activeSession.lessonId !== input.lessonId) {
-      await PlaybackSession.findOneAndUpdate(
-        { userId },
-        {
-          $set: {
-            sessionId: input.sessionId,
-            lessonId: input.lessonId,
-            lastSegmentIndex: -1,
-            startedAt: now,
-            lastSeenAt: now,
-          },
-        },
-        { upsert: true, new: true }
-      );
-      return { accepted: false, reason: 'SESSION_STARTED' };
-    }
-    const remainingSeconds = Math.max(1, Math.ceil(lesson.duration - segmentIndex * 15));
-    // Segment cuối chỉ được ghi nhận phần thời lượng thật còn lại của video.
-    const qualifiedSeconds = Math.min(15, remainingSeconds, Math.max(1, Math.floor(Number(input.qualifiedSeconds))));
-    const elapsedSeconds = (now.getTime() - activeSession.lastSeenAt.getTime()) / 1000;
-    if (elapsedSeconds + 2 < qualifiedSeconds) {
-      throw new Error('Heartbeat đến sớm hơn thời gian xem thực tế.');
-    }
-    await PlaybackSession.findOneAndUpdate(
-      { userId },
-      { $set: { lastSegmentIndex: segmentIndex, lastSeenAt: now } },
-      { upsert: true, new: true }
-    );
-
-    // Heartbeat là hot path nội bộ nên chuyển sang gRPC thay vì HTTP/JSON.
-    return paymentGrpcClient.recordSubscriptionUsage({
-      termId: access.termId,
-      userId,
-      courseId: input.courseId,
-      instructorId: course.instructorId,
-      lessonId: input.lessonId,
-      sessionId: input.sessionId,
-      segmentIndex,
-      qualifiedSeconds,
-      occurredAt: now.toISOString(),
-    });
   }
 }
 

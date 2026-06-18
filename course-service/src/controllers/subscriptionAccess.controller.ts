@@ -1,7 +1,7 @@
 // ========================
 // Subscription Access Controller
 // Mục đích:
-// - mở API opt-in catalog, enroll bằng thuê bao, entitlement và heartbeat
+// - mở API opt-in catalog, enroll bằng thuê bao và entitlement
 // - làm cổng HTTP cho learner/instructor/admin trước khi vào service entitlement
 // ========================
 import { Request, Response } from 'express';
@@ -66,15 +66,6 @@ class SubscriptionAccessController {
     try {
       const data = await subscriptionAccessService.entitlement(req.userId!, String(req.params.id));
       res.status(data.allowed ? 200 : 403).json({ status: data.allowed ? 'OK' : 'ERR', data });
-    } catch (error: any) {
-      res.status(400).json({ status: 'ERR', message: error.message });
-    }
-  };
-
-  public heartbeat = async (req: AuthRequest, res: Response) => {
-    try {
-      const data = await subscriptionAccessService.heartbeat(req.userId!, req.body);
-      res.status(200).json({ status: 'OK', data });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }

@@ -1,5 +1,4 @@
 // - lưu trạng thái ghi danh của học viên vào khóa học
-// - theo dõi tiến độ học tập (progress) của học viên
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
 export enum EnrollmentStatus {

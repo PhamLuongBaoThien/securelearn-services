@@ -9,6 +9,7 @@ service MediaInternalService {
 
 service CourseInternalService {
   rpc CheckCourseEntitlement (CourseEntitlementRequest) returns (CourseEntitlementReply);
+  rpc GetCourseProgressContext (CourseProgressContextRequest) returns (CourseProgressContextReply);
 }
 
 service PaymentInternalService {
@@ -39,6 +40,30 @@ message CourseEntitlementReply {
   string reason = 3;
   string termId = 4;
   string accessEndsAt = 5;
+}
+
+message CourseProgressContextRequest {
+  string userId = 1;
+  string userRole = 2;
+  string courseId = 3;
+}
+
+message CourseProgressLesson {
+  string lessonId = 1;
+  string title = 2;
+  string type = 3;
+  int32 duration = 4;
+  int32 order = 5;
+  string sectionId = 6;
+}
+
+message CourseProgressContextReply {
+  bool allowed = 1;
+  string reason = 2;
+  string courseId = 3;
+  string courseVersionId = 4;
+  int32 totalLessons = 5;
+  repeated CourseProgressLesson lessons = 6;
 }
 
 message SubscriptionUsageRequest {

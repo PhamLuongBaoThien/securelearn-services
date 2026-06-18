@@ -6,6 +6,8 @@ import {
   CourseInternalServiceClient,
   CourseInternalServiceService,
   CourseInternalServiceServer,
+  CourseProgressContextReply,
+  CourseProgressContextRequest,
   MediaAssetBindingReply,
   MediaInternalServiceClient,
   MediaInternalServiceService,
@@ -18,6 +20,10 @@ import {
 } from './generated/securelearn';
 
 export type MediaAssetBinding = MediaAssetBindingReply;
+
+export type CourseProgressContext = Omit<CourseProgressContextReply, 'reason'> & {
+  reason?: string;
+};
 
 export interface CourseEntitlementResult {
   allowed: boolean;
@@ -56,6 +62,15 @@ const normalizeCourseEntitlement = (payload: CourseEntitlementReply): CourseEnti
   reason: payload.reason || undefined,
   termId: payload.termId || undefined,
   accessEndsAt: payload.accessEndsAt || undefined,
+});
+
+const normalizeCourseProgressContext = (payload: CourseProgressContextReply): CourseProgressContext => ({
+  allowed: Boolean(payload.allowed),
+  reason: payload.reason || undefined,
+  courseId: payload.courseId,
+  courseVersionId: payload.courseVersionId,
+  totalLessons: payload.totalLessons,
+  lessons: payload.lessons,
 });
 
 export const GrpcStatus = grpc.status;
@@ -106,6 +121,7 @@ export const createMediaGrpcServer = (handlers: {
 
 export const createCourseGrpcServer = (handlers: {
   checkCourseEntitlement: (request: CourseEntitlementRequest) => Promise<CourseEntitlementResult>;
+  getCourseProgressContext?: (request: CourseProgressContextRequest) => Promise<CourseProgressContext>;
 }): grpc.Server => {
   const server = new grpc.Server();
   const implementation: CourseInternalServiceServer = {
@@ -118,6 +134,24 @@ export const createCourseGrpcServer = (handlers: {
           reason: toOptionalString(response.reason),
           termId: toOptionalString(response.termId),
           accessEndsAt: toOptionalString(response.accessEndsAt),
+        });
+      } catch (error) {
+        callback(error as grpc.ServiceError, null);
+      }
+    },
+    getCourseProgressContext: async (call, callback) => {
+      try {
+        if (!handlers.getCourseProgressContext) {
+          throw createGrpcError(GrpcStatus.UNIMPLEMENTED, 'GetCourseProgressContext chưa được triển khai.');
+        }
+        const response = await handlers.getCourseProgressContext(call.request);
+        callback(null, {
+          allowed: response.allowed,
+          reason: toOptionalString(response.reason),
+          courseId: response.courseId,
+          courseVersionId: response.courseVersionId,
+          totalLessons: response.totalLessons,
+          lessons: response.lessons,
         });
       } catch (error) {
         callback(error as grpc.ServiceError, null);
@@ -166,6 +200,14 @@ export const createCourseGrpcClient = (target: string) => {
         await promisifyUnary<CourseEntitlementRequest, CourseEntitlementReply>(
           rpcClient,
           'checkCourseEntitlement',
+          request,
+        ),
+      ),
+    getCourseProgressContext: async (request: CourseProgressContextRequest) =>
+      normalizeCourseProgressContext(
+        await promisifyUnary<CourseProgressContextRequest, CourseProgressContextReply>(
+          rpcClient,
+          'getCourseProgressContext',
           request,
         ),
       ),

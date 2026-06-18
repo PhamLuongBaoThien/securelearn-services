@@ -2,7 +2,7 @@
 // Enrollment Service
 // Mục đích:
 // - quản lý ghi danh mua đứt và ghi danh bằng thuê bao
-// - giữ enrollment/progress ổn định khi user chuyển từ quyền thuê bao sang mua đứt
+// - giữ enrollment ổn định khi user chuyển từ quyền thuê bao sang mua đứt
 // ========================
 import { Enrollment, EnrollmentSource, IEnrollment, EnrollmentStatus } from '../models/enrollment.model';
 import { Course } from '../models/course.model';
@@ -58,7 +58,7 @@ class EnrollmentService {
    */
   public async enroll(userId: string, courseId: string, userRole: string): Promise<IEnrollment> {
     // Hàm ghi danh chuẩn cho mua đứt.
-    // Nếu user trước đó học bằng subscription thì record cũ được nâng lên PURCHASE để giữ progress nhưng chuyển quyền thành vĩnh viễn.
+    // Nếu user trước đó học bằng subscription thì record cũ được nâng lên PURCHASE để chuyển quyền thành vĩnh viễn.
     // 1. Kiểm tra khóa học có tồn tại và đã PUBLISHED không
     const course = await Course.findById(courseId);
     if (!course) {
@@ -77,7 +77,7 @@ class EnrollmentService {
     const existing = await Enrollment.findOne({ userId, courseId });
     if (existing) {
       if (existing.source === EnrollmentSource.SUBSCRIPTION) {
-        // Nếu user đã học bằng thuê bao rồi mua đứt, giữ nguyên progress nhưng nâng enrollment lên quyền vĩnh viễn.
+        // Nếu user đã học bằng thuê bao rồi mua đứt, nâng enrollment lên quyền vĩnh viễn.
         existing.source = EnrollmentSource.PURCHASE;
         existing.subscriptionTermId = '';
         existing.accessEndsAt = undefined;
