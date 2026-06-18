@@ -24,6 +24,8 @@ export {
   type PaymentCourseItemPayload,
   type PaymentCourseSucceededPayload,
   type PaymentCourseFailedPayload,
+  type ProgressLessonCompletedPayload,
+  type ProgressCourseCompletedPayload,
   type SubscriptionTermStatus,
   type SubscriptionTermChangedPayload,
 } from './constants';

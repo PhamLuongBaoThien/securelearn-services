@@ -3,7 +3,10 @@ import {
   LessonProgress,
   LessonProgressStatus,
   LessonProgressType,
+  WatchedSegment,
 } from '../models/lessonProgress.model';
+import { LearningSession, LearningSessionStatus } from '../models/learningSession.model';
+import { publishCourseCompleted, publishLessonCompleted } from '../events/publishers';
 import courseContextService, { CourseProgressContext } from './courseContext.service';
 
 const VIDEO_COMPLETE_PERCENT = 90;
@@ -17,7 +20,11 @@ type HeartbeatInput = {
   sessionId: string;
   positionSeconds?: number;
   watchedSecondsDelta?: number;
+  segmentStartSeconds?: number;
+  playbackRate?: number;
+  tabVisible?: boolean;
   quizAttemptId?: string;
+  deviceInfo?: string;
 };
 
 type QuizCompleteInput = {
@@ -57,6 +64,8 @@ export type LessonProgressSummary = {
   quizAttemptId: string;
   quizScore: number;
   quizPassed: boolean;
+  watchedSegments: WatchedSegment[];
+  activeSeconds: number;
   lastPositionSeconds: number;
   completedAt?: Date | null;
   updatedAt?: Date;
@@ -67,11 +76,13 @@ class ProgressService {
     this.assertHeartbeatPayload(input);
     const context = await this.loadAllowedContext(input.userId, input.userRole, input.courseId);
     const lesson = this.resolveLesson(context, input.lessonId, input.lessonType);
+    const activeSeconds = this.normalizeActiveSeconds(input.watchedSecondsDelta);
+    await this.upsertLearningSession(input, context, activeSeconds, false);
 
     if (input.lessonType === LessonProgressType.QUIZ) {
       await this.upsertQuizHeartbeat(input, context);
     } else {
-      await this.upsertVideoHeartbeat(input, context, lesson.duration);
+      await this.upsertVideoHeartbeat(input, context, lesson.duration, activeSeconds);
     }
 
     await this.recalculateCourseProgress(input.userId, context, input.lessonId, this.toNumber(input.positionSeconds));
@@ -85,7 +96,14 @@ class ProgressService {
 
     const now = new Date();
     const score = Math.max(0, Math.min(100, Math.round(Number(input.score))));
-      const update = {
+    const existing = await LessonProgress.findOne({
+      userId: input.userId,
+      courseId: context.courseId,
+      lessonId: input.lessonId,
+    });
+    const completedAt = input.passed ? existing?.completedAt || now : null;
+    const shouldPublishLessonCompleted = Boolean(input.passed) && existing?.status !== LessonProgressStatus.COMPLETED;
+    const update = {
       userId: input.userId,
       courseId: context.courseId,
       courseVersionId: context.courseVersionId,
@@ -95,7 +113,7 @@ class ProgressService {
       quizScore: score,
       quizPassed: Boolean(input.passed),
       status: input.passed ? LessonProgressStatus.COMPLETED : LessonProgressStatus.IN_PROGRESS,
-      completedAt: input.passed ? now : null,
+      completedAt,
     };
 
     await LessonProgress.findOneAndUpdate(
@@ -103,6 +121,21 @@ class ProgressService {
       { $set: update },
       { upsert: true, new: true }
     );
+
+    await this.endActiveLearningSessions(input.userId, context.courseId, input.lessonId);
+    if (shouldPublishLessonCompleted && completedAt) {
+      await publishLessonCompleted({
+        userId: input.userId,
+        courseId: context.courseId,
+        courseVersionId: context.courseVersionId,
+        lessonId: input.lessonId,
+        lessonType: LessonProgressType.QUIZ,
+        completedAt: completedAt.toISOString(),
+        quizAttemptId: input.attemptId,
+        quizScore: score,
+        quizPassed: Boolean(input.passed),
+      });
+    }
 
     await this.recalculateCourseProgress(input.userId, context, input.lessonId, 0);
     return this.getCourseProgress(input.userId, input.userRole, input.courseId);
@@ -134,7 +167,12 @@ class ProgressService {
     return rows.map((row) => this.mapCourse(row));
   }
 
-  private async upsertVideoHeartbeat(input: HeartbeatInput, context: CourseProgressContext, durationSeconds: number) {
+  private async upsertVideoHeartbeat(
+    input: HeartbeatInput,
+    context: CourseProgressContext,
+    durationSeconds: number,
+    activeSeconds: number
+  ) {
     const existing = await LessonProgress.findOne({
       userId: input.userId,
       courseId: context.courseId,
@@ -142,12 +180,19 @@ class ProgressService {
     });
 
     const position = Math.min(durationSeconds || Number.MAX_SAFE_INTEGER, this.toNumber(input.positionSeconds));
-    const currentWatched = existing?.watchedSeconds || 0;
-    const watchedSeconds = Math.max(currentWatched, position);
+    const existingSegments = existing?.watchedSegments?.length
+      ? existing.watchedSegments
+      : this.segmentsFromLegacyWatchedSeconds(existing?.watchedSeconds || 0, durationSeconds);
+    const watchedSegments = this.mergeSegments([
+      ...existingSegments,
+      ...this.buildHeartbeatSegments(input, position, durationSeconds),
+    ]);
+    const watchedSeconds = this.sumSegments(watchedSegments);
     const watchPercent = durationSeconds > 0 ? Math.min(100, Math.round((watchedSeconds / durationSeconds) * 100)) : 0;
     const isCompleted = existing?.status === LessonProgressStatus.COMPLETED || watchPercent >= VIDEO_COMPLETE_PERCENT;
     const status = isCompleted ? LessonProgressStatus.COMPLETED : LessonProgressStatus.IN_PROGRESS;
     const completedAt = isCompleted ? existing?.completedAt || new Date() : null;
+    const shouldPublishLessonCompleted = isCompleted && existing?.status !== LessonProgressStatus.COMPLETED;
 
     await LessonProgress.findOneAndUpdate(
       { userId: input.userId, courseId: context.courseId, lessonId: input.lessonId },
@@ -160,6 +205,7 @@ class ProgressService {
           lessonType: LessonProgressType.VIDEO,
           status,
           watchedSeconds,
+          watchedSegments,
           durationSeconds,
           watchPercent,
           lastPositionSeconds: Math.max(existing?.lastPositionSeconds || 0, position),
@@ -168,6 +214,21 @@ class ProgressService {
       },
       { upsert: true, new: true }
     );
+
+    if (durationSeconds > 0 && position >= durationSeconds - 1) {
+      await this.endLearningSession(input.sessionId);
+    }
+    if (shouldPublishLessonCompleted && completedAt) {
+      await publishLessonCompleted({
+        userId: input.userId,
+        courseId: context.courseId,
+        courseVersionId: context.courseVersionId,
+        lessonId: input.lessonId,
+        lessonType: LessonProgressType.VIDEO,
+        completedAt: completedAt.toISOString(),
+        watchPercent,
+      });
+    }
   }
 
   private async upsertQuizHeartbeat(input: HeartbeatInput, context: CourseProgressContext) {
@@ -212,6 +273,11 @@ class ProgressService {
     const progressPercent = totalLessons > 0 ? Math.min(100, Math.round((completedLessons / totalLessons) * 100)) : 0;
     const isCompleted = totalLessons > 0 && completedLessons >= totalLessons;
     const existing = await CourseProgress.findOne({ userId, courseId: context.courseId });
+    const completedAt = isCompleted ? existing?.completedAt || new Date() : null;
+    const shouldPublishCourseCompleted = isCompleted && !existing?.completedAt;
+    const nextLastPositionSeconds = existing?.lastLessonId === lastLessonId
+      ? Math.max(existing.lastPositionSeconds || 0, lastPositionSeconds)
+      : lastPositionSeconds;
 
     await CourseProgress.findOneAndUpdate(
       { userId, courseId: context.courseId },
@@ -224,14 +290,73 @@ class ProgressService {
           completedLessons,
           totalLessons,
           lastLessonId,
-          lastPositionSeconds,
-          completedAt: isCompleted ? existing?.completedAt || new Date() : null,
+          lastPositionSeconds: nextLastPositionSeconds,
+          completedAt,
         },
         $setOnInsert: {
           startedAt: new Date(),
         },
       },
       { upsert: true, new: true }
+    );
+
+    if (shouldPublishCourseCompleted && completedAt) {
+      await publishCourseCompleted({
+        userId,
+        courseId: context.courseId,
+        courseVersionId: context.courseVersionId,
+        completedLessons,
+        totalLessons,
+        completedAt: completedAt.toISOString(),
+      });
+    }
+  }
+
+  private async upsertLearningSession(
+    input: HeartbeatInput,
+    context: CourseProgressContext,
+    activeSeconds: number,
+    ended: boolean
+  ) {
+    const now = new Date();
+    await LearningSession.findOneAndUpdate(
+      { sessionId: input.sessionId },
+      {
+        $set: {
+          userId: input.userId,
+          courseId: context.courseId,
+          courseVersionId: context.courseVersionId,
+          lessonId: input.lessonId,
+          lessonType: input.lessonType,
+          lastHeartbeatAt: now,
+          deviceInfo: input.deviceInfo || '',
+          status: ended ? LearningSessionStatus.ENDED : LearningSessionStatus.ACTIVE,
+          endedAt: ended ? now : null,
+        },
+        $inc: {
+          heartbeatCount: 1,
+          activeSeconds,
+        },
+        $setOnInsert: {
+          sessionId: input.sessionId,
+          startedAt: now,
+        },
+      },
+      { upsert: true, new: true }
+    );
+  }
+
+  private async endLearningSession(sessionId: string) {
+    await LearningSession.findOneAndUpdate(
+      { sessionId, status: LearningSessionStatus.ACTIVE },
+      { $set: { status: LearningSessionStatus.ENDED, endedAt: new Date() } }
+    );
+  }
+
+  private async endActiveLearningSessions(userId: string, courseId: string, lessonId: string) {
+    await LearningSession.updateMany(
+      { userId, courseId, lessonId, status: LearningSessionStatus.ACTIVE },
+      { $set: { status: LearningSessionStatus.ENDED, endedAt: new Date() } }
     );
   }
 
@@ -302,6 +427,8 @@ class ProgressService {
       quizAttemptId: row.quizAttemptId || '',
       quizScore: row.quizScore || 0,
       quizPassed: Boolean(row.quizPassed),
+      watchedSegments: row.watchedSegments || [],
+      activeSeconds: row.watchedSeconds || 0,
       lastPositionSeconds: row.lastPositionSeconds || 0,
       completedAt: row.completedAt,
       updatedAt: row.updatedAt,
@@ -311,6 +438,55 @@ class ProgressService {
   private toNumber(value: unknown) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+  }
+
+  private normalizeActiveSeconds(value: unknown) {
+    const parsed = this.toNumber(value);
+    return parsed > 0 && parsed <= 20 ? parsed : 0;
+  }
+
+  private buildHeartbeatSegments(input: HeartbeatInput, position: number, durationSeconds: number): WatchedSegment[] {
+    const activeSeconds = this.normalizeActiveSeconds(input.watchedSecondsDelta);
+    if (input.lessonType !== LessonProgressType.VIDEO || activeSeconds <= 0 || input.tabVisible === false) return [];
+    const playbackRate = Number(input.playbackRate || 1);
+    if (!Number.isFinite(playbackRate) || playbackRate <= 0 || playbackRate > 2) return [];
+
+    const rawStart = input.segmentStartSeconds === undefined
+      ? position - activeSeconds
+      : this.toNumber(input.segmentStartSeconds);
+    const start = Math.max(0, Math.min(rawStart, position));
+    const maxEnd = durationSeconds > 0 ? durationSeconds : Number.MAX_SAFE_INTEGER;
+    const end = Math.min(maxEnd, Math.max(position, start));
+    return end > start ? [{ start, end }] : [];
+  }
+
+  private mergeSegments(segments: WatchedSegment[]) {
+    const sorted = segments
+      .map((segment) => ({
+        start: this.toNumber(segment.start),
+        end: this.toNumber(segment.end),
+      }))
+      .filter((segment) => segment.end > segment.start)
+      .sort((a, b) => a.start - b.start);
+
+    return sorted.reduce<WatchedSegment[]>((merged, segment) => {
+      const previous = merged[merged.length - 1];
+      if (!previous || segment.start > previous.end) {
+        merged.push(segment);
+        return merged;
+      }
+      previous.end = Math.max(previous.end, segment.end);
+      return merged;
+    }, []);
+  }
+
+  private sumSegments(segments: WatchedSegment[]) {
+    return segments.reduce((sum, segment) => sum + Math.max(0, segment.end - segment.start), 0);
+  }
+
+  private segmentsFromLegacyWatchedSeconds(watchedSeconds: number, durationSeconds: number): WatchedSegment[] {
+    const end = durationSeconds > 0 ? Math.min(watchedSeconds, durationSeconds) : watchedSeconds;
+    return end > 0 ? [{ start: 0, end }] : [];
   }
 }
 

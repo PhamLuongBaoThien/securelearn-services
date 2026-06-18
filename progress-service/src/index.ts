@@ -4,6 +4,7 @@ dotenv.config();
 import { connectDB } from './config/db';
 import app from './app';
 import redisClient from './config/redis';
+import { RabbitMQConnection } from '@securelearn/common';
 
 const PORT = process.env.PORT || 5005;
 
@@ -12,6 +13,12 @@ const bootServer = async () => {
     console.log('Đang khởi động Progress Service...');
 
     await connectDB();
+    const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
+    try {
+      await RabbitMQConnection.getInstance().connect(rabbitmqUrl, 1, 1000);
+    } catch (error) {
+      console.error('[ProgressEvent] RabbitMQ chưa sẵn sàng, progress write vẫn tiếp tục:', error);
+    }
 
     app.listen(PORT, () => {
       console.log(`Progress Service đang chạy tại http://localhost:${PORT}`);
@@ -26,6 +33,7 @@ const bootServer = async () => {
 const gracefulShutdown = async () => {
   console.log('\nĐang tắt Progress Service...');
   redisClient.disconnect();
+  await RabbitMQConnection.getInstance().close();
   process.exit(0);
 };
 

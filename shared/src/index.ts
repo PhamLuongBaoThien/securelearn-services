@@ -38,6 +38,8 @@ export {
   type PaymentCourseItemPayload,
   type PaymentCourseSucceededPayload,
   type PaymentCourseFailedPayload,
+  type ProgressLessonCompletedPayload,
+  type ProgressCourseCompletedPayload,
 } from './rabbitmq';
 
 // --- gRPC ---

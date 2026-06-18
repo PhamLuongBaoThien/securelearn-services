@@ -11,6 +11,11 @@ export enum LessonProgressType {
   QUIZ = 'QUIZ',
 }
 
+export interface WatchedSegment {
+  start: number;
+  end: number;
+}
+
 export interface ILessonProgress extends Document {
   userId: string;
   courseId: string;
@@ -19,6 +24,7 @@ export interface ILessonProgress extends Document {
   lessonType: LessonProgressType;
   status: LessonProgressStatus;
   watchedSeconds: number;
+  watchedSegments: WatchedSegment[];
   durationSeconds: number;
   watchPercent: number;
   quizAttemptId?: string;
@@ -44,6 +50,15 @@ const lessonProgressSchema = new Schema<ILessonProgress>(
       index: true,
     },
     watchedSeconds: { type: Number, default: 0, min: 0 },
+    watchedSegments: {
+      type: [
+        {
+          start: { type: Number, required: true, min: 0 },
+          end: { type: Number, required: true, min: 0 },
+        },
+      ],
+      default: [],
+    },
     durationSeconds: { type: Number, default: 0, min: 0 },
     watchPercent: { type: Number, default: 0, min: 0, max: 100 },
     quizAttemptId: { type: String, default: '' },

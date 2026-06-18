@@ -15,7 +15,11 @@ class ProgressController {
         sessionId: String(req.body.sessionId || ''),
         positionSeconds: req.body.positionSeconds,
         watchedSecondsDelta: req.body.watchedSecondsDelta,
+        segmentStartSeconds: req.body.segmentStartSeconds,
+        playbackRate: req.body.playbackRate,
+        tabVisible: req.body.tabVisible,
         quizAttemptId: req.body.quizAttemptId,
+        deviceInfo: req.header('user-agent') || '',
       });
 
       res.status(200).json({ status: 'OK', data });

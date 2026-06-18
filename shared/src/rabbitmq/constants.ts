@@ -14,6 +14,7 @@ export enum Exchange {
   COURSE = 'course.events',
   MEDIA = 'media.events',
   PAYMENT = 'payment.events',
+  PROGRESS = 'progress.events',
 }
 
 /**
@@ -48,6 +49,9 @@ export enum RoutingKey {
   VIDEO_ASSET_CLEANUP = 'media.video.cleanup',
   DOCUMENT_ASSET_CLEANUP = 'media.document.cleanup',
 
+  // --- Progress Events ---
+  PROGRESS_LESSON_COMPLETED = 'progress.lesson.completed',
+  PROGRESS_COURSE_COMPLETED = 'progress.course.completed',
 }
 // ==============================
 // Event Payloads — Interface cho dữ liệu gửi kèm mỗi event
@@ -168,4 +172,26 @@ export interface SubscriptionTermChangedPayload {
   startsAt: string;
   endsAt: string;
   transactionCode: string;
+}
+
+export interface ProgressLessonCompletedPayload {
+  userId: string;
+  courseId: string;
+  courseVersionId: string;
+  lessonId: string;
+  lessonType: 'VIDEO' | 'QUIZ';
+  completedAt: string;
+  watchPercent?: number;
+  quizAttemptId?: string;
+  quizScore?: number;
+  quizPassed?: boolean;
+}
+
+export interface ProgressCourseCompletedPayload {
+  userId: string;
+  courseId: string;
+  courseVersionId: string;
+  completedLessons: number;
+  totalLessons: number;
+  completedAt: string;
 }
