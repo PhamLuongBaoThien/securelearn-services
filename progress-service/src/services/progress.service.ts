@@ -1,4 +1,4 @@
-﻿import { CourseProgress } from '../models/courseProgress.model';
+import { CourseProgress } from '../models/courseProgress.model';
 import { CourseVersionPublishedPayload } from '@securelearn/common';
 import {
   LessonProgress,
@@ -124,12 +124,16 @@ class ProgressService {
     await this.assertLessonUnlocked(input.userId, context, input.lessonId);
     const activeSeconds = this.normalizeActiveSeconds(input.watchedSecondsDelta);
     await this.upsertLearningSession(input, context, activeSeconds, false);
-    await this.recordDailyActivity(input.userId, activeSeconds, 1, 0, 0);
 
+    let activitySeconds = 0;
     if (input.lessonType === LessonProgressType.QUIZ) {
-      await this.upsertQuizHeartbeat(input, context);
+      activitySeconds = await this.upsertQuizHeartbeat(input, context, activeSeconds);
     } else {
-      await this.upsertVideoHeartbeat(input, context, lesson.duration, activeSeconds);
+      activitySeconds = await this.upsertVideoHeartbeat(input, context, lesson.duration, activeSeconds);
+    }
+
+    if (activitySeconds > 0) {
+      await this.recordDailyActivity(input.userId, activitySeconds, 1, 0, 0);
     }
 
     await this.recalculateCourseProgress(input.userId, context, input.lessonId, this.toNumber(input.positionSeconds));
@@ -461,13 +465,12 @@ class ProgressService {
       lessons,
     };
   }
-
   private async upsertVideoHeartbeat(
     input: HeartbeatInput,
     context: CourseProgressContext,
     durationSeconds: number,
     activeSeconds: number
-  ) {
+  ): Promise<number> {
     const existing = await LessonProgress.findOne({
       userId: input.userId,
       courseId: context.courseId,
@@ -483,6 +486,7 @@ class ProgressService {
       ...this.buildHeartbeatSegments(input, position, durationSeconds),
     ]);
     const watchedSeconds = this.sumSegments(watchedSegments);
+    const progressDeltaSeconds = Math.max(0, watchedSeconds - (existing?.watchedSeconds || 0));
     const watchPercent = durationSeconds > 0 ? Math.min(100, Math.round((watchedSeconds / durationSeconds) * 100)) : 0;
     const isCompleted = existing?.status === LessonProgressStatus.COMPLETED || watchPercent >= VIDEO_COMPLETE_PERCENT;
     const status = isCompleted ? LessonProgressStatus.COMPLETED : LessonProgressStatus.IN_PROGRESS;
@@ -525,9 +529,15 @@ class ProgressService {
         watchPercent,
       });
     }
+
+    return Math.min(activeSeconds, progressDeltaSeconds);
   }
 
-  private async upsertQuizHeartbeat(input: HeartbeatInput, context: CourseProgressContext) {
+  private async upsertQuizHeartbeat(
+    input: HeartbeatInput,
+    context: CourseProgressContext,
+    activeSeconds: number
+  ): Promise<number> {
     const existing = await LessonProgress.findOne({
       userId: input.userId,
       courseId: context.courseId,
@@ -552,6 +562,8 @@ class ProgressService {
       },
       { upsert: true, new: true }
     );
+
+    return existing?.status === LessonProgressStatus.COMPLETED ? 0 : activeSeconds;
   }
 
   private async recalculateCourseProgress(
