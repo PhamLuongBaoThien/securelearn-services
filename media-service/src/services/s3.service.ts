@@ -171,7 +171,7 @@ class S3Service {
     return url;
   }
 
-  public async getDownloadPresignedUrl(objectKey: string, expiresIn: number = 300): Promise<string> {
+  public async getDownloadPresignedUrl(objectKey: string, expiresIn: number = 3600): Promise<string> {
     const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: objectKey });
     return getSignedUrl(presignClient, command, { expiresIn });
   }

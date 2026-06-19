@@ -15,7 +15,6 @@ const sanitizeVideoAsset = (asset: Awaited<ReturnType<typeof videoAssetService.g
 };
 
 class VideoAssetController {
-  // [POST] /api/media/videos/initiate-upload
   public async initiateUpload(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { courseId, lessonId, fileName, mimeType, sizeBytes } = req.body;
@@ -24,7 +23,7 @@ class VideoAssetController {
         return;
       }
       const data = await videoAssetService.initiateUpload({
-        ownerUserId: req.userId!, // ! cuối cùng để khẳng định userId đã được gán bởi middleware auth
+        ownerUserId: req.userId!,
         courseId,
         lessonId,
         fileName,
@@ -37,28 +36,23 @@ class VideoAssetController {
     }
   }
 
-  // [GET] /api/media/videos/:videoAssetId
   public async getAsset(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const asset = await videoAssetService.getAsset(videoAssetId);
-      // Không trả encryption key và multipart internals ở API metadata để tránh lộ thông tin nhạy cảm.
       res.status(200).json({ status: 'OK', data: sanitizeVideoAsset(asset) });
     } catch (error: any) {
       res.status(404).json({ status: 'ERR', message: error.message });
     }
   }
 
-  // [GET] /api/media/videos/:videoAssetId/key
   public async getEncryptionKey(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const asset = await videoAssetService.getAsset(videoAssetId);
       const session = typeof req.query.session === 'string' ? req.query.session : '';
-      // Đây là điểm cấp AES key cho player.
-      // Key chỉ được trả nếu request đi kèm key session hợp lệ hoặc user là owner hoặc admin.
       if (session) {
-        const validSession = await playbackAccessService.validateKeySession(session, req.userId!, videoAssetId);
+        const validSession = await playbackAccessService.validateKeySession(session, videoAssetId, req.userId);
         if (!validSession) {
           res.status(403).send('Invalid key session');
           return;
@@ -83,19 +77,62 @@ class VideoAssetController {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const asset = await videoAssetService.getAsset(videoAssetId);
-      // Không trả manifest hoặc key trực tiếp ở bước này.
-      // Backend chỉ cấp one-time playbackUrl để lần request tiếp theo mới được đổi sang manifest thật.
-      const token = await playbackAccessService.createOneTimePlayback({
+      const playbackInput = {
         userId: req.userId!,
         videoAssetId,
         courseId: String(asset.courseId),
-      });
+      };
+      const token = await playbackAccessService.createOneTimePlayback(playbackInput);
+      const mediaSessionToken = await playbackAccessService.createMediaSession(playbackInput);
       res.status(201).json({
         status: 'OK',
         data: {
           asset: sanitizeVideoAsset(asset),
           playbackUrl: `/api/media/videos/${videoAssetId}/playback?token=${encodeURIComponent(token)}`,
           expiresIn: 60,
+          mediaSessionToken,
+          mediaSessionExpiresIn: playbackAccessService.mediaSessionTtlSeconds,
+          segmentExpiresIn: videoAssetService.playbackSegmentUrlTtlSeconds,
+        },
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async renewPlaybackSession(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const videoAssetId = req.params.videoAssetId as string;
+      const mediaSessionToken =
+        req.header('x-media-session-token') ||
+        (typeof req.body?.mediaSessionToken === 'string' ? req.body.mediaSessionToken : '');
+      if (!mediaSessionToken) {
+        res.status(401).json({ status: 'ERR', message: 'Thiếu media session token.' });
+        return;
+      }
+
+      const mediaSession = await playbackAccessService.validateMediaSession(mediaSessionToken, videoAssetId);
+      if (!mediaSession) {
+        res.status(401).json({ status: 'ERR', message: 'Media session đã hết hạn hoặc không hợp lệ.' });
+        return;
+      }
+
+      const asset = await videoAssetService.getAsset(videoAssetId);
+      const token = await playbackAccessService.createOneTimePlayback({
+        userId: mediaSession.userId,
+        videoAssetId,
+        courseId: mediaSession.courseId,
+      });
+
+      res.status(201).json({
+        status: 'OK',
+        data: {
+          asset: sanitizeVideoAsset(asset),
+          playbackUrl: `/api/media/videos/${videoAssetId}/playback?token=${encodeURIComponent(token)}`,
+          expiresIn: 60,
+          mediaSessionToken,
+          mediaSessionExpiresIn: playbackAccessService.mediaSessionTtlSeconds,
+          segmentExpiresIn: videoAssetService.playbackSegmentUrlTtlSeconds,
         },
       });
     } catch (error: any) {
@@ -111,14 +148,13 @@ class VideoAssetController {
         res.status(400).json({ status: 'ERR', message: 'Thiếu playback token.' });
         return;
       }
-      // Playback token hợp lệ sẽ được đổi lấy manifest HLS đã rewrite key URI bằng key session mới.
       const playback = await playbackAccessService.consumeOneTimePlayback(token);
-      if (!playback || playback.userId !== req.userId || playback.videoAssetId !== videoAssetId) {
+      if (!playback || playback.videoAssetId !== videoAssetId) {
         res.status(410).json({ status: 'ERR', message: 'Playback URL đã hết hạn hoặc đã được sử dụng.' });
         return;
       }
       const keySession = await playbackAccessService.createKeySession({
-        userId: req.userId!,
+        userId: playback.userId,
         videoAssetId,
       });
       const keyUri = `/api/media/videos/${videoAssetId}/key?session=${encodeURIComponent(keySession)}`;
@@ -133,8 +169,6 @@ class VideoAssetController {
 
   public async getPlaybackManifest(req: AuthRequest, res: Response): Promise<void> {
     try {
-      // Route này chủ yếu phục vụ owner hoặc admin hoặc trường hợp nội bộ cần xem manifest trực tiếp.
-      // Learner thông thường nên đi qua playback-session rồi dùng one-time playback URL.
       const asset = await videoAssetService.getAsset(String(req.params.videoAssetId));
       if (asset.ownerUserId !== req.userId && req.userRole !== 'ADMIN') {
         res.status(403).json({ status: 'ERR', message: 'Vui lòng tạo playback session để xem video.' });
@@ -149,8 +183,6 @@ class VideoAssetController {
     }
   }
 
-  // [GET] /api/media/videos/:videoAssetId/batch-part-urls?totalParts=N
-  // Tạo toàn bộ presigned URLs cho 1 file trong 1 request duy nhất.
   public async getBatchPartUrls(req: AuthRequest, res: Response): Promise<void> {
     try {
       const totalParts = parseInt(req.query.totalParts as string, 10);
@@ -160,17 +192,13 @@ class VideoAssetController {
       }
 
       const videoAssetId = req.params.videoAssetId as string;
-      const urls = await videoAssetService.getBatchPartPresignedUrls(
-        videoAssetId,
-        totalParts,
-      );
+      const urls = await videoAssetService.getBatchPartPresignedUrls(videoAssetId, totalParts);
       res.status(200).json({ status: 'OK', data: { urls } });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }
   }
 
-  // [POST] /api/media/videos/:videoAssetId/confirm-upload
   public async confirmUpload(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -181,7 +209,7 @@ class VideoAssetController {
       }
       const hasInvalidPart = parts.some(
         (part) => !part?.ETag || !Number.isInteger(part.PartNumber) || part.PartNumber < 1,
-      ); // .some() để kiểm tra nếu có phần tử nào trong mảng không hợp lệ, tránh lỗi khi gọi service confirmUpload
+      );
       if (hasInvalidPart) {
         res.status(400).json({ status: 'ERR', message: 'Thông tin ETag/PartNumber không hợp lệ.' });
         return;
@@ -193,7 +221,6 @@ class VideoAssetController {
     }
   }
 
-  // [POST] /api/media/videos/:videoAssetId/abort-upload
   public async abortUpload(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;

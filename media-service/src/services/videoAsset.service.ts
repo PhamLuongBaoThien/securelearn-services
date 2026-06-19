@@ -17,6 +17,7 @@ const PROCESSING_TIMEOUT_MS = Number(process.env.MEDIA_PROCESSING_TIMEOUT_MS || 
 // #2 — Tăng lên 20 khi migrate lên Cloudflare R2
 const HLS_UPLOAD_CONCURRENCY = Number(process.env.HLS_UPLOAD_CONCURRENCY || 10);
 const PLAYBACK_MANIFEST_CACHE_TTL_SECONDS = Number(process.env.PLAYBACK_MANIFEST_CACHE_TTL_SECONDS || 240);
+const PLAYBACK_SEGMENT_URL_TTL_SECONDS = Number(process.env.PLAYBACK_SEGMENT_URL_TTL_SECONDS || 3600);
 const KEY_URI_PLACEHOLDER = '__SECURELEARN_KEY_URI__';
 
 // ===== GIỚI HẠN BẢO MẬT =====
@@ -59,6 +60,10 @@ const sanitizeFileName = (fileName: string): string => {
 };
 
 class VideoAssetService {
+  public get playbackSegmentUrlTtlSeconds(): number {
+    return PLAYBACK_SEGMENT_URL_TTL_SECONDS;
+  }
+
   /**
    * Bước 1: Khởi tạo asset record + tạo multipart upload session trên MinIO.
    * Trả về presigned info để FE upload thẳng lên storage, không qua backend.
@@ -233,7 +238,7 @@ class VideoAssetService {
             : `${line},URI="${KEY_URI_PLACEHOLDER}"`;
         }
         if (!value || value.startsWith('#') || /^https?:\/\//i.test(value)) return line;
-        return s3Service.getDownloadPresignedUrl(`${baseKey}${value}`, 300);
+        return s3Service.getDownloadPresignedUrl(`${baseKey}${value}`, PLAYBACK_SEGMENT_URL_TTL_SECONDS);
       })
     );
     const rewritten = lines.join('\n');

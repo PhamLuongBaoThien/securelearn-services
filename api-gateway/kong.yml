@@ -1,4 +1,4 @@
-# ========================
+﻿# ========================
 # Kong Declarative Configuration
 # API Gateway cho SecureLearn Microservices
 #
@@ -15,6 +15,7 @@
 #   GET /api/courses/:id/manage
 #   GET /api/courses/:courseId/lessons/:lessonId/quiz
 #   GET /api/courses/:courseId/lessons/:lessonId/quiz/play
+#   GET/POST /api/quiz-attempts...
 #   POST /api/courses/:id/enroll
 #   POST/PUT/PATCH/DELETE /api/courses/...
 #   GET /api/categories/admin/all
@@ -115,6 +116,7 @@ services:
       - name: course-preflight
         paths:
           - /api/courses
+          - /api/quiz-attempts
           - /api/categories
           - /api/admin/courses
         strip_path: false
@@ -126,6 +128,7 @@ services:
           - /api/courses/enrolled
           - /api/courses/my-courses
           - /api/categories/admin/all
+          - /api/quiz-attempts
           - ~/api/courses/[^/]+/manage$
           - ~/api/courses/[^/]+/lessons/[^/]+/quiz$
           - ~/api/courses/[^/]+/lessons/[^/]+/quiz/play$
@@ -145,6 +148,7 @@ services:
       - name: course-protected
         paths:
           - /api/courses
+          - /api/quiz-attempts
           - /api/categories
         strip_path: false
         methods:
@@ -275,6 +279,17 @@ services:
           - GET
           - POST
 
+
+      - name: media-playback-public
+        paths:
+          - ~/api/media/videos/[^/]+/playback-session/renew$
+          - ~/api/media/videos/[^/]+/playback$
+          - ~/api/media/videos/[^/]+/key$
+        regex_priority: 400
+        strip_path: false
+        methods:
+          - GET
+          - POST
       - name: media-protected
         paths:
           - /api/media/videos
@@ -432,3 +447,6 @@ plugins:
       key_claim_name: iss
       claims_to_verify:
         - exp
+
+
+

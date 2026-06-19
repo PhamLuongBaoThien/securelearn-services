@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+﻿import crypto from 'crypto';
 import redisClient from '../config/redis';
 
 type OneTimePlaybackValue = {
@@ -15,8 +15,16 @@ type KeySessionValue = {
   createdAt: string;
 };
 
+type MediaSessionValue = {
+  userId: string;
+  videoAssetId: string;
+  courseId: string;
+  createdAt: string;
+};
+
 const PLAYBACK_TTL_SECONDS = 60;
 const KEY_SESSION_TTL_SECONDS = 5 * 60;
+const MEDIA_SESSION_TTL_SECONDS = 30 * 60;
 
 const hashToken = (token: string): string =>
   crypto.createHash('sha256').update(token).digest('hex');
@@ -27,10 +35,16 @@ const playbackKey = (token: string): string =>
 const keySessionKey = (token: string): string =>
   `playback:key-session:${hashToken(token)}`;
 
+const mediaSessionKey = (token: string): string =>
+  `playback:media-session:${hashToken(token)}`;
+
 class PlaybackAccessService {
+  public get mediaSessionTtlSeconds(): number {
+    return MEDIA_SESSION_TTL_SECONDS;
+  }
+
   public async createOneTimePlayback(input: Omit<OneTimePlaybackValue, 'createdAt'>): Promise<string> {
     // Tạo token xem manifest dùng một lần.
-    // Token này sống ngắn trong Redis để ngăn việc share trực tiếp playbackUrl.
     const token = crypto.randomBytes(32).toString('base64url');
     const value: OneTimePlaybackValue = {
       ...input,
@@ -61,6 +75,35 @@ class PlaybackAccessService {
     return JSON.parse(raw) as OneTimePlaybackValue;
   }
 
+  public async createMediaSession(input: Omit<MediaSessionValue, 'createdAt'>): Promise<string> {
+    // Media session dùng để renew playback khi video đang phát, tránh phụ thuộc refresh-token.
+    const token = crypto.randomBytes(32).toString('base64url');
+    const value: MediaSessionValue = {
+      ...input,
+      createdAt: new Date().toISOString(),
+    };
+    const result = await redisClient.set(
+      mediaSessionKey(token),
+      JSON.stringify(value),
+      'EX',
+      MEDIA_SESSION_TTL_SECONDS,
+      'NX',
+    );
+    if (result !== 'OK') return this.createMediaSession(input);
+    return token;
+  }
+
+  public async validateMediaSession(token: string, videoAssetId: string): Promise<MediaSessionValue | null> {
+    const raw = await redisClient.get(mediaSessionKey(token));
+    if (!raw) return null;
+    try {
+      const value = JSON.parse(raw) as MediaSessionValue;
+      return value.videoAssetId === videoAssetId ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
   public async createKeySession(input: Omit<KeySessionValue, 'createdAt'>): Promise<string> {
     // Sau khi playback token hợp lệ được consume, hệ thống tạo key session riêng để player được phép gọi API lấy AES key.
     const token = crypto.randomBytes(32).toString('base64url');
@@ -72,13 +115,13 @@ class PlaybackAccessService {
     return token;
   }
 
-  public async validateKeySession(token: string, userId: string, videoAssetId: string): Promise<boolean> {
-    // Kiểm tra key session có đúng user và đúng video hiện tại hay không trước khi trả khóa giải mã.
+  public async validateKeySession(token: string, videoAssetId: string, userId?: string): Promise<boolean> {
+    // Kiểm tra key session có đúng video, và nếu có userId thì phải đúng user hiện tại.
     const raw = await redisClient.get(keySessionKey(token));
     if (!raw) return false;
     try {
       const value = JSON.parse(raw) as KeySessionValue;
-      return value.userId === userId && value.videoAssetId === videoAssetId;
+      return value.videoAssetId === videoAssetId && (!userId || value.userId === userId);
     } catch {
       return false;
     }
