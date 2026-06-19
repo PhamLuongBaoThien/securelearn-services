@@ -17,6 +17,7 @@ export enum LessonStatus {
 export interface ILesson extends Document {
   courseId: Types.ObjectId;
   sectionId: Types.ObjectId;
+  sourceLessonId?: Types.ObjectId | null;
   title: string;
   type: LessonType;
   status: LessonStatus;
@@ -34,6 +35,7 @@ const lessonSchema = new Schema<ILesson>(
   {
     courseId: { type: Schema.Types.ObjectId, ref: 'CourseVersion', required: true, index: true },
     sectionId: { type: Schema.Types.ObjectId, ref: 'Section', required: true, index: true },
+    sourceLessonId: { type: Schema.Types.ObjectId, default: null, index: true },
     title: { type: String, required: true, trim: true },
     type: { type: String, enum: Object.values(LessonType), default: LessonType.VIDEO },
     status: { type: String, enum: Object.values(LessonStatus), default: LessonStatus.DRAFT, index: true },

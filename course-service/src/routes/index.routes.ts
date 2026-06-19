@@ -1,4 +1,4 @@
-// File này là điểm mount route cấp app của course-service.
+﻿// File này là điểm mount route cấp app của course-service.
 // Ghi nhớ:
 // - /api/courses chứa cả course routes và quiz attempt routes
 // - /api/categories đi riêng vì vừa phục vụ admin vừa phục vụ course editor
@@ -16,6 +16,7 @@ const routes = (app: Application) => {
 
   // Route này xử lý quiz attempt cho student.
   // Đặt trước courseRoutes để không bị các nested route (route "lồng nhau") quản lý của instructor chặn nhầm.
+  app.use('/api/quiz-attempts', quizAttemptRoutes);
   app.use('/api/courses', quizAttemptRoutes);
 
   // Route này xử lý cả public course routes và authenticated course routes

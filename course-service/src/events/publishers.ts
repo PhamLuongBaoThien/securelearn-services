@@ -7,6 +7,7 @@ import {
   Exchange,
   RoutingKey,
   type CourseCreatedPayload,
+  type CourseVersionPublishedPayload,
   type EnrollmentCreatedPayload,
   type AssetCleanupPayload,
   type AssetAttachedPayload,
@@ -36,6 +37,16 @@ export const publishCoursePublished = async (payload: {
   publishedAt?: string;
 }): Promise<void> => {
   await publishMessage(Exchange.COURSE, RoutingKey.COURSE_PUBLISHED, payload);
+};
+
+export const publishCourseVersionPublished = async (
+  payload: CourseVersionPublishedPayload,
+): Promise<void> => {
+  await publishMessage<CourseVersionPublishedPayload>(
+    Exchange.COURSE,
+    RoutingKey.COURSE_VERSION_PUBLISHED,
+    payload,
+  );
 };
 
 /**

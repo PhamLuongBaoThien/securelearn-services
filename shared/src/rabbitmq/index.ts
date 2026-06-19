@@ -14,6 +14,8 @@ export {
   type UserUpdatedPayload,
   type UserDeletedPayload,
   type CourseCreatedPayload,
+  type CourseVersionPublishedLessonMapping,
+  type CourseVersionPublishedPayload,
   type EnrollmentCreatedPayload,
   type VideoAssetStatusPayload,
   type AssetCleanupPayload,

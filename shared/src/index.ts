@@ -28,6 +28,8 @@ export {
   type UserUpdatedPayload,
   type UserDeletedPayload,
   type CourseCreatedPayload,
+  type CourseVersionPublishedLessonMapping,
+  type CourseVersionPublishedPayload,
   type EnrollmentCreatedPayload,
   type VideoAssetStatusPayload,
   type AssetCleanupPayload,
@@ -40,6 +42,8 @@ export {
   type PaymentCourseFailedPayload,
   type ProgressLessonCompletedPayload,
   type ProgressCourseCompletedPayload,
+  type SubscriptionTermStatus,
+  type SubscriptionTermChangedPayload,
 } from './rabbitmq';
 
 // --- gRPC ---
