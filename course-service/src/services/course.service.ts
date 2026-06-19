@@ -8,6 +8,7 @@ import { Types } from "mongoose";
 import {
   CategoryResolutionStatus,
   Course,
+  CourseProgressionMode,
   ICourse,
   CourseStatus,
   SubscriptionCatalogStatus,
@@ -19,6 +20,7 @@ import { Section } from "../models/section.model";
 import {
   publishCourseCreated,
   publishCoursePublished,
+  publishCourseVersionPublished,
 } from "../events/publishers";
 import categoryService from "./category.service";
 import mediaReferenceService from "./mediaReference.service";
@@ -66,6 +68,7 @@ interface CourseResponse {
   suggestedCategoryName: string;
   suggestedCategoryNote: string;
   level: string;
+  progressionMode: CourseProgressionMode;
   status: string;
   submittedAt: Date | null;
   reviewedAt: Date | null;
@@ -135,6 +138,7 @@ type VersionLike = {
       }
     | null;
   level: string;
+  progressionMode?: CourseProgressionMode;
   status: string;
   submittedAt?: Date | null;
   reviewedAt?: Date | null;
@@ -171,6 +175,7 @@ type CourseShellLike = {
   subscriptionReviewedBy?: string;
   subscriptionReviewedByName?: string;
   subscriptionReviewedByEmail?: string;
+  progressionMode?: CourseProgressionMode;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -387,6 +392,7 @@ class CourseService {
     suggestedCategoryName?: string;
     suggestedCategoryNote?: string;
     level?: string;
+    progressionMode?: CourseProgressionMode;
     price?: number;
     instructorId: string;
     instructorName: string;
@@ -424,6 +430,7 @@ class CourseService {
       suggestedCategoryName: shell.suggestedCategoryName,
       suggestedCategoryNote: shell.suggestedCategoryNote,
       level: shell.level,
+      progressionMode: data.progressionMode || CourseProgressionMode.FREE,
       status: CourseStatus.DRAFT,
       price: shell.price,
     });
@@ -534,7 +541,8 @@ class CourseService {
         | "categoryResolutionStatus"
         | "suggestedCategoryName"
         | "suggestedCategoryNote"
-        | "level"
+      | "level"
+        | "progressionMode"
         | "price"
       >
     > & { categoryId?: string },
@@ -578,6 +586,7 @@ class CourseService {
     }
     if (data.level !== undefined) version.level = data.level as any;
     if (data.price !== undefined) version.price = data.price;
+    if (data.progressionMode !== undefined) version.progressionMode = data.progressionMode;
 
     await version.save();
     await this.syncShellDraftCache(shell._id.toString(), version);
@@ -731,6 +740,7 @@ class CourseService {
       suggestedCategoryName: current.suggestedCategoryName,
       suggestedCategoryNote: current.suggestedCategoryNote,
       level: current.level,
+      progressionMode: current.progressionMode || shell.progressionMode || CourseProgressionMode.FREE,
       status: CourseStatus.DRAFT,
       price: current.price,
     });
@@ -818,6 +828,7 @@ class CourseService {
 
     const shell = await Course.findById(version.courseId);
     if (!shell) throw new Error("Khóa học gốc không tồn tại.");
+    const previousVersionId = shell.currentVersionId?.toString() || "";
 
     const needsAdminClassification =
       version.categoryResolutionStatus ===
@@ -891,6 +902,26 @@ class CourseService {
     } catch (err) {
       // Không block publish nếu event broker gặp lỗi; log và tiếp tục.
       console.error("Failed to publish COURSE_PUBLISHED event", err);
+    }
+
+    if (previousVersionId && previousVersionId !== version._id.toString()) {
+      try {
+        await publishCourseVersionPublished({
+          courseId: shell._id.toString(),
+          oldVersionId: previousVersionId,
+          newVersionId: version._id.toString(),
+          totalLessons: version.totalLessons || 0,
+          publishedAt: version.reviewedAt
+            ? version.reviewedAt.toISOString()
+            : new Date().toISOString(),
+          lessonMappings: await this.buildVersionLessonMappings(
+            previousVersionId,
+            version._id.toString(),
+          ),
+        });
+      } catch (err) {
+        console.error("Failed to publish COURSE_VERSION_PUBLISHED event", err);
+      }
     }
 
     const approved = await CourseVersion.findById(version._id)
@@ -1302,6 +1333,7 @@ class CourseService {
       | "suggestedCategoryName"
       | "suggestedCategoryNote"
       | "level"
+      | "progressionMode"
       | "price"
       | "totalDuration"
       | "totalLessons"
@@ -1328,6 +1360,7 @@ class CourseService {
     shell.suggestedCategoryName = version.suggestedCategoryName || "";
     shell.suggestedCategoryNote = version.suggestedCategoryNote || "";
     shell.level = version.level;
+    shell.progressionMode = version.progressionMode || CourseProgressionMode.FREE;
     shell.price = version.price;
     shell.totalDuration = version.totalDuration;
     shell.totalLessons = version.totalLessons;
@@ -1419,6 +1452,7 @@ class CourseService {
       const createdLesson = await Lesson.create({
         courseId: targetVersionId,
         sectionId: targetSectionId,
+        sourceLessonId: lesson.sourceLessonId ?? lesson._id,
         title: lesson.title,
         type: lesson.type,
         status: lesson.status,
@@ -1447,6 +1481,76 @@ class CourseService {
         questions: quiz.questions,
       });
     }
+  }
+
+  private async buildVersionLessonMappings(
+    oldVersionId: string,
+    newVersionId: string,
+  ) {
+    const newVersion = await CourseVersion.findById(newVersionId).select("courseId").lean();
+    if (!newVersion) return [];
+    const historicalVersions = await CourseVersion.find({
+      courseId: newVersion.courseId,
+      _id: { $ne: newVersion._id },
+    }).select("_id").lean();
+    const historicalVersionIds = historicalVersions.map((version) => version._id);
+    const [oldSections, newSections, oldLessons, newLessons, historicalLessons] = await Promise.all([
+      Section.find({ courseId: oldVersionId }).select("_id order").lean(),
+      Section.find({ courseId: newVersionId }).select("_id order").lean(),
+      Lesson.find({ courseId: oldVersionId }).select("_id sectionId sourceLessonId type order").lean(),
+      Lesson.find({ courseId: newVersionId }).select("_id sectionId sourceLessonId type order").lean(),
+      historicalVersionIds.length
+        ? Lesson.find({ courseId: { $in: historicalVersionIds } }).select("_id sourceLessonId type").lean()
+        : Promise.resolve([]),
+    ]);
+    const oldSectionOrderById = new Map(oldSections.map((section) => [section._id.toString(), section.order]));
+    const newSectionOrderById = new Map(newSections.map((section) => [section._id.toString(), section.order]));
+    const oldByIdentity = new Map<string, typeof oldLessons[number]>();
+    const oldByPosition = new Map<string, typeof oldLessons[number]>();
+
+    for (const lesson of oldLessons) {
+      const identity = (lesson.sourceLessonId || lesson._id).toString();
+      oldByIdentity.set(identity, lesson);
+      oldByPosition.set(
+        `${oldSectionOrderById.get(lesson.sectionId.toString()) || 0}:${lesson.order}:${lesson.type}`,
+        lesson,
+      );
+    }
+
+    const mappings = new Map<string, {
+      oldLessonId: string;
+      newLessonId: string;
+      lessonType: LessonType;
+    }>();
+
+    for (const lesson of newLessons) {
+      const identity = lesson.sourceLessonId?.toString();
+      const matched = identity
+        ? oldByIdentity.get(identity)
+        : oldByPosition.get(
+            `${newSectionOrderById.get(lesson.sectionId.toString()) || 0}:${lesson.order}:${lesson.type}`,
+          );
+      if (matched) {
+        mappings.set(`${matched._id.toString()}:${lesson._id.toString()}`, {
+          oldLessonId: matched._id.toString(),
+          newLessonId: lesson._id.toString(),
+          lessonType: lesson.type,
+        });
+      }
+
+      const targetIdentity = (lesson.sourceLessonId || lesson._id).toString();
+      for (const historicalLesson of historicalLessons) {
+        const historicalIdentity = (historicalLesson.sourceLessonId || historicalLesson._id).toString();
+        if (historicalIdentity !== targetIdentity || historicalLesson.type !== lesson.type) continue;
+        mappings.set(`${historicalLesson._id.toString()}:${lesson._id.toString()}`, {
+          oldLessonId: historicalLesson._id.toString(),
+          newLessonId: lesson._id.toString(),
+          lessonType: lesson.type,
+        });
+      }
+    }
+
+    return Array.from(mappings.values()).filter((mapping) => mapping.oldLessonId !== mapping.newLessonId);
   }
 
   private async loadCourseSections(
@@ -1570,6 +1674,7 @@ class CourseService {
       suggestedCategoryName: version.suggestedCategoryName || "",
       suggestedCategoryNote: version.suggestedCategoryNote || "",
       level: version.level,
+      progressionMode: version.progressionMode || CourseProgressionMode.FREE,
       status: version.status,
       submittedAt: version.submittedAt || null,
       reviewedAt: version.reviewedAt || null,

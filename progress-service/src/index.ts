@@ -5,6 +5,7 @@ import { connectDB } from './config/db';
 import app from './app';
 import redisClient from './config/redis';
 import { RabbitMQConnection } from '@securelearn/common';
+import { registerEventHandlers } from './events/handlers';
 
 const PORT = process.env.PORT || 5005;
 
@@ -16,6 +17,7 @@ const bootServer = async () => {
     const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
     try {
       await RabbitMQConnection.getInstance().connect(rabbitmqUrl, 1, 1000);
+      await registerEventHandlers();
     } catch (error) {
       console.error('[ProgressEvent] RabbitMQ chưa sẵn sàng, progress write vẫn tiếp tục:', error);
     }

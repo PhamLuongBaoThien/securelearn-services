@@ -55,6 +55,9 @@ message CourseProgressLesson {
   int32 duration = 4;
   int32 order = 5;
   string sectionId = 6;
+  int32 sectionOrder = 7;
+  bool required = 8;
+  repeated string equivalentLessonIds = 9;
 }
 
 message CourseProgressContextReply {
@@ -64,6 +67,8 @@ message CourseProgressContextReply {
   string courseVersionId = 4;
   int32 totalLessons = 5;
   repeated CourseProgressLesson lessons = 6;
+  string progressionMode = 7;
+  string instructorId = 8;
 }
 
 message SubscriptionUsageRequest {

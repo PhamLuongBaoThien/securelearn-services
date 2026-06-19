@@ -1,6 +1,8 @@
 import { GrpcStatus, createCourseGrpcServer, createGrpcError } from '@securelearn/common';
-import { Course, CourseStatus } from '../models/course.model';
+import { Course, CourseProgressionMode, CourseStatus } from '../models/course.model';
+import { CourseVersion } from '../models/courseVersion.model';
 import { Lesson } from '../models/lesson.model';
+import { Section } from '../models/section.model';
 import subscriptionAccessService from '../services/subscriptionAccess.service';
 
 export const createInternalGrpcServer = () =>
@@ -37,25 +39,79 @@ export const createInternalGrpcServer = () =>
         ? { allowed: false, reason: 'OWNER_PREVIEW' }
         : await subscriptionAccessService.entitlement(userId, course._id.toString());
 
-      const lessons = await Lesson.find({ courseId: course.currentVersionId })
-        .sort({ order: 1, createdAt: 1 })
-        .select('_id title type duration order sectionId')
-        .lean();
+      const currentVersionId = course.currentVersionId.toString();
+      const versionRows = await CourseVersion.find({ courseId: course._id }).select('_id').lean();
+      const versionIds = versionRows.map((version) => version._id);
+      const allVersionIds = versionIds.some((versionId) => versionId.toString() === currentVersionId)
+        ? versionIds
+        : [...versionIds, course.currentVersionId];
+      const [lessons, sections, allLessons, allSections] = await Promise.all([
+        Lesson.find({ courseId: course.currentVersionId })
+          .sort({ order: 1, createdAt: 1 })
+          .select('_id title type duration order sectionId sourceLessonId')
+          .lean(),
+        Section.find({ courseId: course.currentVersionId })
+          .select('_id order')
+          .lean(),
+        Lesson.find({ courseId: { $in: allVersionIds } })
+          .select('_id courseId sectionId sourceLessonId type order')
+          .lean(),
+        Section.find({ courseId: { $in: allVersionIds } })
+          .select('_id courseId order')
+          .lean(),
+      ]);
+      const sectionOrderById = new Map(sections.map((section) => [section._id.toString(), section.order || 0]));
+      const allSectionOrderById = new Map(allSections.map((section) => [section._id.toString(), section.order || 0]));
+      const equivalentIdsByIdentity = new Map<string, Set<string>>();
+      const equivalentIdsByPosition = new Map<string, Set<string>>();
+
+      for (const lesson of allLessons) {
+        const lessonId = lesson._id.toString();
+        const identityKey = `${lesson.type}:${(lesson.sourceLessonId || lesson._id).toString()}`;
+        if (!equivalentIdsByIdentity.has(identityKey)) equivalentIdsByIdentity.set(identityKey, new Set());
+        equivalentIdsByIdentity.get(identityKey)!.add(lessonId);
+
+        const positionKey = [
+          lesson.type,
+          allSectionOrderById.get(lesson.sectionId.toString()) || 0,
+          lesson.order,
+        ].join(':');
+        if (!equivalentIdsByPosition.has(positionKey)) equivalentIdsByPosition.set(positionKey, new Set());
+        equivalentIdsByPosition.get(positionKey)!.add(lessonId);
+      }
 
       return {
         allowed: Boolean(access.allowed),
         reason: access.allowed ? undefined : access.reason || 'NOT_ENTITLED',
         courseId: course._id.toString(),
-        courseVersionId: course.currentVersionId.toString(),
+        courseVersionId: currentVersionId,
         totalLessons: lessons.length,
-        lessons: lessons.map((lesson) => ({
-          lessonId: lesson._id.toString(),
-          title: lesson.title,
-          type: lesson.type,
-          duration: lesson.duration || 0,
-          order: lesson.order,
-          sectionId: lesson.sectionId.toString(),
-        })),
+        progressionMode: course.progressionMode || CourseProgressionMode.FREE,
+        instructorId: String(course.instructorId || ''),
+        lessons: lessons.map((lesson) => {
+          const lessonId = lesson._id.toString();
+          const sectionOrder = sectionOrderById.get(lesson.sectionId.toString()) || 0;
+          const identityKey = `${lesson.type}:${(lesson.sourceLessonId || lesson._id).toString()}`;
+          const positionKey = [lesson.type, sectionOrder, lesson.order].join(':');
+          const equivalentLessonIds = new Set<string>(equivalentIdsByIdentity.get(identityKey) || []);
+          if (!lesson.sourceLessonId) {
+            for (const equivalentId of equivalentIdsByPosition.get(positionKey) || []) {
+              equivalentLessonIds.add(equivalentId);
+            }
+          }
+
+          return {
+            lessonId,
+            title: lesson.title,
+            type: lesson.type,
+            duration: lesson.duration || 0,
+            order: lesson.order,
+            sectionId: lesson.sectionId.toString(),
+            sectionOrder,
+            required: true,
+            equivalentLessonIds: Array.from(equivalentLessonIds).filter((id) => id !== lessonId),
+          };
+        }),
       };
     },
   });

@@ -1,4 +1,5 @@
-import { CourseProgress } from '../models/courseProgress.model';
+﻿import { CourseProgress } from '../models/courseProgress.model';
+import { CourseVersionPublishedPayload } from '@securelearn/common';
 import {
   LessonProgress,
   LessonProgressStatus,
@@ -6,8 +7,9 @@ import {
   WatchedSegment,
 } from '../models/lessonProgress.model';
 import { LearningSession, LearningSessionStatus } from '../models/learningSession.model';
+import { LearnerActivityDaily } from '../models/learnerActivityDaily.model';
 import { publishCourseCompleted, publishLessonCompleted } from '../events/publishers';
-import courseContextService, { CourseProgressContext } from './courseContext.service';
+import courseContextService, { CourseLessonContext, CourseProgressContext, ProgressionMode } from './courseContext.service';
 
 const VIDEO_COMPLETE_PERCENT = 90;
 
@@ -40,6 +42,48 @@ type QuizCompleteInput = {
 type CourseProgressResponse = {
   course: CourseProgressSummary;
   lessons: Record<string, LessonProgressSummary>;
+};
+
+export type LessonAccessSummary = {
+  lessonId: string;
+  locked: boolean;
+  reason?: string;
+  requiredLessonIds?: string[];
+};
+
+export type CourseAccessResponse = {
+  courseId: string;
+  progressionMode: ProgressionMode;
+  lessons: Record<string, LessonAccessSummary>;
+};
+
+export type LearnerActivityResponse = {
+  totalActiveSeconds: number;
+  activeDays: number;
+  currentStreakDays: number;
+  days: Array<{
+    date: string;
+    activeSeconds: number;
+    completedLessons: number;
+    completedCourses: number;
+  }>;
+};
+
+export type CourseAnalyticsResponse = {
+  courseId: string;
+  totalLearners: number;
+  completedLearners: number;
+  completionRate: number;
+  lessons: Array<{
+    lessonId: string;
+    lessonType: LessonProgressType;
+    startedCount: number;
+    completedCount: number;
+    completionRate: number;
+    averageWatchPercent?: number;
+    quizPassRate?: number;
+    averageQuizScore?: number;
+  }>;
 };
 
 export type CourseProgressSummary = {
@@ -75,9 +119,12 @@ class ProgressService {
   public async heartbeat(input: HeartbeatInput): Promise<CourseProgressResponse> {
     this.assertHeartbeatPayload(input);
     const context = await this.loadAllowedContext(input.userId, input.userRole, input.courseId);
+    await this.ensureCurrentVersionLessonProgress(input.userId, context);
     const lesson = this.resolveLesson(context, input.lessonId, input.lessonType);
+    await this.assertLessonUnlocked(input.userId, context, input.lessonId);
     const activeSeconds = this.normalizeActiveSeconds(input.watchedSecondsDelta);
     await this.upsertLearningSession(input, context, activeSeconds, false);
+    await this.recordDailyActivity(input.userId, activeSeconds, 1, 0, 0);
 
     if (input.lessonType === LessonProgressType.QUIZ) {
       await this.upsertQuizHeartbeat(input, context);
@@ -92,7 +139,9 @@ class ProgressService {
   public async quizComplete(input: QuizCompleteInput): Promise<CourseProgressResponse> {
     this.assertQuizCompletePayload(input);
     const context = await this.loadAllowedContext(input.userId, input.userRole, input.courseId);
+    await this.ensureCurrentVersionLessonProgress(input.userId, context);
     this.resolveLesson(context, input.lessonId, LessonProgressType.QUIZ);
+    await this.assertLessonUnlocked(input.userId, context, input.lessonId);
 
     const now = new Date();
     const score = Math.max(0, Math.min(100, Math.round(Number(input.score))));
@@ -101,18 +150,21 @@ class ProgressService {
       courseId: context.courseId,
       lessonId: input.lessonId,
     });
-    const completedAt = input.passed ? existing?.completedAt || now : null;
-    const shouldPublishLessonCompleted = Boolean(input.passed) && existing?.status !== LessonProgressStatus.COMPLETED;
+    const wasCompleted = existing?.status === LessonProgressStatus.COMPLETED;
+    const isCompleted = wasCompleted || Boolean(input.passed);
+    const completedAt = isCompleted ? existing?.completedAt || now : null;
+    const shouldPublishLessonCompleted = Boolean(input.passed) && !wasCompleted;
+    const shouldUpdateCompletionMetadata = Boolean(input.passed) || !wasCompleted;
     const update = {
       userId: input.userId,
       courseId: context.courseId,
       courseVersionId: context.courseVersionId,
       lessonId: input.lessonId,
       lessonType: LessonProgressType.QUIZ,
-      quizAttemptId: input.attemptId,
-      quizScore: score,
-      quizPassed: Boolean(input.passed),
-      status: input.passed ? LessonProgressStatus.COMPLETED : LessonProgressStatus.IN_PROGRESS,
+      quizAttemptId: shouldUpdateCompletionMetadata ? input.attemptId : existing?.quizAttemptId || '',
+      quizScore: input.passed ? Math.max(existing?.quizScore || 0, score) : wasCompleted ? existing?.quizScore || 0 : score,
+      quizPassed: Boolean(existing?.quizPassed || input.passed),
+      status: isCompleted ? LessonProgressStatus.COMPLETED : LessonProgressStatus.IN_PROGRESS,
       completedAt,
     };
 
@@ -124,6 +176,7 @@ class ProgressService {
 
     await this.endActiveLearningSessions(input.userId, context.courseId, input.lessonId);
     if (shouldPublishLessonCompleted && completedAt) {
+      await this.recordDailyActivity(input.userId, 0, 0, 1, 0);
       await publishLessonCompleted({
         userId: input.userId,
         courseId: context.courseId,
@@ -143,12 +196,16 @@ class ProgressService {
 
   public async getCourseProgress(userId: string, userRole: string, courseId: string): Promise<CourseProgressResponse> {
     const context = await this.loadAllowedContext(userId, userRole, courseId);
-    let courseProgress = await CourseProgress.findOne({ userId, courseId: context.courseId }).lean();
+    await this.ensureCurrentVersionLessonProgress(userId, context);
+    const lessonRows = await LessonProgress.find({
+      userId,
+      courseId: context.courseId,
+      courseVersionId: context.courseVersionId,
+    }).lean();
+    let courseProgress = await this.syncCourseProgressSnapshot(userId, context, lessonRows);
     if (!courseProgress) {
       courseProgress = this.emptyCourseProgress(userId, context) as any;
     }
-
-    const lessonRows = await LessonProgress.find({ userId, courseId: context.courseId }).lean();
     const lessons = lessonRows.reduce<Record<string, LessonProgressSummary>>((map, row) => {
       map[row.lessonId] = this.mapLesson(row);
       return map;
@@ -160,11 +217,249 @@ class ProgressService {
     };
   }
 
-  public async getMyCoursesProgress(userId: string, courseIds: string[]): Promise<CourseProgressSummary[]> {
+  public async getMyCoursesProgress(userId: string, userRole: string, courseIds: string[]): Promise<CourseProgressSummary[]> {
+    if (courseIds.length > 0) {
+      const rows = await Promise.all(courseIds.map(async (courseId) => {
+        try {
+          const context = await this.loadAllowedContext(userId, userRole, courseId);
+          await this.ensureCurrentVersionLessonProgress(userId, context);
+          const lessonRows = await LessonProgress.find({
+            userId,
+            courseId: context.courseId,
+            courseVersionId: context.courseVersionId,
+          }).lean();
+          const synced = await this.syncCourseProgressSnapshot(userId, context, lessonRows);
+          return synced ? this.mapCourse(synced) : this.emptyCourseProgress(userId, context);
+        } catch {
+          return null;
+        }
+      }));
+      return rows.filter((row): row is CourseProgressSummary => Boolean(row));
+    }
+
     const query: Record<string, unknown> = { userId };
-    if (courseIds.length > 0) query.courseId = { $in: courseIds };
     const rows = await CourseProgress.find(query).lean();
     return rows.map((row) => this.mapCourse(row));
+  }
+
+  public async migrateCourseVersionProgress(payload: CourseVersionPublishedPayload): Promise<void> {
+    if (!payload.courseId || !payload.oldVersionId || !payload.newVersionId || !payload.lessonMappings?.length) {
+      return;
+    }
+
+    const lessonIdMap = new Map(payload.lessonMappings.map((item) => [item.oldLessonId, item.newLessonId]));
+    const newLessonIds = payload.lessonMappings.map((item) => item.newLessonId);
+    const oldLessonRows = await LessonProgress.find({
+      courseId: payload.courseId,
+      lessonId: { $in: [...lessonIdMap.keys()] },
+    }).lean();
+    const affectedUserIds = new Set<string>();
+
+    for (const oldRow of oldLessonRows) {
+      const newLessonId = lessonIdMap.get(oldRow.lessonId);
+      if (!newLessonId) continue;
+      affectedUserIds.add(oldRow.userId);
+
+      const existing = await LessonProgress.findOne({
+        userId: oldRow.userId,
+        courseId: payload.courseId,
+        lessonId: newLessonId,
+      });
+      const nextStatus = existing?.status === LessonProgressStatus.COMPLETED || oldRow.status === LessonProgressStatus.COMPLETED
+        ? LessonProgressStatus.COMPLETED
+        : existing?.status || oldRow.status;
+      const nextCompletedAt = existing?.completedAt || oldRow.completedAt || null;
+
+      await LessonProgress.findOneAndUpdate(
+        { userId: oldRow.userId, courseId: payload.courseId, lessonId: newLessonId },
+        {
+          $set: {
+            userId: oldRow.userId,
+            courseId: payload.courseId,
+            courseVersionId: payload.newVersionId,
+            lessonId: newLessonId,
+            lessonType: oldRow.lessonType,
+            status: nextStatus,
+            watchedSegments: existing?.watchedSegments?.length ? existing.watchedSegments : oldRow.watchedSegments || [],
+            quizAttemptId: existing?.quizAttemptId || oldRow.quizAttemptId || '',
+            quizPassed: Boolean(existing?.quizPassed || oldRow.quizPassed),
+            completedAt: nextCompletedAt,
+          },
+          $max: {
+            watchedSeconds: oldRow.watchedSeconds || 0,
+            durationSeconds: oldRow.durationSeconds || 0,
+            watchPercent: oldRow.watchPercent || 0,
+            quizScore: oldRow.quizScore || 0,
+            lastPositionSeconds: oldRow.lastPositionSeconds || 0,
+          },
+        },
+        { upsert: true, new: true }
+      );
+    }
+
+    const courseProgressRows = await CourseProgress.find({
+      courseId: payload.courseId,
+      courseVersionId: payload.oldVersionId,
+    }).lean();
+    courseProgressRows.forEach((row) => affectedUserIds.add(row.userId));
+
+    for (const userId of affectedUserIds) {
+      const existingCourseProgress = await CourseProgress.findOne({ userId, courseId: payload.courseId });
+      const completedLessons = await LessonProgress.countDocuments({
+        userId,
+        courseId: payload.courseId,
+        courseVersionId: payload.newVersionId,
+        lessonId: { $in: newLessonIds },
+        status: LessonProgressStatus.COMPLETED,
+      });
+      const totalLessons = payload.totalLessons || existingCourseProgress?.totalLessons || newLessonIds.length;
+      const progressPercent = totalLessons > 0 ? Math.min(100, Math.round((completedLessons / totalLessons) * 100)) : 0;
+      const mappedLastLessonId = existingCourseProgress?.lastLessonId
+        ? lessonIdMap.get(existingCourseProgress.lastLessonId) || existingCourseProgress.lastLessonId
+        : '';
+      const completedAt = totalLessons > 0 && completedLessons >= totalLessons
+        ? existingCourseProgress?.completedAt || new Date(payload.publishedAt || Date.now())
+        : null;
+
+      await CourseProgress.findOneAndUpdate(
+        { userId, courseId: payload.courseId },
+        {
+          $set: {
+            courseVersionId: payload.newVersionId,
+            completedLessons,
+            totalLessons,
+            progressPercent,
+            lastLessonId: mappedLastLessonId,
+            completedAt,
+          },
+          $setOnInsert: {
+            startedAt: new Date(payload.publishedAt || Date.now()),
+          },
+        },
+        { upsert: true, new: true }
+      );
+    }
+  }
+
+  public async getCourseAccess(userId: string, userRole: string, courseId: string): Promise<CourseAccessResponse> {
+    const context = await this.loadReadableContext(userId, userRole, courseId);
+    if (context.reason === 'OWNER_PREVIEW') {
+      return {
+        courseId: context.courseId,
+        progressionMode: context.progressionMode,
+        lessons: context.lessons.reduce<Record<string, LessonAccessSummary>>((map, lesson) => {
+          map[lesson.lessonId] = { lessonId: lesson.lessonId, locked: false };
+          return map;
+        }, {}),
+      };
+    }
+
+    await this.ensureCurrentVersionLessonProgress(userId, context);
+    const completedRows = await LessonProgress.find({
+      userId,
+      courseId: context.courseId,
+      courseVersionId: context.courseVersionId,
+      status: LessonProgressStatus.COMPLETED,
+    })
+      .select('lessonId')
+      .lean();
+    const completedLessonIds = new Set(completedRows.map((row) => row.lessonId));
+    const sortedLessons = this.sortLessons(context.lessons);
+    const lessons = sortedLessons.reduce<Record<string, LessonAccessSummary>>((map, lesson, index) => {
+      map[lesson.lessonId] = this.resolveLessonAccess(
+        lesson,
+        index,
+        sortedLessons,
+        completedLessonIds,
+        context.progressionMode
+      );
+      return map;
+    }, {});
+
+    return {
+      courseId: context.courseId,
+      progressionMode: context.progressionMode,
+      lessons,
+    };
+  }
+
+  public async getLearnerActivity(userId: string, from?: string, to?: string): Promise<LearnerActivityResponse> {
+    const query: Record<string, unknown> = { userId };
+    if (from || to) {
+      query.date = {};
+      if (from) (query.date as Record<string, string>).$gte = from;
+      if (to) (query.date as Record<string, string>).$lte = to;
+    }
+
+    const rows = await LearnerActivityDaily.find(query).sort({ date: 1 }).lean();
+    const days = rows.map((row) => ({
+      date: row.date,
+      activeSeconds: row.activeSeconds || 0,
+      completedLessons: row.completedLessons || 0,
+      completedCourses: row.completedCourses || 0,
+    }));
+    const totalActiveSeconds = days.reduce((sum, day) => sum + day.activeSeconds, 0);
+    const activeDaySet = new Set(days.filter((day) => day.activeSeconds > 0).map((day) => day.date));
+
+    return {
+      totalActiveSeconds,
+      activeDays: activeDaySet.size,
+      currentStreakDays: this.calculateCurrentStreak(activeDaySet),
+      days,
+    };
+  }
+
+  public async getInstructorCourseAnalytics(
+    userId: string,
+    userRole: string,
+    courseId: string
+  ): Promise<CourseAnalyticsResponse> {
+    const context = await this.loadReadableContext(userId, userRole, courseId);
+    if (userRole !== 'INSTRUCTOR' || context.instructorId !== userId) {
+      throw new Error('Chỉ giảng viên sở hữu khóa học mới được xem analytics.');
+    }
+
+    const [courseRows, lessonRows] = await Promise.all([
+      CourseProgress.find({ courseId: context.courseId }).lean(),
+      LessonProgress.find({ courseId: context.courseId, courseVersionId: context.courseVersionId }).lean(),
+    ]);
+    const learnerIds = new Set<string>();
+    courseRows.forEach((row) => learnerIds.add(row.userId));
+    lessonRows.forEach((row) => learnerIds.add(row.userId));
+    const totalLearners = learnerIds.size;
+    const completedLearners = courseRows.filter((row) => Boolean(row.completedAt)).length;
+
+    const lessons = this.sortLessons(context.lessons).map((lesson) => {
+      const rows = lessonRows.filter((row) => row.lessonId === lesson.lessonId);
+      const startedLearners = new Set(rows.map((row) => row.userId));
+      const completedCount = rows.filter((row) => row.status === LessonProgressStatus.COMPLETED).length;
+      const summary: CourseAnalyticsResponse['lessons'][number] = {
+        lessonId: lesson.lessonId,
+        lessonType: lesson.type as LessonProgressType,
+        startedCount: startedLearners.size,
+        completedCount,
+        completionRate: this.percent(completedCount, startedLearners.size),
+      };
+
+      if (lesson.type === LessonProgressType.VIDEO) {
+        summary.averageWatchPercent = this.average(rows.map((row) => row.watchPercent || 0));
+      }
+      if (lesson.type === LessonProgressType.QUIZ) {
+        const quizRows = rows.filter((row) => row.quizAttemptId || row.quizScore !== undefined);
+        summary.quizPassRate = this.percent(quizRows.filter((row) => row.quizPassed).length, quizRows.length);
+        summary.averageQuizScore = this.average(quizRows.map((row) => row.quizScore || 0));
+      }
+
+      return summary;
+    });
+
+    return {
+      courseId: context.courseId,
+      totalLearners,
+      completedLearners,
+      completionRate: this.percent(completedLearners, totalLearners),
+      lessons,
+    };
   }
 
   private async upsertVideoHeartbeat(
@@ -219,6 +514,7 @@ class ProgressService {
       await this.endLearningSession(input.sessionId);
     }
     if (shouldPublishLessonCompleted && completedAt) {
+      await this.recordDailyActivity(input.userId, 0, 0, 1, 0);
       await publishLessonCompleted({
         userId: input.userId,
         courseId: context.courseId,
@@ -267,6 +563,7 @@ class ProgressService {
     const completedLessons = await LessonProgress.countDocuments({
       userId,
       courseId: context.courseId,
+      courseVersionId: context.courseVersionId,
       status: LessonProgressStatus.COMPLETED,
     });
     const totalLessons = context.totalLessons;
@@ -301,6 +598,7 @@ class ProgressService {
     );
 
     if (shouldPublishCourseCompleted && completedAt) {
+      await this.recordDailyActivity(userId, 0, 0, 0, 1);
       await publishCourseCompleted({
         userId,
         courseId: context.courseId,
@@ -309,6 +607,123 @@ class ProgressService {
         totalLessons,
         completedAt: completedAt.toISOString(),
       });
+    }
+  }
+
+  private async syncCourseProgressSnapshot(
+    userId: string,
+    context: CourseProgressContext,
+    lessonRows: Array<any>
+  ) {
+    const existing = await CourseProgress.findOne({ userId, courseId: context.courseId });
+    const completedLessons = lessonRows.filter((row) => row.status === LessonProgressStatus.COMPLETED).length;
+    const totalLessons = context.totalLessons;
+    const progressPercent = totalLessons > 0 ? Math.min(100, Math.round((completedLessons / totalLessons) * 100)) : 0;
+    const completedAt = totalLessons > 0 && completedLessons >= totalLessons
+      ? existing?.completedAt || new Date()
+      : null;
+    const currentLessonIds = new Set(lessonRows.map((row) => row.lessonId));
+    const latestLessonRow = [...lessonRows].sort((a, b) => {
+      const left = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const right = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return right - left;
+    })[0];
+    const lastLessonId = existing?.lastLessonId && currentLessonIds.has(existing.lastLessonId)
+      ? existing.lastLessonId
+      : latestLessonRow?.lessonId || '';
+    const lastPositionSeconds = latestLessonRow?.lessonId === lastLessonId
+      ? latestLessonRow.lastPositionSeconds || 0
+      : existing?.lastPositionSeconds || 0;
+
+    if (
+      existing &&
+      existing.courseVersionId === context.courseVersionId &&
+      existing.completedLessons === completedLessons &&
+      existing.totalLessons === totalLessons &&
+      existing.progressPercent === progressPercent &&
+      existing.lastLessonId === lastLessonId
+    ) {
+      return existing.toObject();
+    }
+
+    return CourseProgress.findOneAndUpdate(
+      { userId, courseId: context.courseId },
+      {
+        $set: {
+          userId,
+          courseId: context.courseId,
+          courseVersionId: context.courseVersionId,
+          completedLessons,
+          totalLessons,
+          progressPercent,
+          lastLessonId,
+          lastPositionSeconds,
+          completedAt,
+        },
+        $setOnInsert: {
+          startedAt: new Date(),
+        },
+      },
+      { upsert: true, new: true, lean: true }
+    );
+  }
+
+  private async ensureCurrentVersionLessonProgress(userId: string, context: CourseProgressContext) {
+    for (const lesson of context.lessons) {
+      const equivalentLessonIds = Array.from(new Set(lesson.equivalentLessonIds || []))
+        .filter((lessonId) => lessonId && lessonId !== lesson.lessonId);
+      if (equivalentLessonIds.length === 0) continue;
+
+      const current = await LessonProgress.exists({
+        userId,
+        courseId: context.courseId,
+        courseVersionId: context.courseVersionId,
+        lessonId: lesson.lessonId,
+      });
+      if (current) continue;
+
+      const source = await LessonProgress.findOne({
+        userId,
+        courseId: context.courseId,
+        lessonId: { $in: equivalentLessonIds },
+        courseVersionId: { $ne: context.courseVersionId },
+      })
+        .sort({ updatedAt: -1, completedAt: -1 })
+        .lean();
+      if (!source) continue;
+
+      const durationSeconds = source.durationSeconds || lesson.duration || 0;
+      const watchedSeconds = source.watchedSeconds || 0;
+      const watchPercent = lesson.type === LessonProgressType.VIDEO && durationSeconds > 0
+        ? Math.min(100, Math.round((watchedSeconds / durationSeconds) * 100))
+        : source.watchPercent || 0;
+
+      await LessonProgress.findOneAndUpdate(
+        { userId, courseId: context.courseId, lessonId: lesson.lessonId },
+        {
+          $set: {
+            userId,
+            courseId: context.courseId,
+            courseVersionId: context.courseVersionId,
+            lessonId: lesson.lessonId,
+            lessonType: lesson.type as LessonProgressType,
+            status: source.status,
+            watchedSeconds,
+            watchedSegments: source.watchedSegments || [],
+            durationSeconds,
+            watchPercent,
+            quizAttemptId: source.quizAttemptId || '',
+            quizScore: source.quizScore || 0,
+            quizPassed: Boolean(source.quizPassed),
+            lastPositionSeconds: source.lastPositionSeconds || 0,
+            completedAt: source.completedAt || null,
+          },
+          $setOnInsert: {
+            createdAt: source.createdAt || new Date(),
+          },
+        },
+        { upsert: true, new: true }
+      );
     }
   }
 
@@ -366,6 +781,138 @@ class ProgressService {
       throw new Error(context.reason || 'Bạn không có quyền ghi nhận tiến độ cho khóa học này.');
     }
     return context;
+  }
+
+  private async loadReadableContext(userId: string, userRole: string, courseId: string) {
+    const context = await courseContextService.getContext({ userId, userRole, courseId });
+    if (!context.allowed && context.reason !== 'OWNER_PREVIEW') {
+      throw new Error(context.reason || 'Bạn không có quyền xem dữ liệu tiến độ khóa học này.');
+    }
+    return context;
+  }
+
+  private async assertLessonUnlocked(userId: string, context: CourseProgressContext, lessonId: string) {
+    const completedRows = await LessonProgress.find({
+      userId,
+      courseId: context.courseId,
+      courseVersionId: context.courseVersionId,
+      status: LessonProgressStatus.COMPLETED,
+    })
+      .select('lessonId')
+      .lean();
+    const completedLessonIds = new Set(completedRows.map((row) => row.lessonId));
+    const sortedLessons = this.sortLessons(context.lessons);
+    const lessonIndex = sortedLessons.findIndex((lesson) => lesson.lessonId === lessonId);
+    if (lessonIndex < 0) throw new Error('Bài học không thuộc khóa học hiện tại.');
+
+    const access = this.resolveLessonAccess(
+      sortedLessons[lessonIndex],
+      lessonIndex,
+      sortedLessons,
+      completedLessonIds,
+      context.progressionMode
+    );
+    if (access.locked) {
+      throw new Error(access.reason || 'Bài học này đang bị khóa.');
+    }
+  }
+
+  private sortLessons(lessons: CourseLessonContext[]) {
+    return [...lessons].sort((a, b) => {
+      if (a.sectionOrder !== b.sectionOrder) return a.sectionOrder - b.sectionOrder;
+      if (a.sectionId !== b.sectionId) return a.sectionId.localeCompare(b.sectionId);
+      if (a.order !== b.order) return a.order - b.order;
+      return a.lessonId.localeCompare(b.lessonId);
+    });
+  }
+
+  private resolveLessonAccess(
+    lesson: CourseLessonContext,
+    index: number,
+    sortedLessons: CourseLessonContext[],
+    completedLessonIds: Set<string>,
+    progressionMode: ProgressionMode
+  ): LessonAccessSummary {
+    if (progressionMode === 'FREE' || lesson.required === false) {
+      return { lessonId: lesson.lessonId, locked: false };
+    }
+
+    if (progressionMode === 'SEQUENTIAL') {
+      const previousRequired = sortedLessons.slice(0, index).filter((item) => item.required !== false);
+      const missing = previousRequired.filter((item) => !completedLessonIds.has(item.lessonId)).map((item) => item.lessonId);
+      return {
+        lessonId: lesson.lessonId,
+        locked: missing.length > 0,
+        reason: missing.length > 0 ? 'Hoàn thành bài trước để mở bài này.' : undefined,
+        requiredLessonIds: missing,
+      };
+    }
+
+    if (progressionMode === 'QUIZ_REQUIRES_PREVIOUS_LESSONS' && lesson.type === LessonProgressType.QUIZ) {
+      const previousInSection = sortedLessons
+        .slice(0, index)
+        .filter((item) => item.sectionId === lesson.sectionId && item.required !== false);
+      const missing = previousInSection
+        .filter((item) => !completedLessonIds.has(item.lessonId))
+        .map((item) => item.lessonId);
+      return {
+        lessonId: lesson.lessonId,
+        locked: missing.length > 0,
+        reason: missing.length > 0 ? 'Hoàn thành các bài trước trong phần này để mở quiz.' : undefined,
+        requiredLessonIds: missing,
+      };
+    }
+
+    return { lessonId: lesson.lessonId, locked: false };
+  }
+
+  private async recordDailyActivity(
+    userId: string,
+    activeSeconds: number,
+    heartbeatCount: number,
+    completedLessons: number,
+    completedCourses: number
+  ) {
+    await LearnerActivityDaily.findOneAndUpdate(
+      { userId, date: this.todayKey() },
+      {
+        $inc: {
+          activeSeconds,
+          heartbeatCount,
+          completedLessons,
+          completedCourses,
+        },
+      },
+      { upsert: true, new: true }
+    );
+  }
+
+  private calculateCurrentStreak(activeDaySet: Set<string>) {
+    let streak = 0;
+    const cursor = new Date();
+    while (activeDaySet.has(this.dateKey(cursor))) {
+      streak++;
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
+    }
+    return streak;
+  }
+
+  private todayKey() {
+    return this.dateKey(new Date());
+  }
+
+  private dateKey(date: Date) {
+    return date.toISOString().slice(0, 10);
+  }
+
+  private percent(numerator: number, denominator: number) {
+    return denominator > 0 ? Math.round((numerator / denominator) * 100) : 0;
+  }
+
+  private average(values: number[]) {
+    const valid = values.filter((value) => Number.isFinite(value));
+    if (valid.length === 0) return 0;
+    return Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length);
   }
 
   private resolveLesson(context: CourseProgressContext, lessonId: string, lessonType: LessonProgressType) {
@@ -491,3 +1038,4 @@ class ProgressService {
 }
 
 export default new ProgressService();
+

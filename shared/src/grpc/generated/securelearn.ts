@@ -60,6 +60,9 @@ export interface CourseProgressLesson {
   duration: number;
   order: number;
   sectionId: string;
+  sectionOrder: number;
+  required: boolean;
+  equivalentLessonIds: string[];
 }
 
 export interface CourseProgressContextReply {
@@ -69,6 +72,8 @@ export interface CourseProgressContextReply {
   courseVersionId: string;
   totalLessons: number;
   lessons: CourseProgressLesson[];
+  progressionMode: string;
+  instructorId: string;
 }
 
 export interface SubscriptionUsageRequest {
@@ -579,7 +584,17 @@ export const CourseProgressContextRequest: MessageFns<CourseProgressContextReque
 };
 
 function createBaseCourseProgressLesson(): CourseProgressLesson {
-  return { lessonId: "", title: "", type: "", duration: 0, order: 0, sectionId: "" };
+  return {
+    lessonId: "",
+    title: "",
+    type: "",
+    duration: 0,
+    order: 0,
+    sectionId: "",
+    sectionOrder: 0,
+    required: false,
+    equivalentLessonIds: [],
+  };
 }
 
 export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
@@ -601,6 +616,15 @@ export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
     }
     if (message.sectionId !== "") {
       writer.uint32(50).string(message.sectionId);
+    }
+    if (message.sectionOrder !== 0) {
+      writer.uint32(56).int32(message.sectionOrder);
+    }
+    if (message.required !== false) {
+      writer.uint32(64).bool(message.required);
+    }
+    for (const v of message.equivalentLessonIds) {
+      writer.uint32(74).string(v!);
     }
     return writer;
   },
@@ -660,6 +684,30 @@ export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
           message.sectionId = reader.string();
           continue;
         }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.sectionOrder = reader.int32();
+          continue;
+        }
+        case 8: {
+          if (tag !== 64) {
+            break;
+          }
+
+          message.required = reader.bool();
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.equivalentLessonIds.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -677,6 +725,11 @@ export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
       duration: isSet(object.duration) ? globalThis.Number(object.duration) : 0,
       order: isSet(object.order) ? globalThis.Number(object.order) : 0,
       sectionId: isSet(object.sectionId) ? globalThis.String(object.sectionId) : "",
+      sectionOrder: isSet(object.sectionOrder) ? globalThis.Number(object.sectionOrder) : 0,
+      required: isSet(object.required) ? globalThis.Boolean(object.required) : false,
+      equivalentLessonIds: globalThis.Array.isArray(object?.equivalentLessonIds)
+        ? object.equivalentLessonIds.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -700,6 +753,15 @@ export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
     if (message.sectionId !== "") {
       obj.sectionId = message.sectionId;
     }
+    if (message.sectionOrder !== 0) {
+      obj.sectionOrder = Math.round(message.sectionOrder);
+    }
+    if (message.required !== false) {
+      obj.required = message.required;
+    }
+    if (message.equivalentLessonIds?.length) {
+      obj.equivalentLessonIds = message.equivalentLessonIds;
+    }
     return obj;
   },
 
@@ -714,12 +776,24 @@ export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
     message.duration = object.duration ?? 0;
     message.order = object.order ?? 0;
     message.sectionId = object.sectionId ?? "";
+    message.sectionOrder = object.sectionOrder ?? 0;
+    message.required = object.required ?? false;
+    message.equivalentLessonIds = object.equivalentLessonIds?.map((e) => e) || [];
     return message;
   },
 };
 
 function createBaseCourseProgressContextReply(): CourseProgressContextReply {
-  return { allowed: false, reason: "", courseId: "", courseVersionId: "", totalLessons: 0, lessons: [] };
+  return {
+    allowed: false,
+    reason: "",
+    courseId: "",
+    courseVersionId: "",
+    totalLessons: 0,
+    lessons: [],
+    progressionMode: "",
+    instructorId: "",
+  };
 }
 
 export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> = {
@@ -741,6 +815,12 @@ export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> 
     }
     for (const v of message.lessons) {
       CourseProgressLesson.encode(v!, writer.uint32(50).fork()).join();
+    }
+    if (message.progressionMode !== "") {
+      writer.uint32(58).string(message.progressionMode);
+    }
+    if (message.instructorId !== "") {
+      writer.uint32(66).string(message.instructorId);
     }
     return writer;
   },
@@ -800,6 +880,22 @@ export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> 
           message.lessons.push(CourseProgressLesson.decode(reader, reader.uint32()));
           continue;
         }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.progressionMode = reader.string();
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.instructorId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -819,6 +915,8 @@ export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> 
       lessons: globalThis.Array.isArray(object?.lessons)
         ? object.lessons.map((e: any) => CourseProgressLesson.fromJSON(e))
         : [],
+      progressionMode: isSet(object.progressionMode) ? globalThis.String(object.progressionMode) : "",
+      instructorId: isSet(object.instructorId) ? globalThis.String(object.instructorId) : "",
     };
   },
 
@@ -842,6 +940,12 @@ export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> 
     if (message.lessons?.length) {
       obj.lessons = message.lessons.map((e) => CourseProgressLesson.toJSON(e));
     }
+    if (message.progressionMode !== "") {
+      obj.progressionMode = message.progressionMode;
+    }
+    if (message.instructorId !== "") {
+      obj.instructorId = message.instructorId;
+    }
     return obj;
   },
 
@@ -856,6 +960,8 @@ export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> 
     message.courseVersionId = object.courseVersionId ?? "";
     message.totalLessons = object.totalLessons ?? 0;
     message.lessons = object.lessons?.map((e) => CourseProgressLesson.fromPartial(e)) || [];
+    message.progressionMode = object.progressionMode ?? "";
+    message.instructorId = object.instructorId ?? "";
     return message;
   },
 };

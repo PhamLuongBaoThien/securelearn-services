@@ -32,6 +32,12 @@ export enum SubscriptionCatalogStatus {
   REMOVED = 'REMOVED',
 }
 
+export enum CourseProgressionMode {
+  FREE = 'FREE',
+  SEQUENTIAL = 'SEQUENTIAL',
+  QUIZ_REQUIRES_PREVIOUS_LESSONS = 'QUIZ_REQUIRES_PREVIOUS_LESSONS',
+}
+
 export interface ICourse extends Document {
   title: string;
   slug: string;
@@ -59,6 +65,7 @@ export interface ICourse extends Document {
   enrollmentCount: number;
   ratingAverage: number;
   ratingCount: number;
+  progressionMode: CourseProgressionMode;
   subscriptionStatus: SubscriptionCatalogStatus;
   subscriptionReviewReason: string;
   subscriptionReviewedAt?: Date | null;
@@ -135,6 +142,12 @@ const courseSchema = new Schema<ICourse>(
     enrollmentCount: { type: Number, default: 0 },
     ratingAverage: { type: Number, default: 0, min: 0, max: 5, index: true },
     ratingCount: { type: Number, default: 0, min: 0 },
+    progressionMode: {
+      type: String,
+      enum: Object.values(CourseProgressionMode),
+      default: CourseProgressionMode.FREE,
+      index: true,
+    },
     // Trạng thái này quyết định course có được xuất hiện trong catalog thuê bao hay không.
     subscriptionStatus: {
       type: String,

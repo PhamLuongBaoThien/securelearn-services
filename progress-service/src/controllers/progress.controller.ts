@@ -59,6 +59,45 @@ class ProgressController {
     }
   }
 
+  public async getCourseAccess(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const data = await progressService.getCourseAccess(
+        req.userId!,
+        req.userRole!,
+        String(req.params.courseId)
+      );
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async getLearnerActivity(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const data = await progressService.getLearnerActivity(
+        req.userId!,
+        req.query.from ? String(req.query.from) : undefined,
+        req.query.to ? String(req.query.to) : undefined
+      );
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async getInstructorCourseAnalytics(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const data = await progressService.getInstructorCourseAnalytics(
+        req.userId!,
+        req.userRole!,
+        String(req.params.courseId)
+      );
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   public async getMyCoursesProgress(req: AuthRequest, res: Response): Promise<void> {
     try {
       const rawCourseIds = Array.isArray(req.query.courseIds)
@@ -68,7 +107,7 @@ class ProgressController {
         .split(',')
         .map((id) => id.trim())
         .filter(Boolean);
-      const data = await progressService.getMyCoursesProgress(req.userId!, courseIds);
+      const data = await progressService.getMyCoursesProgress(req.userId!, req.userRole!, courseIds);
       res.status(200).json({ status: 'OK', data });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });

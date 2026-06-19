@@ -1,5 +1,7 @@
 import { courseGrpcClient } from '../grpc/course.client';
 
+export type ProgressionMode = 'FREE' | 'SEQUENTIAL' | 'QUIZ_REQUIRES_PREVIOUS_LESSONS';
+
 export type CourseLessonContext = {
   lessonId: string;
   title: string;
@@ -7,6 +9,9 @@ export type CourseLessonContext = {
   duration: number;
   order: number;
   sectionId: string;
+  sectionOrder: number;
+  required: boolean;
+  equivalentLessonIds: string[];
 };
 
 export type CourseProgressContext = {
@@ -15,6 +20,8 @@ export type CourseProgressContext = {
   courseId: string;
   courseVersionId: string;
   totalLessons: number;
+  progressionMode: ProgressionMode;
+  instructorId: string;
   lessons: CourseLessonContext[];
 };
 
@@ -35,9 +42,14 @@ class CourseContextService {
 
     return {
       ...context,
+      progressionMode: (context.progressionMode || 'FREE') as ProgressionMode,
+      instructorId: context.instructorId || '',
       lessons: context.lessons.map((lesson) => ({
         ...lesson,
         type: lesson.type as CourseLessonContext['type'],
+        sectionOrder: lesson.sectionOrder || 0,
+        required: lesson.required !== false,
+        equivalentLessonIds: lesson.equivalentLessonIds || [],
       })),
     };
   }

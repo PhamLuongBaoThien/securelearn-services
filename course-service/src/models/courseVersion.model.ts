@@ -1,7 +1,7 @@
 // - lưu phiên bản nội dung cụ thể của khóa học
 // - hỗ trợ versioning để giảng viên chỉnh sửa nội dung mà không ảnh hưởng học viên đang học
 import mongoose, { Document, Schema, Types } from 'mongoose';
-import { CategoryResolutionStatus, CourseLevel, CourseStatus } from './course.model';
+import { CategoryResolutionStatus, CourseLevel, CourseProgressionMode, CourseStatus } from './course.model';
 import slugify from 'slugify';
 
 // CourseVersion là bản nội dung thật của khóa học.
@@ -23,6 +23,7 @@ export interface ICourseVersion extends Document {
   suggestedCategoryName: string;
   suggestedCategoryNote: string;
   level: CourseLevel;
+  progressionMode: CourseProgressionMode;
   status: CourseStatus;
   submittedAt?: Date | null;
   reviewedAt?: Date | null;
@@ -64,6 +65,12 @@ const courseVersionSchema = new Schema<ICourseVersion>(
       type: String,
       enum: Object.values(CourseLevel),
       default: CourseLevel.BEGINNER,
+    },
+    progressionMode: {
+      type: String,
+      enum: Object.values(CourseProgressionMode),
+      default: CourseProgressionMode.FREE,
+      index: true,
     },
     status: {
       type: String,

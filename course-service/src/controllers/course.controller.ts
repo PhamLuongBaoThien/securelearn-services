@@ -5,7 +5,7 @@
 // - trả response thống nhất cho public flow, instructor editor và learning flow có entitlement
 // ========================
 import { Request, Response } from 'express';
-import { CategoryResolutionStatus, CourseLevel } from '../models/course.model';
+import { CategoryResolutionStatus, CourseLevel, CourseProgressionMode } from '../models/course.model';
 import courseService from '../services/course.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
@@ -22,6 +22,7 @@ type UpdateCoursePayload = {
   suggestedCategoryNote?: string;
   level?: CourseLevel;
   price?: number;
+  progressionMode?: CourseProgressionMode;
 };
 
 const normalizeStringArray = (value: unknown): string[] | undefined => {
@@ -44,8 +45,13 @@ const parseCourseLevel = (value: unknown): CourseLevel | undefined => {
   return value as CourseLevel;
 };
 
+const parseProgressionMode = (value: unknown): CourseProgressionMode | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  return value as CourseProgressionMode;
+};
+
 const buildUpdateCoursePayload = (req: AuthRequest): UpdateCoursePayload => {
-  const { title, shortDescription, description, thumbnail, categoryId, category, categoryResolutionStatus, suggestedCategoryName, suggestedCategoryNote, level, price } = req.body;
+  const { title, shortDescription, description, thumbnail, categoryId, category, categoryResolutionStatus, suggestedCategoryName, suggestedCategoryNote, level, price, progressionMode } = req.body;
 
   return {
     title,
@@ -60,6 +66,7 @@ const buildUpdateCoursePayload = (req: AuthRequest): UpdateCoursePayload => {
     suggestedCategoryNote,
     level: parseCourseLevel(level),
     price: parseOptionalNumber(price),
+    progressionMode: parseProgressionMode(progressionMode),
   };
 };
 
@@ -71,7 +78,7 @@ class CourseController {
   // Tạo metadata khóa học ban đầu, chưa đi sâu vào curriculum.
   public async createCourse(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { title, description, categoryId, category, level, price } = req.body;
+      const { title, description, categoryId, category, level, price, progressionMode } = req.body;
 
       if (!title) {
         res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp tên khóa học.' });
@@ -87,6 +94,7 @@ class CourseController {
         categoryId: categoryId || category,
         level,
         price,
+        progressionMode,
         instructorId: req.userId!,
         instructorName,
       });

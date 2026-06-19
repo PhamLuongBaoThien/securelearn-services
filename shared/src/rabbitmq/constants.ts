@@ -31,6 +31,7 @@ export enum RoutingKey {
   COURSE_CREATED = 'course.course.created',
   COURSE_UPDATED = 'course.course.updated',
   COURSE_PUBLISHED = 'course.course.published',
+  COURSE_VERSION_PUBLISHED = 'course.version.published',
   ENROLLMENT_CREATED = 'course.enrollment.created',
 
   // --- Media Events ---
@@ -93,6 +94,21 @@ export interface EnrollmentCreatedPayload {
   enrollmentId: string;
   userId: string;
   courseId: string;
+}
+
+export interface CourseVersionPublishedLessonMapping {
+  oldLessonId: string;
+  newLessonId: string;
+  lessonType: 'VIDEO' | 'QUIZ';
+}
+
+export interface CourseVersionPublishedPayload {
+  courseId: string;
+  oldVersionId: string;
+  newVersionId: string;
+  totalLessons: number;
+  publishedAt: string;
+  lessonMappings: CourseVersionPublishedLessonMapping[];
 }
 
 export interface VideoAssetStatusPayload {

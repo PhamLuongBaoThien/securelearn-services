@@ -70,6 +70,8 @@ const normalizeCourseProgressContext = (payload: CourseProgressContextReply): Co
   courseId: payload.courseId,
   courseVersionId: payload.courseVersionId,
   totalLessons: payload.totalLessons,
+  progressionMode: payload.progressionMode || 'FREE',
+  instructorId: payload.instructorId || '',
   lessons: payload.lessons,
 });
 
@@ -151,6 +153,8 @@ export const createCourseGrpcServer = (handlers: {
           courseId: response.courseId,
           courseVersionId: response.courseVersionId,
           totalLessons: response.totalLessons,
+          progressionMode: response.progressionMode || 'FREE',
+          instructorId: response.instructorId || '',
           lessons: response.lessons,
         });
       } catch (error) {
