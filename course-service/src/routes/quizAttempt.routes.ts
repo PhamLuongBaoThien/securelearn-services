@@ -12,6 +12,9 @@ router.get('/:courseId/lessons/:lessonId/quiz/play', extractUser, requireStudent
 // [POST] /api/courses/:courseId/lessons/:lessonId/quiz/:quizId/attempts
 router.post('/:courseId/lessons/:lessonId/quiz/:quizId/attempts', extractUser, requireStudentOrInstructor, quizAttemptController.startAttempt);
 
+// [GET] /api/courses/:courseId/lessons/:lessonId/quiz/:quizId/attempts
+router.get('/:courseId/lessons/:lessonId/quiz/:quizId/attempts', extractUser, requireStudentOrInstructor, quizAttemptController.listAttempts);
+
 // [POST] /api/courses/:courseId/lessons/:lessonId/quiz/:quizId/attempts/:attemptId/submit
 router.post('/:courseId/lessons/:lessonId/quiz/:quizId/attempts/:attemptId/submit', extractUser, requireStudentOrInstructor, quizAttemptController.submitAttempt);
 

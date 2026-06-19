@@ -6,6 +6,21 @@ import quizAttemptService from '../services/quizAttempt.service';
 import quizService from '../services/quiz.service';
 
 class QuizAttemptController {
+  public async listAttempts(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const attempts = await quizAttemptService.listAttempts(
+        req.params.courseId as string,
+        req.params.lessonId as string,
+        req.params.quizId as string,
+        req.userId!
+      );
+
+      res.status(200).json({ status: 'OK', data: attempts });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   public async getQuizForAttempt(req: AuthRequest, res: Response): Promise<void> {
     try {
       const quiz = await quizService.getQuizForAttempt(

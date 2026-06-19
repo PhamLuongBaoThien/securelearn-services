@@ -9,6 +9,38 @@ import { Course, CourseStatus } from '../models/course.model';
 import { CourseVersion } from '../models/courseVersion.model';
 
 class QuizAttemptService {
+  public async listAttempts(courseId: string, lessonId: string, quizId: string, userId: string) {
+    const context = await this.resolveCourseQuizContext(courseId);
+    const quiz = await Quiz.findOne({ _id: quizId, lessonId, courseId: context.versionId }).select('_id').lean();
+    if (!quiz) throw new Error('Quiz không tồn tại.');
+
+    const attempts = await QuizAttempt.find({
+      quizId,
+      lessonId,
+      courseId: context.courseId,
+      courseVersionId: context.versionId,
+      userId,
+    })
+      .sort({ startedAt: -1 })
+      .select('_id score passed status startedAt completedAt createdAt updatedAt')
+      .lean();
+
+    return {
+      totalAttempts: attempts.length,
+      submittedAttempts: attempts.filter((attempt) => attempt.status === QuizAttemptStatus.SUBMITTED).length,
+      bestScore: attempts.reduce((best, attempt) => Math.max(best, attempt.score || 0), 0),
+      attempts: attempts.map((attempt, index) => ({
+        attemptId: attempt._id.toString(),
+        attemptNumber: attempts.length - index,
+        score: attempt.score || 0,
+        passed: Boolean(attempt.passed),
+        status: attempt.status,
+        startedAt: attempt.startedAt,
+        completedAt: attempt.completedAt,
+      })),
+    };
+  }
+
   public async startAttempt(courseId: string, lessonId: string, quizId: string, userId: string) {
     const context = await this.resolveCourseQuizContext(courseId);
     const quiz = await Quiz.findOne({ _id: quizId, lessonId, courseId: context.versionId }).lean();
