@@ -12,6 +12,8 @@ import { publishCourseCompleted, publishLessonCompleted } from '../events/publis
 import courseContextService, { CourseLessonContext, CourseProgressContext, ProgressionMode } from './courseContext.service';
 
 const VIDEO_COMPLETE_PERCENT = 90;
+const STREAK_MIN_ACTIVE_SECONDS = 5 * 60;
+const ACTIVITY_TIME_ZONE = 'Asia/Bangkok';
 
 type HeartbeatInput = {
   userId: string;
@@ -61,6 +63,12 @@ export type LearnerActivityResponse = {
   totalActiveSeconds: number;
   activeDays: number;
   currentStreakDays: number;
+  dailyGoalSeconds: number;
+  todayActiveSeconds: number;
+  todayGoalCompleted: boolean;
+  todayRemainingSeconds: number;
+  streakAtRisk: boolean;
+  currentDate: string;
   days: Array<{
     date: string;
     activeSeconds: number;
@@ -125,15 +133,14 @@ class ProgressService {
     const activeSeconds = this.normalizeActiveSeconds(input.watchedSecondsDelta);
     await this.upsertLearningSession(input, context, activeSeconds, false);
 
-    let activitySeconds = 0;
     if (input.lessonType === LessonProgressType.QUIZ) {
-      activitySeconds = await this.upsertQuizHeartbeat(input, context, activeSeconds);
+      await this.upsertQuizHeartbeat(input, context);
     } else {
-      activitySeconds = await this.upsertVideoHeartbeat(input, context, lesson.duration, activeSeconds);
+      await this.upsertVideoHeartbeat(input, context, lesson.duration);
     }
 
-    if (activitySeconds > 0) {
-      await this.recordDailyActivity(input.userId, activitySeconds, 1, 0, 0);
+    if (activeSeconds > 0) {
+      await this.recordDailyActivity(input.userId, activeSeconds, 1, 0, 0);
     }
 
     await this.recalculateCourseProgress(input.userId, context, input.lessonId, this.toNumber(input.positionSeconds));
@@ -395,7 +402,15 @@ class ProgressService {
       if (to) (query.date as Record<string, string>).$lte = to;
     }
 
-    const rows = await LearnerActivityDaily.find(query).sort({ date: 1 }).lean();
+    const [rows, streakRows] = await Promise.all([
+      LearnerActivityDaily.find(query).sort({ date: 1 }).lean(),
+      LearnerActivityDaily.find({
+        userId,
+        activeSeconds: { $gte: STREAK_MIN_ACTIVE_SECONDS },
+      })
+        .select({ date: 1 })
+        .lean(),
+    ]);
     const days = rows.map((row) => ({
       date: row.date,
       activeSeconds: row.activeSeconds || 0,
@@ -404,11 +419,28 @@ class ProgressService {
     }));
     const totalActiveSeconds = days.reduce((sum, day) => sum + day.activeSeconds, 0);
     const activeDaySet = new Set(days.filter((day) => day.activeSeconds > 0).map((day) => day.date));
+    const streakDaySet = new Set(streakRows.map((day) => day.date));
+    const currentDate = this.todayKey();
+    const yesterdayDate = this.addDaysKey(currentDate, -1);
+    const todayActiveSeconds = days.find((day) => day.date === currentDate)?.activeSeconds
+      ?? await this.getDailyActiveSeconds(userId, currentDate);
+    const todayGoalCompleted = todayActiveSeconds >= STREAK_MIN_ACTIVE_SECONDS;
+    const currentStreakDays = todayGoalCompleted
+      ? this.calculateCurrentStreak(streakDaySet, currentDate)
+      : streakDaySet.has(yesterdayDate)
+        ? this.calculateCurrentStreak(streakDaySet, yesterdayDate)
+        : 0;
 
     return {
       totalActiveSeconds,
       activeDays: activeDaySet.size,
-      currentStreakDays: this.calculateCurrentStreak(activeDaySet),
+      currentStreakDays,
+      dailyGoalSeconds: STREAK_MIN_ACTIVE_SECONDS,
+      todayActiveSeconds,
+      todayGoalCompleted,
+      todayRemainingSeconds: Math.max(0, STREAK_MIN_ACTIVE_SECONDS - todayActiveSeconds),
+      streakAtRisk: currentStreakDays > 0 && !todayGoalCompleted,
+      currentDate,
       days,
     };
   }
@@ -468,9 +500,8 @@ class ProgressService {
   private async upsertVideoHeartbeat(
     input: HeartbeatInput,
     context: CourseProgressContext,
-    durationSeconds: number,
-    activeSeconds: number
-  ): Promise<number> {
+    durationSeconds: number
+  ) {
     const existing = await LessonProgress.findOne({
       userId: input.userId,
       courseId: context.courseId,
@@ -486,7 +517,6 @@ class ProgressService {
       ...this.buildHeartbeatSegments(input, position, durationSeconds),
     ]);
     const watchedSeconds = this.sumSegments(watchedSegments);
-    const progressDeltaSeconds = Math.max(0, watchedSeconds - (existing?.watchedSeconds || 0));
     const watchPercent = durationSeconds > 0 ? Math.min(100, Math.round((watchedSeconds / durationSeconds) * 100)) : 0;
     const isCompleted = existing?.status === LessonProgressStatus.COMPLETED || watchPercent >= VIDEO_COMPLETE_PERCENT;
     const status = isCompleted ? LessonProgressStatus.COMPLETED : LessonProgressStatus.IN_PROGRESS;
@@ -529,15 +559,12 @@ class ProgressService {
         watchPercent,
       });
     }
-
-    return Math.min(activeSeconds, progressDeltaSeconds);
   }
 
   private async upsertQuizHeartbeat(
     input: HeartbeatInput,
-    context: CourseProgressContext,
-    activeSeconds: number
-  ): Promise<number> {
+    context: CourseProgressContext
+  ) {
     const existing = await LessonProgress.findOne({
       userId: input.userId,
       courseId: context.courseId,
@@ -562,8 +589,6 @@ class ProgressService {
       },
       { upsert: true, new: true }
     );
-
-    return existing?.status === LessonProgressStatus.COMPLETED ? 0 : activeSeconds;
   }
 
   private async recalculateCourseProgress(
@@ -899,14 +924,19 @@ class ProgressService {
     );
   }
 
-  private calculateCurrentStreak(activeDaySet: Set<string>) {
+  private calculateCurrentStreak(activeDaySet: Set<string>, startDateKey = this.todayKey()) {
     let streak = 0;
-    const cursor = new Date();
-    while (activeDaySet.has(this.dateKey(cursor))) {
+    let cursorKey = startDateKey;
+    while (activeDaySet.has(cursorKey)) {
       streak++;
-      cursor.setUTCDate(cursor.getUTCDate() - 1);
+      cursorKey = this.addDaysKey(cursorKey, -1);
     }
     return streak;
+  }
+
+  private async getDailyActiveSeconds(userId: string, date: string) {
+    const row = await LearnerActivityDaily.findOne({ userId, date }).select({ activeSeconds: 1 }).lean();
+    return row?.activeSeconds || 0;
   }
 
   private todayKey() {
@@ -914,6 +944,20 @@ class ProgressService {
   }
 
   private dateKey(date: Date) {
+    const parts = new Intl.DateTimeFormat('en', {
+      timeZone: ACTIVITY_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const value = (type: string) => parts.find((part) => part.type === type)?.value || '00';
+    return `${value('year')}-${value('month')}-${value('day')}`;
+  }
+
+  private addDaysKey(dateKey: string, days: number) {
+    const [year, month, day] = dateKey.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    date.setUTCDate(date.getUTCDate() + days);
     return date.toISOString().slice(0, 10);
   }
 

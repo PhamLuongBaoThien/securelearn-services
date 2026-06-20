@@ -1,3 +1,9 @@
+/**
+ * Tác dụng và mục đích:
+ * Dùng để theo dõi tiến độ học tập tổng thể của một học viên trong một khóa học cụ thể.
+ * Lưu trữ các thông tin như phần trăm hoàn thành khóa học, số bài học đã hoàn thành,
+ * tổng số bài học trong khóa học, bài học cuối cùng đang học dở và thời gian bắt đầu cũng như hoàn thành khóa học.
+ */
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ICourseProgress extends Document {

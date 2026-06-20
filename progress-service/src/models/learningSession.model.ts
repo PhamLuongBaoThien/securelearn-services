@@ -1,3 +1,10 @@
+/**
+ * Tác dụng và mục đích:
+ * Dùng để quản lý các phiên học tập chi tiết của học viên khi tham gia học một bài học cụ thể.
+ * Ghi nhận các thông tin như thời gian bắt đầu phiên, thời điểm cập nhật heartbeat cuối cùng,
+ * tổng thời gian học thực tế trong phiên (giây hoạt động), thiết bị sử dụng và trạng thái phiên học (đang học hoặc đã kết thúc).
+ * Hỗ trợ theo dõi tính liên tục và xác thực thời gian học của học viên để tránh gian lận.
+ */
 import mongoose, { Document, Schema } from 'mongoose';
 import { LessonProgressType } from './lessonProgress.model';
 

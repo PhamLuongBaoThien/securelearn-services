@@ -1,3 +1,9 @@
+/**
+ * Tác dụng và mục đích:
+ * Dùng để lưu trữ tiến độ học tập chi tiết của một học viên cho từng bài học riêng biệt trong khóa học.
+ * Hỗ trợ lưu trữ tiến trình xem video (các phân đoạn đã xem, tỷ lệ phần trăm đã xem, vị trí xem cuối cùng),
+ * hoặc kết quả thi trắc nghiệm (mã bài thi trắc nghiệm, điểm số đạt được, trạng thái vượt qua hay chưa) tùy theo loại bài học.
+ */
 import mongoose, { Schema, Document } from 'mongoose';
 
 export enum LessonProgressStatus {

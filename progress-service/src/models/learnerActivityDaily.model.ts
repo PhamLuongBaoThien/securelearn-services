@@ -1,3 +1,10 @@
+/**
+ * Tác dụng và mục đích:
+ * Dùng để ghi nhận và thống kê hoạt động học tập hàng ngày của một học viên.
+ * Lưu trữ thông tin chi tiết theo từng ngày (dưới dạng chuỗi YYYY-MM-DD) gồm tổng số giây hoạt động,
+ * số lượt heartbeat ghi nhận hoạt động, số bài học và số khóa học đã hoàn thành trong ngày đó.
+ * Dữ liệu này phục vụ cho việc vẽ biểu đồ hoạt động (heatmap) và tính toán chuỗi ngày học liên tục (streak).
+ */
 import mongoose, { Document, Schema } from 'mongoose';
 
 export interface ILearnerActivityDaily extends Document {
