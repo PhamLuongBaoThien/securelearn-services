@@ -1006,6 +1006,7 @@ class PaymentService {
         totalInstructorRevenue: 0,
         successfulTransactions: 0,
         monthlyData: [] as Array<{ month: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
+        dailyData: [] as Array<{ date: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
         providerBreakdown: [] as Array<{ provider: PaymentProvider; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
       }
     );
@@ -1047,6 +1048,7 @@ class PaymentService {
     const summary = items.reduce(
       (acc: any, item: any) => {
         const month = `${item.paidAt.getFullYear()}-${String(item.paidAt.getMonth() + 1).padStart(2, '0')}`;
+        const day = `${item.paidAt.getFullYear()}-${String(item.paidAt.getMonth() + 1).padStart(2, '0')}-${String(item.paidAt.getDate()).padStart(2, '0')}`;
         acc.totalGrossRevenue += item.grossAmount;
         acc.totalAdminRevenue += item.adminAmount;
         acc.totalInstructorRevenue += item.instructorAmount;
@@ -1061,6 +1063,22 @@ class PaymentService {
         } else {
           acc.monthlyData.push({
             month,
+            revenue: item.grossAmount,
+            adminRevenue: item.adminAmount,
+            instructorRevenue: item.instructorAmount,
+            transactions: 1,
+          });
+        }
+
+        const dayBucket = acc.dailyData.find((entry: any) => entry.date === day);
+        if (dayBucket) {
+          dayBucket.revenue += item.grossAmount;
+          dayBucket.adminRevenue += item.adminAmount;
+          dayBucket.instructorRevenue += item.instructorAmount;
+          dayBucket.transactions += 1;
+        } else {
+          acc.dailyData.push({
+            date: day,
             revenue: item.grossAmount,
             adminRevenue: item.adminAmount,
             instructorRevenue: item.instructorAmount,
@@ -1110,12 +1128,14 @@ class PaymentService {
         totalInstructorRevenue: 0,
         totalTransactions: 0,
         monthlyData: [] as Array<{ month: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
+        dailyData: [] as Array<{ date: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
         providerBreakdown: [] as Array<{ provider: PaymentProvider; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
         courseBreakdown: [] as Array<{ courseId: string; courseTitle: string; slug: string; grossRevenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
       }
     );
 
     summary.monthlyData.sort((a: any, b: any) => a.month.localeCompare(b.month));
+    summary.dailyData.sort((a: any, b: any) => a.date.localeCompare(b.date));
     summary.courseBreakdown.sort((a: any, b: any) => b.instructorRevenue - a.instructorRevenue);
 
     return summary;
@@ -1291,3 +1311,4 @@ class PaymentService {
 }
 
 export default new PaymentService();
+
