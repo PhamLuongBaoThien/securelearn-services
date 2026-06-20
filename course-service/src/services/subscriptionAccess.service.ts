@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // Subscription Access Service
 // Mục đích:
 // - quản lý catalog thuê bao, enroll bằng thuê bao và entitlement khi học
@@ -128,7 +128,7 @@ class SubscriptionAccessService {
     }).sort({ enrollmentCount: -1, createdAt: -1 }).lean();
   }
 
-  public async enroll(userId: string, userRole: string, courseId: string) {
+  public async enroll(userId: string, userRole: string, courseId: string, learner: { name?: string; email?: string; avatarUrl?: string } = {}) {
     const now = new Date();
     const term = await SubscriptionEntitlement.findOne({
       userId,
@@ -137,7 +137,7 @@ class SubscriptionAccessService {
       endsAt: { $gt: now },
     }).sort({ endsAt: -1 });
     if (!term) throw new Error('Bạn không có gói thuê bao đang hoạt động.');
-    return enrollmentService.enrollSubscription(userId, courseId, userRole, term.termId, term.endsAt);
+    return enrollmentService.enrollSubscription(userId, courseId, userRole, term.termId, term.endsAt, learner);
   }
 
   public async entitlement(userId: string, courseId: string) {
@@ -217,3 +217,4 @@ class SubscriptionAccessService {
 }
 
 export default new SubscriptionAccessService();
+

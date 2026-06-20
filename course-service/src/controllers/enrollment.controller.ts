@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // File này là controller cho Enrollment.
 // Đây là phần learner-side/public-side của domain course, không thuộc curriculum editor nhưng vẫn là luồng course.
 // ========================
@@ -17,6 +17,7 @@ class EnrollmentController {
         req.userId!,
         req.params.id as string,
         req.userRole!,
+        { name: req.userName, email: req.userEmail },
       );
 
       res.status(201).json({
@@ -44,6 +45,19 @@ class EnrollmentController {
       res.status(500).json({ status: 'ERR', message: error.message });
     }
   }
+  /**
+   * [GET] /api/courses/instructor/students
+   * Danh sách học viên đã ghi danh vào các khóa của instructor hiện tại.
+   */
+  public async getInstructorStudents(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const data = await enrollmentService.getInstructorStudents(req.userId!);
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
 }
 
 export default new EnrollmentController();
+

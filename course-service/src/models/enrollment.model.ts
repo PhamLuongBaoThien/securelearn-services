@@ -1,4 +1,4 @@
-// - lưu trạng thái ghi danh của học viên vào khóa học
+﻿// - lưu trạng thái ghi danh của học viên vào khóa học
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
 export enum EnrollmentStatus {
@@ -14,6 +14,9 @@ export enum EnrollmentSource {
 
 export interface IEnrollment extends Document {
   userId: string;            // ID học viên (từ Identity Service)
+  learnerName?: string;      // Cache tên học viên tại thời điểm ghi danh
+  learnerEmail?: string;     // Cache email học viên để instructor dễ nhận diện
+  learnerAvatarUrl?: string;
   courseId: Types.ObjectId;   // Ref đến Course
   status: EnrollmentStatus;
   enrolledAt: Date;
@@ -25,6 +28,9 @@ export interface IEnrollment extends Document {
 const enrollmentSchema = new Schema<IEnrollment>(
   {
     userId: { type: String, required: true, index: true },
+    learnerName: { type: String, default: '' },
+    learnerEmail: { type: String, default: '' },
+    learnerAvatarUrl: { type: String, default: '' },
     courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true, index: true },
     status: {
       type: String,
@@ -46,3 +52,4 @@ const enrollmentSchema = new Schema<IEnrollment>(
 enrollmentSchema.index({ userId: 1, courseId: 1 }, { unique: true });
 
 export const Enrollment = mongoose.model<IEnrollment>('Enrollment', enrollmentSchema);
+

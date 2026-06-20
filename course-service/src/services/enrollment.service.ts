@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // Enrollment Service
 // Mục đích:
 // - quản lý ghi danh mua đứt và ghi danh bằng thuê bao
@@ -8,6 +8,12 @@ import { Enrollment, EnrollmentSource, IEnrollment, EnrollmentStatus } from '../
 import { Course } from '../models/course.model';
 import { publishEnrollmentCreated } from '../events/publishers';
 import entitlementCacheService from './entitlementCache.service';
+
+type LearnerSnapshot = {
+  name?: string;
+  email?: string;
+  avatarUrl?: string;
+};
 
 class EnrollmentService {
   private async cachePurchaseEntitlement(userId: string, courseId: string, versionId?: string | null): Promise<void> {
@@ -56,7 +62,7 @@ class EnrollmentService {
    * Cả STUDENT lẫn INSTRUCTOR đều có thể ghi danh,
    * nhưng INSTRUCTOR không được ghi danh khóa học do chính mình tạo.
    */
-  public async enroll(userId: string, courseId: string, userRole: string): Promise<IEnrollment> {
+  public async enroll(userId: string, courseId: string, userRole: string, learner: LearnerSnapshot = {}): Promise<IEnrollment> {
     // Hàm ghi danh chuẩn cho mua đứt.
     // Nếu user trước đó học bằng subscription thì record cũ được nâng lên PURCHASE để chuyển quyền thành vĩnh viễn.
     // 1. Kiểm tra khóa học có tồn tại và đã PUBLISHED không
@@ -82,6 +88,9 @@ class EnrollmentService {
         existing.subscriptionTermId = '';
         existing.accessEndsAt = undefined;
         existing.status = EnrollmentStatus.ACTIVE;
+        if (learner.name && !existing.learnerName) existing.learnerName = learner.name;
+        if (learner.email && !existing.learnerEmail) existing.learnerEmail = learner.email;
+        if (learner.avatarUrl && !existing.learnerAvatarUrl) existing.learnerAvatarUrl = learner.avatarUrl;
         await existing.save();
         await this.cachePurchaseEntitlement(userId, courseId, course.currentVersionId?.toString());
         return existing;
@@ -92,6 +101,9 @@ class EnrollmentService {
     // 4. Tạo enrollment
     const enrollment = new Enrollment({
       userId,
+      learnerName: learner.name || '',
+      learnerEmail: learner.email || '',
+      learnerAvatarUrl: learner.avatarUrl || '',
       courseId,
       status: EnrollmentStatus.ACTIVE,
       source: EnrollmentSource.PURCHASE,
@@ -117,12 +129,13 @@ class EnrollmentService {
     courseId: string,
     userRole: string,
     subscriptionTermId: string,
-    accessEndsAt: Date
+    accessEndsAt: Date,
+    learner: LearnerSnapshot = {},
   ): Promise<IEnrollment> {
     const course = await Course.findById(courseId);
     if (!course || course.status !== 'PUBLISHED') throw new Error('Khóa học không tồn tại hoặc chưa xuất bản.');
     if (course.subscriptionStatus !== 'APPROVED') throw new Error('Khóa học không thuộc catalog thuê bao.');
-    if (userRole === 'INSTRUCTOR' && course.instructorId === userId) {
+    if (userRole === 'INSTRUCTOR' && course.instructorId.toString() === userId) {
       throw new Error('Giảng viên không thể học khóa học do chính mình tạo.');
     }
     const existing = await Enrollment.findOne({ userId, courseId });
@@ -132,6 +145,9 @@ class EnrollmentService {
       existing.status = EnrollmentStatus.ACTIVE;
       existing.subscriptionTermId = subscriptionTermId;
       existing.accessEndsAt = accessEndsAt;
+      if (learner.name && !existing.learnerName) existing.learnerName = learner.name;
+      if (learner.email && !existing.learnerEmail) existing.learnerEmail = learner.email;
+      if (learner.avatarUrl && !existing.learnerAvatarUrl) existing.learnerAvatarUrl = learner.avatarUrl;
       await existing.save();
       await this.cacheSubscriptionEntitlement(
         userId,
@@ -144,6 +160,9 @@ class EnrollmentService {
     }
     const enrollment = await Enrollment.create({
       userId,
+      learnerName: learner.name || '',
+      learnerEmail: learner.email || '',
+      learnerAvatarUrl: learner.avatarUrl || '',
       courseId,
       status: EnrollmentStatus.ACTIVE,
       source: EnrollmentSource.SUBSCRIPTION,
@@ -179,6 +198,62 @@ class EnrollmentService {
 
     return enrollments;
   }
+  /**
+   * Lấy danh sách học viên đã ghi danh vào các khóa thuộc instructor hiện tại.
+   */
+  public async getInstructorStudents(instructorId: string): Promise<any> {
+    const courses = await Course.find({ instructorId })
+      .select('_id title slug thumbnail status enrollmentCount')
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const courseIds = courses.map((course: any) => course._id);
+    const enrollments = await Enrollment.find({ courseId: { $in: courseIds } })
+      .populate({ path: 'courseId', select: 'title slug thumbnail status enrollmentCount' })
+      .sort({ enrolledAt: -1 })
+      .lean();
+
+    const mappedEnrollments = enrollments.map((enrollment: any) => {
+      const course = enrollment.courseId || null;
+      return {
+        _id: enrollment._id?.toString(),
+        userId: enrollment.userId,
+        learnerName: enrollment.learnerName || '',
+        learnerEmail: enrollment.learnerEmail || '',
+        learnerAvatarUrl: enrollment.learnerAvatarUrl || '',
+        status: enrollment.status,
+        source: enrollment.source,
+        enrolledAt: enrollment.enrolledAt,
+        accessEndsAt: enrollment.accessEndsAt || null,
+        course: course ? {
+          _id: course._id?.toString(),
+          title: course.title,
+          slug: course.slug,
+          thumbnail: course.thumbnail || '',
+          status: course.status,
+          enrollmentCount: course.enrollmentCount || 0,
+        } : null,
+      };
+    });
+
+    return {
+      enrollments: mappedEnrollments,
+      summary: {
+        total: mappedEnrollments.length,
+        purchase: mappedEnrollments.filter((item: any) => item.source === EnrollmentSource.PURCHASE).length,
+        subscription: mappedEnrollments.filter((item: any) => item.source === EnrollmentSource.SUBSCRIPTION).length,
+        active: mappedEnrollments.filter((item: any) => item.status === EnrollmentStatus.ACTIVE).length,
+      },
+      courses: courses.map((course: any) => ({
+        _id: course._id?.toString(),
+        title: course.title,
+        slug: course.slug,
+        status: course.status,
+        enrollmentCount: course.enrollmentCount || 0,
+      })),
+    };
+  }
 }
 
 export default new EnrollmentService();
+

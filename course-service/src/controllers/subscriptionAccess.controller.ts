@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // Subscription Access Controller
 // Mục đích:
 // - mở API opt-in catalog, enroll bằng thuê bao và entitlement
@@ -55,7 +55,7 @@ class SubscriptionAccessController {
 
   public enroll = async (req: AuthRequest, res: Response) => {
     try {
-      const data = await subscriptionAccessService.enroll(req.userId!, req.userRole!, String(req.params.id));
+      const data = await subscriptionAccessService.enroll(req.userId!, req.userRole!, String(req.params.id), { name: req.userName, email: req.userEmail });
       res.status(201).json({ status: 'OK', message: 'Đã mở khóa học bằng gói thuê bao.', data });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
@@ -73,3 +73,4 @@ class SubscriptionAccessController {
 }
 
 export default new SubscriptionAccessController();
+

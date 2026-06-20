@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // Course Event Handlers
 // Mục đích:
 // - consume event từ identity, media và payment
@@ -160,7 +160,7 @@ export const registerEventHandlers = async (): Promise<void> => {
 
       for (const item of payload.items) {
         try {
-          await enrollmentService.enroll(payload.userId, item.courseId, payload.userRole);
+          await enrollmentService.enroll(payload.userId, item.courseId, payload.userRole, { name: payload.fullName, email: payload.email });
         } catch (error: any) {
           const message = error?.message || 'Không thể ghi danh khóa học từ thanh toán.';
           console.warn(`[CourseEvent] Enroll failed for course ${item.courseId}: ${message}`);
@@ -237,3 +237,4 @@ export const registerEventHandlers = async (): Promise<void> => {
 
   console.log('[CourseEvent] Đã đăng ký lắng nghe tất cả events.');
 };
+

@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // Course Routes
 // Mục đích:
 // - khai báo route public, learner và instructor cho domain course
@@ -48,6 +48,7 @@ router.get('/:id/entitlement', extractUser, requireStudentOrInstructor, subscrip
 
 // [GET] /api/courses/my-courses — Danh sách khóa học của tôi
 router.get('/my-courses', extractUser, requireInstructor, courseController.getMyCourses);
+router.get('/instructor/students', extractUser, requireInstructor, enrollmentController.getInstructorStudents);
 
 // [POST] /api/courses — Tạo khóa học mới
 router.post('/', extractUser, requireInstructor, courseController.createCourse);
@@ -85,3 +86,4 @@ router.use('/:courseId', extractUser, requireInstructor, lessonRoutes);
 router.use('/:courseId', extractUser, requireInstructor, quizRoutes);
 
 export default router;
+
