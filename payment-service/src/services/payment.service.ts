@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // Payment Service
 // Mục đích:
 // - xử lý checkout, callback và tra cứu transaction cho mua khóa học và thuê bao
@@ -19,6 +19,7 @@ import { verifyMomoSignature } from './momo/momo.verifier';
 import { getMomoConfig } from './momo/momo.config';
 import { SubscriptionPlan } from '../models/subscriptionPlan.model';
 import subscriptionService from './subscription.service';
+import { UserSubscriptionTerm } from '../models/userSubscriptionTerm.model';
 import couponService from './coupon.service';
 
 type CheckoutRequest = {
@@ -1039,10 +1040,22 @@ class PaymentService {
         const month = `${paidAt.getFullYear()}-${String(paidAt.getMonth() + 1).padStart(2, '0')}`;
         const splitTotals = this.calculateTransactionSplitTotals(transaction);
 
+        const isSubscription = transaction.productType === 'SUBSCRIPTION';
         acc.totalRevenue += transaction.amount;
         acc.totalAdminRevenue += splitTotals.adminAmount;
         acc.totalInstructorRevenue += splitTotals.instructorAmount;
         acc.successfulTransactions += 1;
+        if (isSubscription) {
+          acc.subscriptionRevenue += transaction.amount;
+          acc.subscriptionAdminRevenue += splitTotals.adminAmount;
+          acc.subscriptionInstructorRevenue += splitTotals.instructorAmount;
+          acc.subscriptionTransactions += 1;
+        } else {
+          acc.courseRevenue += transaction.amount;
+          acc.courseAdminRevenue += splitTotals.adminAmount;
+          acc.courseInstructorRevenue += splitTotals.instructorAmount;
+          acc.courseTransactions += 1;
+        }
 
         const monthBucket = acc.monthlyData.find((entry: any) => entry.month === month);
         if (monthBucket) {
@@ -1050,6 +1063,8 @@ class PaymentService {
           monthBucket.adminRevenue += splitTotals.adminAmount;
           monthBucket.instructorRevenue += splitTotals.instructorAmount;
           monthBucket.transactions += 1;
+          if (isSubscription) monthBucket.subscriptionRevenue += transaction.amount;
+          else monthBucket.courseRevenue += transaction.amount;
         } else {
           acc.monthlyData.push({
             month,
@@ -1057,6 +1072,8 @@ class PaymentService {
             adminRevenue: splitTotals.adminAmount,
             instructorRevenue: splitTotals.instructorAmount,
             transactions: 1,
+            courseRevenue: isSubscription ? 0 : transaction.amount,
+            subscriptionRevenue: isSubscription ? transaction.amount : 0,
           });
         }
 
@@ -1083,7 +1100,15 @@ class PaymentService {
         totalAdminRevenue: 0,
         totalInstructorRevenue: 0,
         successfulTransactions: 0,
-        monthlyData: [] as Array<{ month: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
+        courseRevenue: 0,
+        courseAdminRevenue: 0,
+        courseInstructorRevenue: 0,
+        courseTransactions: 0,
+        subscriptionRevenue: 0,
+        subscriptionAdminRevenue: 0,
+        subscriptionInstructorRevenue: 0,
+        subscriptionTransactions: 0,
+        monthlyData: [] as Array<{ month: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number; courseRevenue: number; subscriptionRevenue: number }>,
         dailyData: [] as Array<{ date: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
         providerBreakdown: [] as Array<{ provider: PaymentProvider; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
       }
@@ -1091,7 +1116,10 @@ class PaymentService {
 
     summary.monthlyData.sort((a: any, b: any) => a.month.localeCompare(b.month));
 
-    const splitConfig = await this.ensureFinanceSplitConfig();
+    const [splitConfig, activeSubscriptions] = await Promise.all([
+      this.ensureFinanceSplitConfig(),
+      UserSubscriptionTerm.countDocuments({ status: 'ACTIVE', startsAt: { $lte: new Date() }, endsAt: { $gt: new Date() } }),
+    ]);
     const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
     const currentMonthData = summary.monthlyData.find((entry: any) => entry.month === currentMonth);
 
@@ -1102,7 +1130,9 @@ class PaymentService {
       thisMonthRevenue: currentMonthData?.revenue ?? 0,
       thisMonthAdminRevenue: currentMonthData?.adminRevenue ?? 0,
       thisMonthInstructorRevenue: currentMonthData?.instructorRevenue ?? 0,
-      activeSubscriptions: 0,
+      thisMonthCourseRevenue: currentMonthData?.courseRevenue ?? 0,
+      thisMonthSubscriptionRevenue: currentMonthData?.subscriptionRevenue ?? 0,
+      activeSubscriptions,
     };
   }
 
@@ -1205,7 +1235,7 @@ class PaymentService {
         totalAdminRevenue: 0,
         totalInstructorRevenue: 0,
         totalTransactions: 0,
-        monthlyData: [] as Array<{ month: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
+        monthlyData: [] as Array<{ month: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number; courseRevenue: number; subscriptionRevenue: number }>,
         dailyData: [] as Array<{ date: string; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
         providerBreakdown: [] as Array<{ provider: PaymentProvider; revenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
         courseBreakdown: [] as Array<{ courseId: string; courseTitle: string; slug: string; grossRevenue: number; adminRevenue: number; instructorRevenue: number; transactions: number }>,
@@ -1326,7 +1356,10 @@ class PaymentService {
     });
 
     const summary = this.buildInstructorSummary(items);
-    const splitConfig = await this.ensureFinanceSplitConfig();
+    const [splitConfig, activeSubscriptions] = await Promise.all([
+      this.ensureFinanceSplitConfig(),
+      UserSubscriptionTerm.countDocuments({ status: 'ACTIVE', startsAt: { $lte: new Date() }, endsAt: { $gt: new Date() } }),
+    ]);
     return {
       ...summary,
       adminPercent: splitConfig.adminPercent,
@@ -1389,4 +1422,9 @@ class PaymentService {
 }
 
 export default new PaymentService();
+
+
+
+
+
 
