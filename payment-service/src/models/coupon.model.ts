@@ -24,6 +24,7 @@ export interface ICoupon extends Document {
   startsAt?: Date;
   endsAt?: Date;
   isActive: boolean;
+  combinable: boolean; 
   createdBy: string;
   updatedBy: string;
   createdAt: Date;
@@ -44,6 +45,7 @@ const couponSchema = new Schema<ICoupon>(
     startsAt: { type: Date },
     endsAt: { type: Date },
     isActive: { type: Boolean, default: true, index: true },
+    combinable: { type: Boolean, default: false },
     createdBy: { type: String, default: '' },
     updatedBy: { type: String, default: '' },
   },

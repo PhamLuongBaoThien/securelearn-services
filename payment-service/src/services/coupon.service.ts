@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // Coupon Service
 // Mục đích:
 // - gom toàn bộ nghiệp vụ coupon cho Admin và learner ở payment-service
@@ -12,6 +12,8 @@ import { Types } from 'mongoose';
 import { Coupon, CouponType, ICoupon } from '../models/coupon.model';
 import { CouponRedemption } from '../models/couponRedemption.model';
 
+export type CouponComputedStatus = 'ACTIVE' | 'SCHEDULED' | 'EXPIRED' | 'INACTIVE' | 'USED_UP';
+
 export type CouponInput = {
   code: string;
   name: string;
@@ -24,6 +26,7 @@ export type CouponInput = {
   startsAt?: string | Date | null;
   endsAt?: string | Date | null;
   isActive?: boolean;
+  combinable?: boolean;
 };
 
 export type CouponValidationResult = {
@@ -31,6 +34,14 @@ export type CouponValidationResult = {
   subtotal: number;
   discountAmount: number;
   finalAmount: number;
+};
+
+type EvaluatedCoupon = {
+  coupon: ICoupon;
+  subtotal: number;
+  discountAmount: number;
+  finalAmount: number;
+  reasonIfUnavailable?: string;
 };
 
 class CouponService {
@@ -43,31 +54,20 @@ class CouponService {
       filter.$or = [{ code: searchRegex }, { name: searchRegex }];
     }
 
-    const now = new Date();
-    if (query?.status === 'active') {
-      filter.isActive = true;
-      filter.$and = [
-        { $or: [{ startsAt: { $exists: false } }, { startsAt: null }, { startsAt: { $lte: now } }] },
-        { $or: [{ endsAt: { $exists: false } }, { endsAt: null }, { endsAt: { $gte: now } }] },
-      ];
-    } else if (query?.status === 'inactive') {
-      filter.isActive = false;
-    } else if (query?.status === 'expired') {
-      filter.endsAt = { $lt: now };
-    }
+    const normalizedStatus = String(query?.status || '').toUpperCase();
+    this.applyStatusFilter(filter, normalizedStatus);
 
     const page = Math.max(Number(query?.page || 1), 1);
     const limit = Math.min(Math.max(Number(query?.limit || 20), 1), 100);
     const skip = (page - 1) * limit;
 
-    const [coupons, total] = await Promise.all([
-      Coupon.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
-      Coupon.countDocuments(filter),
-    ]);
+    const coupons = await Coupon.find(filter).sort({ createdAt: -1 });
+    const filteredCoupons = this.filterComputedStatus(coupons, normalizedStatus);
+    const pagedCoupons = filteredCoupons.slice(skip, skip + limit);
 
     return {
-      coupons: coupons.map((coupon) => this.mapCoupon(coupon)),
-      total,
+      coupons: pagedCoupons.map((coupon) => this.mapCoupon(coupon)),
+      total: filteredCoupons.length,
       page,
       limit,
     };
@@ -122,6 +122,78 @@ class CouponService {
     if (!deleted) throw new Error('Coupon không tồn tại.');
   }
 
+  public async getAvailableCoupons(userId: string | undefined, subtotal: number) {
+    if (subtotal <= 0) return { coupons: [], subtotal };
+    const coupons = await Coupon.find({}).sort({ endsAt: 1, createdAt: -1 });
+    const evaluated = await Promise.all(coupons.map((coupon) => this.evaluateCoupon(coupon, userId, subtotal)));
+    return {
+      subtotal,
+      coupons: evaluated
+        .filter((entry) => !entry.reasonIfUnavailable && entry.discountAmount > 0)
+        .map((entry) => this.mapEvaluatedCoupon(entry)),
+    };
+  }
+
+  public async getBestCoupon(userId: string | undefined, subtotal: number) {
+    const available = await this.getAvailableCoupons(userId, subtotal);
+    const best = available.coupons
+      .slice()
+      .sort((a: any, b: any) => {
+        if (a.finalAmount !== b.finalAmount) return a.finalAmount - b.finalAmount;
+        if (a.discountAmount !== b.discountAmount) return b.discountAmount - a.discountAmount;
+        const aEnds = a.endsAt ? new Date(a.endsAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const bEnds = b.endsAt ? new Date(b.endsAt).getTime() : Number.MAX_SAFE_INTEGER;
+        return aEnds - bEnds;
+      })[0];
+
+    return {
+      subtotal,
+      coupon: best || null,
+    };
+  }
+
+
+  public async getBestCouponPreview(subtotal: number, userId?: string) {
+    const normalizedSubtotal = Math.max(Math.floor(Number(subtotal || 0)), 0);
+    if (normalizedSubtotal <= 0) return { subtotal: normalizedSubtotal, coupon: null };
+    return this.getBestCoupon(userId, normalizedSubtotal);
+  }
+
+  public async getBestCouponPreviews(items: Array<{ courseId?: string; price?: number }>, userId?: string) {
+    const normalizedItems = items
+      .map((item) => ({
+        courseId: String(item.courseId || '').trim(),
+        subtotal: Math.max(Math.floor(Number(item.price || 0)), 0),
+      }))
+      .filter((item) => item.courseId && item.subtotal > 0)
+      .slice(0, 100);
+
+    if (normalizedItems.length === 0) return { previews: {} };
+
+    const coupons = await Coupon.find({}).sort({ endsAt: 1, createdAt: -1 });
+    const previews: Record<string, { subtotal: number; coupon: ReturnType<CouponService['mapCoupon']> | null }> = {};
+
+    await Promise.all(normalizedItems.map(async (item) => {
+      const evaluated = await Promise.all(coupons.map((coupon) => this.evaluateCoupon(coupon, userId, item.subtotal)));
+      const best = evaluated
+        .filter((entry) => !entry.reasonIfUnavailable && entry.discountAmount > 0)
+        .map((entry) => this.mapEvaluatedCoupon(entry))
+        .sort((a: any, b: any) => {
+          if (a.finalAmount !== b.finalAmount) return a.finalAmount - b.finalAmount;
+          if (a.discountAmount !== b.discountAmount) return b.discountAmount - a.discountAmount;
+          const aEnds = a.endsAt ? new Date(a.endsAt).getTime() : Number.MAX_SAFE_INTEGER;
+          const bEnds = b.endsAt ? new Date(b.endsAt).getTime() : Number.MAX_SAFE_INTEGER;
+          return aEnds - bEnds;
+        })[0] || null;
+
+      previews[item.courseId] = {
+        subtotal: item.subtotal,
+        coupon: best,
+      };
+    }));
+
+    return { previews };
+  }
   public async validateForCheckout(code: string, userId: string, subtotal: number): Promise<CouponValidationResult> {
     const normalizedCode = this.normalizeCode(code);
     if (!normalizedCode) throw new Error('Vui lòng nhập mã coupon.');
@@ -129,21 +201,113 @@ class CouponService {
 
     const coupon = await Coupon.findOne({ code: normalizedCode });
     if (!coupon) throw new Error('Mã coupon không tồn tại.');
-    this.assertCouponUsable(coupon, subtotal);
-
-    const userUsage = await CouponRedemption.countDocuments({ couponId: coupon._id.toString(), userId });
-    if (userUsage >= coupon.perUserLimit) {
-      throw new Error('Bạn đã sử dụng hết lượt cho mã coupon này.');
-    }
-
-    const discountAmount = this.calculateDiscount(coupon, subtotal);
-    if (discountAmount <= 0) throw new Error('Mã coupon không tạo ra giảm giá cho đơn hàng này.');
+    const evaluated = await this.evaluateCoupon(coupon, userId, subtotal);
+    if (evaluated.reasonIfUnavailable) throw new Error(evaluated.reasonIfUnavailable);
+    if (evaluated.discountAmount <= 0) throw new Error('Mã coupon không tạo ra giảm giá cho đơn hàng này.');
 
     return {
       coupon,
       subtotal,
-      discountAmount,
-      finalAmount: Math.max(subtotal - discountAmount, 0),
+      discountAmount: evaluated.discountAmount,
+      finalAmount: evaluated.finalAmount,
+    };
+  }
+
+  public async listRedemptions(query?: { couponId?: string; code?: string; user?: string; page?: number; limit?: number }) {
+    const filter: Record<string, any> = {};
+    if (query?.couponId) {
+      if (!Types.ObjectId.isValid(query.couponId)) throw new Error('Coupon không hợp lệ.');
+      filter.couponId = query.couponId;
+    }
+    if (query?.code) {
+      const escapedCode = String(query.code).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.code = new RegExp(escapedCode, 'i');
+    }
+    if (query?.user) {
+      const escapedUser = String(query.user).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.userId = new RegExp(escapedUser, 'i');
+    }
+
+    const page = Math.max(Number(query?.page || 1), 1);
+    const limit = Math.min(Math.max(Number(query?.limit || 20), 1), 100);
+    const skip = (page - 1) * limit;
+
+    const [redemptions, total] = await Promise.all([
+      CouponRedemption.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      CouponRedemption.countDocuments(filter),
+    ]);
+
+    return {
+      redemptions: redemptions.map((item) => ({
+        _id: item._id.toString(),
+        couponId: item.couponId,
+        couponCode: item.code,
+        userId: item.userId,
+        transactionId: item.transactionId,
+        transactionCode: item.transactionCode,
+        discountAmount: item.discountAmount,
+        createdAt: item.createdAt,
+      })),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  public async getCouponStats(couponId?: string) {
+    if (couponId && !Types.ObjectId.isValid(couponId)) throw new Error('Coupon không hợp lệ.');
+    const couponFilter = couponId ? { _id: couponId } : {};
+    const redemptionFilter = couponId ? { couponId } : {};
+    const [coupons, redemptions, discountAggregate, topByDiscount] = await Promise.all([
+      Coupon.find(couponFilter),
+      CouponRedemption.find(redemptionFilter).lean(),
+      CouponRedemption.aggregate([
+        { $match: redemptionFilter },
+        { $group: { _id: null, totalDiscountAmount: { $sum: '$discountAmount' }, totalRedemptions: { $sum: 1 } } },
+      ]),
+      CouponRedemption.aggregate([
+        { $match: redemptionFilter },
+        { $group: { _id: { couponId: '$couponId', code: '$code' }, totalDiscountAmount: { $sum: '$discountAmount' }, redemptions: { $sum: 1 } } },
+        { $sort: { totalDiscountAmount: -1 } },
+        { $limit: 5 },
+      ]),
+    ]);
+
+    const statusCounts = coupons.reduce(
+      (acc, coupon) => {
+        const status = this.getComputedStatus(coupon);
+        acc[status] += 1;
+        return acc;
+      },
+      { ACTIVE: 0, SCHEDULED: 0, EXPIRED: 0, INACTIVE: 0, USED_UP: 0 } as Record<CouponComputedStatus, number>
+    );
+
+    const uniqueUsers = new Set(redemptions.map((item) => item.userId)).size;
+    const aggregate = discountAggregate[0] || { totalDiscountAmount: 0, totalRedemptions: 0 };
+    const topByUsage = coupons
+      .slice()
+      .sort((a, b) => b.usedCount - a.usedCount)
+      .slice(0, 5)
+      .map((coupon) => ({
+        couponId: coupon._id.toString(),
+        code: coupon.code,
+        usedCount: coupon.usedCount,
+        computedStatus: this.getComputedStatus(coupon),
+      }));
+
+    return {
+      totalCoupons: coupons.length,
+      statusCounts,
+      totalRedemptions: aggregate.totalRedemptions || 0,
+      totalDiscountAmount: aggregate.totalDiscountAmount || 0,
+      uniqueUsers,
+      topByUsage,
+      topByDiscount: topByDiscount.map((item) => ({
+        couponId: item._id.couponId,
+        code: item._id.code,
+        totalDiscountAmount: item.totalDiscountAmount,
+        redemptions: item.redemptions,
+      })),
     };
   }
 
@@ -177,11 +341,87 @@ class CouponService {
       startsAt: coupon.startsAt ?? null,
       endsAt: coupon.endsAt ?? null,
       isActive: coupon.isActive,
+      combinable: coupon.combinable ?? false,
+      computedStatus: this.getComputedStatus(coupon),
       createdBy: coupon.createdBy,
       updatedBy: coupon.updatedBy,
       createdAt: coupon.createdAt,
       updatedAt: coupon.updatedAt,
     };
+  }
+
+  private mapEvaluatedCoupon(entry: EvaluatedCoupon) {
+    return {
+      ...this.mapCoupon(entry.coupon),
+      subtotal: entry.subtotal,
+      discountAmount: entry.discountAmount,
+      discountPreview: entry.discountAmount,
+      finalAmount: entry.finalAmount,
+      reasonIfUnavailable: entry.reasonIfUnavailable || '',
+    };
+  }
+
+  private async evaluateCoupon(coupon: ICoupon, userId: string | undefined, subtotal: number): Promise<EvaluatedCoupon> {
+    const reasonIfUnavailable = await this.getUnavailableReason(coupon, userId, subtotal);
+    const discountAmount = reasonIfUnavailable ? 0 : this.calculateDiscount(coupon, subtotal);
+    return {
+      coupon,
+      subtotal,
+      discountAmount,
+      finalAmount: Math.max(subtotal - discountAmount, 0),
+      reasonIfUnavailable,
+    };
+  }
+
+  private async getUnavailableReason(coupon: ICoupon, userId: string | undefined, subtotal: number): Promise<string> {
+    const status = this.getComputedStatus(coupon);
+    if (subtotal <= 0) return 'Giỏ hàng không có giá trị để áp dụng coupon.';
+    if (status === 'INACTIVE') return 'Mã coupon đã bị tạm dừng.';
+    if (status === 'SCHEDULED') return 'Mã coupon chưa đến thời gian sử dụng.';
+    if (status === 'EXPIRED') return 'Mã coupon đã hết hạn.';
+    if (status === 'USED_UP') return 'Mã coupon đã hết lượt sử dụng.';
+    if (subtotal < coupon.minOrderAmount) return `Đơn hàng cần tối thiểu ${coupon.minOrderAmount.toLocaleString('vi-VN')} ₫ để dùng mã này.`;
+
+    if (userId) {
+      const userUsage = await CouponRedemption.countDocuments({ couponId: coupon._id.toString(), userId });
+      if (userUsage >= coupon.perUserLimit) return 'Bạn đã sử dụng hết lượt cho mã coupon này.';
+    }
+    return '';
+  }
+
+  private getComputedStatus(coupon: ICoupon): CouponComputedStatus {
+    const now = new Date();
+    if (!coupon.isActive) return 'INACTIVE';
+    if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) return 'USED_UP';
+    if (coupon.startsAt && coupon.startsAt > now) return 'SCHEDULED';
+    if (coupon.endsAt && coupon.endsAt < now) return 'EXPIRED';
+    return 'ACTIVE';
+  }
+
+  private applyStatusFilter(filter: Record<string, any>, normalizedStatus: string): void {
+    const now = new Date();
+    if (['INACTIVE', 'INACTIVE', 'TAM_DUNG'].includes(normalizedStatus)) filter.isActive = false;
+    if (normalizedStatus === 'ACTIVE') {
+      filter.isActive = true;
+      filter.$and = [
+        { $or: [{ startsAt: { $exists: false } }, { startsAt: null }, { startsAt: { $lte: now } }] },
+        { $or: [{ endsAt: { $exists: false } }, { endsAt: null }, { endsAt: { $gte: now } }] },
+      ];
+    }
+    if (normalizedStatus === 'SCHEDULED') {
+      filter.isActive = true;
+      filter.startsAt = { $gt: now };
+    }
+    if (normalizedStatus === 'EXPIRED') filter.endsAt = { $lt: now };
+    if (normalizedStatus === 'USED_UP') filter.$expr = { $gte: ['$usedCount', '$usageLimit'] };
+  }
+
+  private filterComputedStatus(coupons: ICoupon[], normalizedStatus: string): ICoupon[] {
+    if (!normalizedStatus || ['ACTIVE', 'SCHEDULED', 'EXPIRED', 'INACTIVE', 'USED_UP'].includes(normalizedStatus)) {
+      if (!normalizedStatus) return coupons;
+      return coupons.filter((coupon) => this.getComputedStatus(coupon) === normalizedStatus);
+    }
+    return coupons;
   }
 
   private normalizeInput(input: Partial<CouponInput>, partial = false): Partial<CouponInput> & { code?: string } {
@@ -231,24 +471,12 @@ class CouponService {
     if (input.startsAt !== undefined) payload.startsAt = input.startsAt ? new Date(input.startsAt) : undefined;
     if (input.endsAt !== undefined) payload.endsAt = input.endsAt ? new Date(input.endsAt) : undefined;
     if (input.isActive !== undefined) payload.isActive = Boolean(input.isActive);
+    if (input.combinable !== undefined) payload.combinable = Boolean(input.combinable);
     if (payload.startsAt && payload.endsAt && payload.startsAt > payload.endsAt) {
       throw new Error('Ngày bắt đầu phải trước ngày kết thúc.');
     }
 
     return payload;
-  }
-
-  private assertCouponUsable(coupon: ICoupon, subtotal: number): void {
-    const now = new Date();
-    if (!coupon.isActive) throw new Error('Mã coupon đã bị tạm dừng.');
-    if (coupon.startsAt && coupon.startsAt > now) throw new Error('Mã coupon chưa đến thời gian sử dụng.');
-    if (coupon.endsAt && coupon.endsAt < now) throw new Error('Mã coupon đã hết hạn.');
-    if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
-      throw new Error('Mã coupon đã hết lượt sử dụng.');
-    }
-    if (subtotal < coupon.minOrderAmount) {
-      throw new Error(`Đơn hàng cần tối thiểu ${coupon.minOrderAmount.toLocaleString('vi-VN')} ₫ để dùng mã này.`);
-    }
   }
 
   private calculateDiscount(coupon: ICoupon, subtotal: number): number {
@@ -267,3 +495,4 @@ class CouponService {
 }
 
 export default new CouponService();
+

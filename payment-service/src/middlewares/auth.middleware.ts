@@ -1,4 +1,4 @@
-// Auth Middleware — Payment Service
+﻿// Auth Middleware — Payment Service
 // Mục đích:
 // - decode JWT đã được Kong verify
 // - gắn userId / role / name / email vào request
@@ -55,6 +55,42 @@ export const extractUser = async (req: AuthRequest, res: Response, next: NextFun
   next();
 };
 
+// Hàm này giống extractUser nhưng không trả về lỗi nếu thiếu token, để dùng cho các route có thể có hoặc không có auth (ví dụ: xem coupon tốt nhất trước khi checkout)
+export const optionalExtractUser = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  const token = req.header('Authorization')?.replace('Bearer ', '');
+  if (!token) {
+    next();
+    return;
+  }
+
+  const decoded = jwt.decode(token) as {
+    id: string;
+    role: string;
+    fullName?: string;
+    email?: string;
+    permissions?: string[];
+  } | null;
+  if (!decoded) {
+    next();
+    return;
+  }
+
+  req.userId = decoded.id;
+  req.userRole = decoded.role;
+  req.userName = decoded.fullName ?? '';
+  req.userEmail = decoded.email ?? '';
+  req.userPermissions = decoded.permissions ?? [];
+
+  if (decoded.role !== 'ADMIN') {
+    const isLocked = await redisClient.get(`locked_user:${decoded.id}`);
+    if (isLocked) {
+      res.status(403).json({ status: 'ERR', message: 'Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.' });
+      return;
+    }
+  }
+
+  next();
+};
 export const requireRoles = (...roles: string[]) =>
   (req: AuthRequest, res: Response, next: NextFunction): void => {
     if (!req.userRole || !roles.includes(req.userRole)) {
@@ -72,3 +108,4 @@ export const requirePermission = (permission: string) =>
     }
     next();
   };
+

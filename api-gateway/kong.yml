@@ -1,4 +1,4 @@
-# ========================
+﻿# ========================
 # Kong Declarative Configuration
 # API Gateway cho SecureLearn Microservices
 #
@@ -221,6 +221,15 @@ services:
         strip_path: false
         methods:
           - GET
+
+      - name: payment-coupon-preview-public
+        paths:
+          - /api/payments/coupons/best-preview
+          - /api/payments/coupons/best-previews
+        strip_path: false
+        methods:
+          - GET
+          - POST
 
       - name: payment-protected
         paths:
@@ -449,6 +458,8 @@ plugins:
       key_claim_name: iss
       claims_to_verify:
         - exp
+
+
 
 
 

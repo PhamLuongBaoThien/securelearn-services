@@ -263,6 +263,16 @@ class PaymentService {
       finalAmount: validation.finalAmount,
     };
   }
+
+  public async getAvailableCourseCoupons(userId: string, token: string) {
+    const cart = await this.fetchCart(token);
+    return couponService.getAvailableCoupons(userId, cart.totalPrice);
+  }
+
+  public async getBestCourseCoupon(userId: string, token: string) {
+    const cart = await this.fetchCart(token);
+    return couponService.getBestCoupon(userId, cart.totalPrice);
+  }
   public async getTransactionForUser(transactionId: string, userId: string, userRole?: string) {
     const transaction = await this.findOwnedTransaction(transactionId, userId, userRole);
     return this.mapTransaction(transaction);
