@@ -12,7 +12,7 @@ import { publishCourseCompleted, publishLessonCompleted } from '../events/publis
 import courseContextService, { CourseLessonContext, CourseProgressContext, ProgressionMode } from './courseContext.service';
 
 const VIDEO_COMPLETE_PERCENT = 90;
-const STREAK_MIN_ACTIVE_SECONDS = 5 * 60;
+const STREAK_MIN_ACTIVE_SECONDS = 30;
 const ACTIVITY_TIME_ZONE = 'Asia/Bangkok';
 
 type HeartbeatInput = {
