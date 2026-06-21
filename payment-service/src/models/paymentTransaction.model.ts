@@ -5,7 +5,7 @@
 // - confirm
 // - tra cứu transaction
 
-import { Schema, model, Document} from 'mongoose';
+import { Schema, model, Document } from 'mongoose';
 import { PaymentMethod, PaymentProvider, PaymentStatus } from '@securelearn/common';
 
 export interface PaymentCourseItem {
@@ -29,7 +29,16 @@ export interface IPaymentTransaction extends Document {
   fullName: string;
   email: string;
   items: PaymentCourseItem[];
+  grossAmount?: number;
+  discountAmount?: number;
   amount: number;
+  couponSnapshot?: {
+    couponId: string;
+    code: string;
+    type: 'PERCENT' | 'FIXED';
+    value: number;
+    discountAmount: number;
+  };
   productType: 'COURSE' | 'SUBSCRIPTION';
   subscriptionSnapshot?: {
     planId: string;
@@ -80,7 +89,16 @@ const paymentTransactionSchema = new Schema<IPaymentTransaction>(
     fullName: { type: String, required: true },
     email: { type: String, required: true },
     items: { type: [paymentCourseItemSchema], required: true },
+    grossAmount: { type: Number, min: 0 },
+    discountAmount: { type: Number, default: 0, min: 0 },
     amount: { type: Number, required: true, min: 0 },
+    couponSnapshot: {
+      couponId: { type: String },
+      code: { type: String },
+      type: { type: String, enum: ['PERCENT', 'FIXED'] },
+      value: { type: Number, min: 0 },
+      discountAmount: { type: Number, min: 0 },
+    },
     // productType giúp callback/payment return biết giao dịch này cần enroll course hay tạo term thuê bao.
     productType: { type: String, enum: ['COURSE', 'SUBSCRIPTION'], default: 'COURSE', index: true },
     subscriptionSnapshot: {

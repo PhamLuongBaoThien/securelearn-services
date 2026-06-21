@@ -1,18 +1,20 @@
 // ========================
 // Payment Routes
 // Mục đích:
-// - gom toàn bộ endpoint checkout, webhook, finance và subscription của payment-service
+// - gom toàn bộ endpoint checkout, webhook, finance, coupon và subscription của payment-service
 // - tách rõ route public, route có auth và route nội bộ để các flow thanh toán dễ theo dõi
 // ========================
 import { Router } from 'express';
 import paymentController from '../controllers/payment.controller';
 import financeController from '../controllers/finance.controller';
 import subscriptionController from '../controllers/subscription.controller';
+import couponController from '../controllers/coupon.controller';
 import { extractUser, requirePermission, requireRoles } from '../middlewares/auth.middleware';
 
 const router = Router();
 // Route cho checkout khóa học
 router.post('/course-checkout', extractUser, requireRoles('STUDENT', 'INSTRUCTOR'), paymentController.courseCheckout);
+router.post('/coupons/validate', extractUser, requireRoles('STUDENT', 'INSTRUCTOR'), couponController.validate);
 // Nhóm route mới cho thuê bao: tách riêng khỏi mua khóa học để dễ quản trị quyền và settlement.
 router.get('/subscription-plans', subscriptionController.plans);
 router.post('/subscription-checkout', extractUser, requireRoles('STUDENT', 'INSTRUCTOR'), subscriptionController.checkout);
@@ -28,6 +30,12 @@ router.get('/admin/finance/split-config', extractUser, requirePermission('financ
 router.put('/admin/finance/split-config', extractUser, requirePermission('finance:manage'), financeController.updateSplitConfig);
 router.get('/admin/finance/revenue', extractUser, requirePermission('finance:read'), financeController.getAdminRevenue);
 router.get('/admin/finance/transactions', extractUser, requirePermission('finance:read'), financeController.getAdminTransactions);
+
+router.get('/admin/coupons', extractUser, requirePermission('finance:read'), couponController.listAdmin);
+router.post('/admin/coupons', extractUser, requirePermission('finance:manage'), couponController.create);
+router.patch('/admin/coupons/:id', extractUser, requirePermission('finance:manage'), couponController.update);
+router.patch('/admin/coupons/:id/status', extractUser, requirePermission('finance:manage'), couponController.updateStatus);
+router.delete('/admin/coupons/:id', extractUser, requirePermission('finance:manage'), couponController.delete);
 
 // Finance: Instructor report
 router.get('/instructor/finance/revenue', extractUser, requireRoles('INSTRUCTOR'), financeController.getInstructorRevenue);

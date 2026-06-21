@@ -19,10 +19,12 @@ import { verifyMomoSignature } from './momo/momo.verifier';
 import { getMomoConfig } from './momo/momo.config';
 import { SubscriptionPlan } from '../models/subscriptionPlan.model';
 import subscriptionService from './subscription.service';
+import couponService from './coupon.service';
 
 type CheckoutRequest = {
   paymentMethod: PaymentMethod;
   provider?: PaymentProvider;
+  couponCode?: string;
 };
 
 type SubscriptionCheckoutRequest = CheckoutRequest & {
@@ -70,6 +72,13 @@ class PaymentService {
       throw new Error('Giỏ hàng của bạn đang trống.');
     }
 
+    const couponValidation = request.couponCode
+      ? await couponService.validateForCheckout(request.couponCode, user.userId, cart.totalPrice)
+      : null;
+    const grossAmount = cart.totalPrice;
+    const discountAmount = couponValidation?.discountAmount ?? 0;
+    const payableAmount = couponValidation?.finalAmount ?? grossAmount;
+
     // Chuẩn hóa provider để dễ quản lý sau này khi thêm cổng thanh toán mới hoặc phương thức thanh toán mới.
     const normalizedProvider = this.normalizeProvider(request.provider, request.paymentMethod);
 
@@ -83,7 +92,16 @@ class PaymentService {
       fullName: user.fullName,
       email: user.email,
       items: cart.items,
-      amount: cart.totalPrice,
+      grossAmount,
+      discountAmount,
+      amount: payableAmount,
+      couponSnapshot: couponValidation ? {
+        couponId: couponValidation.coupon._id.toString(),
+        code: couponValidation.coupon.code,
+        type: couponValidation.coupon.type,
+        value: couponValidation.coupon.value,
+        discountAmount,
+      } : undefined,
       provider: normalizedProvider,
       paymentMethod: request.paymentMethod,
       status: 'PENDING' as PaymentStatus,
@@ -119,7 +137,7 @@ class PaymentService {
         paymentMethod: request.paymentMethod,
         success: true,
         message: 'Created checkout session',
-        rawPayload: { cartCount: cart.items.length, clientIp, orderInfo, paymentUrl },
+        rawPayload: { cartCount: cart.items.length, clientIp, orderInfo, paymentUrl, couponCode: couponValidation?.coupon.code },
       });
     } catch (error: any) {
       transaction.status = 'FAILED';
@@ -136,7 +154,7 @@ class PaymentService {
         paymentMethod: request.paymentMethod,
         success: false,
         message: error.message || 'Không thể tạo phiên thanh toán.',
-        rawPayload: { cartCount: cart.items.length, clientIp, orderInfo },
+        rawPayload: { cartCount: cart.items.length, clientIp, orderInfo, couponCode: couponValidation?.coupon.code },
       });
 
       throw error;
@@ -231,6 +249,20 @@ class PaymentService {
     }
   }
 
+
+  public async validateCourseCoupon(userId: string, token: string, code: string) {
+    const cart = await this.fetchCart(token);
+    if (cart.items.length === 0) {
+      throw new Error('Giỏ hàng của bạn đang trống.');
+    }
+    const validation = await couponService.validateForCheckout(code, userId, cart.totalPrice);
+    return {
+      coupon: couponService.mapCoupon(validation.coupon),
+      subtotal: validation.subtotal,
+      discountAmount: validation.discountAmount,
+      finalAmount: validation.finalAmount,
+    };
+  }
   public async getTransactionForUser(transactionId: string, userId: string, userRole?: string) {
     const transaction = await this.findOwnedTransaction(transactionId, userId, userRole);
     return this.mapTransaction(transaction);
@@ -775,7 +807,9 @@ class PaymentService {
       amount: transaction.amount,
       productType: transaction.productType || 'COURSE',
       subscriptionSnapshot: transaction.subscriptionSnapshot || null,
-      grossAmount: transaction.amount,
+      grossAmount: transaction.grossAmount ?? transaction.amount,
+      discountAmount: transaction.discountAmount ?? 0,
+      couponSnapshot: transaction.couponSnapshot || null,
       adminAmount: splitTotals.adminAmount,
       instructorAmount: splitTotals.instructorAmount,
       provider: transaction.provider,
@@ -825,15 +859,16 @@ class PaymentService {
     const config = await this.ensureFinanceSplitConfig();
     let changed = false;
 
-    transaction.items = transaction.items.map((item) => {
+    transaction.items = transaction.items.map((item, index) => {
       const hasValidSnapshot =
         Number.isFinite(item.adminPercent) &&
         Number.isFinite(item.instructorPercent) &&
         item.adminPercent! + item.instructorPercent! === 100;
       const adminPercent = hasValidSnapshot ? item.adminPercent! : config.adminPercent;
       const instructorPercent = hasValidSnapshot ? item.instructorPercent! : config.instructorPercent;
-      const adminAmount = this.calculateSplitAmount(item.price, adminPercent);
-      const instructorAmount = item.price - adminAmount;
+      const netPrice = this.calculateNetItemAmount(transaction, item, index);
+      const adminAmount = this.calculateSplitAmount(netPrice, adminPercent);
+      const instructorAmount = netPrice - adminAmount;
 
       if (
         item.instructorId !== (item.instructorId || '') ||
@@ -870,6 +905,16 @@ class PaymentService {
       return;
     }
     await this.ensureRevenueSnapshot(transaction);
+    if (transaction.couponSnapshot?.couponId && (transaction.discountAmount || 0) > 0) {
+      await couponService.recordRedemption({
+        couponId: transaction.couponSnapshot.couponId,
+        code: transaction.couponSnapshot.code,
+        userId: transaction.userId,
+        transactionId: transaction._id.toString(),
+        transactionCode: transaction.transactionCode,
+        discountAmount: transaction.discountAmount || transaction.couponSnapshot.discountAmount,
+      });
+    }
     await publishPaymentCourseSucceeded(this.toSucceededPayload(transaction));
   }
 
@@ -904,15 +949,38 @@ class PaymentService {
       };
     }
     return transaction.items.reduce(
-      (acc: { adminAmount: number; instructorAmount: number }, item: any) => {
-        const adminAmount = item.adminAmount ?? this.calculateSplitAmount(item.price, item.adminPercent ?? 0);
-        const instructorAmount = item.instructorAmount ?? (item.price - adminAmount);
+      (acc: { adminAmount: number; instructorAmount: number }, item: any, index: number) => {
+        const netPrice = this.calculateNetItemAmount(transaction, item, index);
+        const adminAmount = item.adminAmount ?? this.calculateSplitAmount(netPrice, item.adminPercent ?? 0);
+        const instructorAmount = item.instructorAmount ?? (netPrice - adminAmount);
         acc.adminAmount += adminAmount;
         acc.instructorAmount += instructorAmount;
         return acc;
       },
       { adminAmount: 0, instructorAmount: 0 }
     );
+  }
+
+
+  private calculateNetItemAmount(transaction: any, item: any, index: number): number {
+    const grossAmount = transaction.grossAmount ?? transaction.items.reduce((sum: number, entry: any) => sum + Number(entry.price || 0), 0);
+    const discountAmount = Math.min(Number(transaction.discountAmount || 0), grossAmount);
+    if (!discountAmount || grossAmount <= 0) return Number(item.price || 0);
+
+    const items = transaction.items || [];
+    const grossBeforeItem = items
+      .slice(0, index)
+      .reduce((sum: number, entry: any) => sum + Number(entry.price || 0), 0);
+    const allocatedBeforeItem = items
+      .slice(0, index)
+      .reduce((sum: number, entry: any) => sum + Math.floor((Number(entry.price || 0) * discountAmount) / grossAmount), 0);
+    const isLastItem = index === items.length - 1;
+    const itemDiscount = isLastItem
+      ? discountAmount - allocatedBeforeItem
+      : Math.floor((Number(item.price || 0) * discountAmount) / grossAmount);
+
+    if (grossBeforeItem >= grossAmount) return Number(item.price || 0);
+    return Math.max(Number(item.price || 0) - itemDiscount, 0);
   }
 
   private async queryTransactions(query?: { search?: string; startDate?: string; endDate?: string; provider?: string; status?: string; page?: number; limit?: number }) {
@@ -1239,7 +1307,7 @@ class PaymentService {
           slug: item.slug,
           instructorId: item.instructorId || instructorId,
           instructorName: item.instructorName || '',
-          grossAmount: item.price,
+          grossAmount: (item.adminAmount ?? 0) + (item.instructorAmount ?? 0),
           adminPercent: item.adminPercent ?? 0,
           instructorPercent: item.instructorPercent ?? 0,
           adminAmount: item.adminAmount ?? 0,

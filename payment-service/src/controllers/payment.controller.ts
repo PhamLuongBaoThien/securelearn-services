@@ -22,7 +22,7 @@ import { PaymentMethod, PaymentProvider } from '@securelearn/common';
 class PaymentController {
   public async courseCheckout(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { paymentMethod, provider } = req.body as { paymentMethod?: PaymentMethod; provider?: PaymentProvider };
+      const { paymentMethod, provider, couponCode } = req.body as { paymentMethod?: PaymentMethod; provider?: PaymentProvider; couponCode?: string };
       if (!paymentMethod) {
         res.status(400).json({ status: 'ERR', message: 'Vui lòng chọn phương thức thanh toán.' });
         return;
@@ -42,7 +42,7 @@ class PaymentController {
           email: req.userEmail || '',
         },
         authHeader,
-        { paymentMethod, provider },
+        { paymentMethod, provider, couponCode },
         String(req.headers['x-forwarded-for'] || req.ip || '127.0.0.1').split(',')[0].trim()
       );
 

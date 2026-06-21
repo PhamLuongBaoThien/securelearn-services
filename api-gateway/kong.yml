@@ -1,4 +1,4 @@
-﻿# ========================
+# ========================
 # Kong Declarative Configuration
 # API Gateway cho SecureLearn Microservices
 #
@@ -230,6 +230,8 @@ services:
           - GET
           - POST
           - PUT
+          - PATCH
+          - DELETE
 
   - name: progress-service
     url: http://progress-service:5005
