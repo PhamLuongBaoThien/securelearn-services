@@ -215,35 +215,52 @@ class VideoAssetService {
     return asset;
   }
 
+  // [BẢO MẬT STREAMING - BƯỚC 2.1]
+  // Đọc file manifest (.m3u8) từ MinIO và viết lại đường dẫn để ẩn các thông tin bảo mật,
+  // đồng thời ký presigned URL có thời hạn ngắn (1 giờ) cho các phân đoạn video (.ts).
   public async getPlaybackManifest(videoAssetId: string, keyUri?: string) {
-    // Hàm này đọc manifest HLS từ storage và rewrite các line cần bảo vệ.
-    // Nếu có keyUri, manifest trả ra sẽ trỏ về API lấy key nội bộ thay vì lộ file key gốc.
     const asset = await VideoAsset.findById(videoAssetId).lean();
     if (!asset?.manifestKey || asset.status !== 'READY') {
       throw new Error('Video chưa sẵn sàng để phát.');
     }
+    
+    // Nếu có keyUri, kiểm tra xem manifest đã viết lại đã có sẵn trong Redis cache chưa
     if (keyUri) {
       const cached = await this.getCachedPlaybackManifest(asset.manifestKey);
       if (cached) return cached.replaceAll(KEY_URI_PLACEHOLDER, keyUri);
     }
 
+    // Đọc nội dung file manifest HLS gốc (.m3u8) từ MinIO
     const manifest = await s3Service.getObjectText(asset.manifestKey);
     const baseKey = asset.manifestKey.slice(0, asset.manifestKey.lastIndexOf('/') + 1);
+    
+    // Quét từng dòng của file manifest để thực hiện viết lại (rewrite)
     const lines = await Promise.all(
       manifest.split(/\r?\n/).map(async (line) => {
         const value = line.trim();
+        
+        // 1. Nếu là dòng chỉ định khóa giải mã (#EXT-X-KEY): thay thế bằng Placeholder để ẩn URL gốc
         if (value.startsWith('#EXT-X-KEY') && keyUri) {
           return line.includes('URI="')
             ? line.replace(/URI="[^"]*"/, `URI="${KEY_URI_PLACEHOLDER}"`)
             : `${line},URI="${KEY_URI_PLACEHOLDER}"`;
         }
+        
+        // 2. Bỏ qua các dòng comment, chỉ thị định dạng HLS
         if (!value || value.startsWith('#') || /^https?:\/\//i.test(value)) return line;
+        
+        // 3. Nếu là dòng chứa file phân đoạn (.ts): ký đường dẫn presigned URL có hiệu lực trong 1 giờ
         return s3Service.getDownloadPresignedUrl(`${baseKey}${value}`, PLAYBACK_SEGMENT_URL_TTL_SECONDS);
       })
     );
+    
     const rewritten = lines.join('\n');
     if (!keyUri) return rewritten;
+    
+    // Lưu manifest đã rewrite vào Redis cache (thời gian sống 4 phút) để phục vụ các yêu cầu tiếp theo
     await this.cachePlaybackManifest(asset.manifestKey, rewritten);
+    
+    // Trả về manifest, thay thế placeholder bằng keyUri thực tế (kèm session) của user
     return rewritten.replaceAll(KEY_URI_PLACEHOLDER, keyUri);
   }
 

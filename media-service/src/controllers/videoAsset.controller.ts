@@ -46,12 +46,17 @@ class VideoAssetController {
     }
   }
 
+  // [BẢO MẬT STREAMING - BƯỚC 2]
+  // Endpoint lấy key giải mã AES-128 của phân đoạn HLS (.ts).
+  // Đảm bảo chỉ người dùng đang xem thực tế mới lấy được key giải mã nhị phân.
   public async getEncryptionKey(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const asset = await videoAssetService.getAsset(videoAssetId);
       const session = typeof req.query.session === 'string' ? req.query.session : '';
+      
       if (session) {
+        // Kiểm tra Key Session có đúng của user đang request và đúng video này không
         const validSession = await playbackAccessService.validateKeySession(session, videoAssetId, req.userId);
         if (!validSession) {
           res.status(403).send('Invalid key session');
@@ -61,10 +66,13 @@ class VideoAssetController {
         res.status(403).send('Key requires playback session');
         return;
       }
+      
       if (!asset.encryptionKey) {
         res.status(404).send('Key not found or not ready');
         return;
       }
+      
+      // Chuyển đổi chuỗi hex lưu trong DB thành dữ liệu binary buffer nhị phân thô để gửi về player giải mã
       const keyBuffer = Buffer.from(asset.encryptionKey, 'hex');
       res.setHeader('Content-Type', 'application/octet-stream');
       res.send(keyBuffer);
@@ -73,6 +81,9 @@ class VideoAssetController {
     }
   }
 
+  // [BẢO MẬT STREAMING - BƯỚC 2]
+  // Endpoint khởi tạo phiên xem video (Playback Session).
+  // Tạo One-Time Playback Token (hết hạn trong 60s) và Media Session Token dài hạn (30 phút) trong Redis.
   public async createPlaybackSession(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -82,8 +93,13 @@ class VideoAssetController {
         videoAssetId,
         courseId: String(asset.courseId),
       };
+      
+      // Tạo token xem manifest dùng một lần trong Redis
       const token = await playbackAccessService.createOneTimePlayback(playbackInput);
+      
+      // Tạo session xem video dài hạn lưu trong Redis để FE gia hạn không cần login lại
       const mediaSessionToken = await playbackAccessService.createMediaSession(playbackInput);
+      
       res.status(201).json({
         status: 'OK',
         data: {
@@ -140,6 +156,8 @@ class VideoAssetController {
     }
   }
 
+  // [BẢO MẬT STREAMING - BƯỚC 2]
+  // Endpoint consume Playback Token dùng 1 lần và trả về nội dung file manifest HLS.
   public async getOneTimePlaybackManifest(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -148,19 +166,27 @@ class VideoAssetController {
         res.status(400).json({ status: 'ERR', message: 'Thiếu playback token.' });
         return;
       }
+      
+      // Đọc và xóa (GET + DEL) token trong Redis ngay lập tức để chặn replay link
       const playback = await playbackAccessService.consumeOneTimePlayback(token);
       if (!playback || playback.videoAssetId !== videoAssetId) {
         res.status(410).json({ status: 'ERR', message: 'Playback URL đã hết hạn hoặc đã được sử dụng.' });
         return;
       }
+      
+      // Tạo Key Session mới trong Redis (hết hạn sau 5 phút) để cấp quyền lấy AES key giải mã
       const keySession = await playbackAccessService.createKeySession({
         userId: playback.userId,
         videoAssetId,
       });
+      
+      // Viết lại URL của Key trong manifest để trỏ về API cấp key bảo mật kèm theo token Key Session
       const keyUri = `/api/media/videos/${videoAssetId}/key?session=${encodeURIComponent(keySession)}`;
+      
+      // Đọc manifest từ MinIO, rewrite và trả về trực tiếp
       const manifest = await videoAssetService.getPlaybackManifest(videoAssetId, keyUri);
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('Cache-Control', 'private, no-store'); // Chặn caching manifest
       res.send(manifest);
     } catch (error: any) {
       res.status(404).json({ status: 'ERR', message: error.message });

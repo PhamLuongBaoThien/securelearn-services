@@ -124,31 +124,53 @@ export type LessonProgressSummary = {
 };
 
 class ProgressService {
+  // [TIẾN ĐỘ & HEARTBEAT - BƯỚC 3]
+  // Xử lý sự kiện heartbeat gửi lên từ Frontend mỗi 15 giây.
+  // Đồng bộ thời gian thực học, cập nhật segment xem video và tính toán tiến độ.
   public async heartbeat(input: HeartbeatInput): Promise<CourseProgressResponse> {
     this.assertHeartbeatPayload(input);
+    
+    // 1. Gọi gRPC sang course-service để lấy thông tin giáo trình và check quyền của học viên
     const context = await this.loadAllowedContext(input.userId, input.userRole, input.courseId);
+    
+    // 2. Tự động đồng bộ tiến độ cũ sang phiên bản khóa học mới nếu có cập nhật
     await this.ensureCurrentVersionLessonProgress(input.userId, context);
+    
     const lesson = this.resolveLesson(context, input.lessonId, input.lessonType);
+    
+    // 3. Bảo vệ: Kiểm tra xem bài học hiện tại có bị khóa do ProgressionMode hay không
     await this.assertLessonUnlocked(input.userId, context, input.lessonId);
+    
+    // 4. Chuẩn hóa delta thực học của học viên (giới hạn tối đa 15s để tránh gian lận)
     const activeSeconds = this.normalizeActiveSeconds(input.watchedSecondsDelta);
+    
+    // 5. Ghi nhận hoặc cập nhật LearningSession (phiên học đang chạy)
     await this.upsertLearningSession(input, context, activeSeconds, false);
 
+    // 6. Cập nhật tiến độ của Video hoặc Quiz
     if (input.lessonType === LessonProgressType.QUIZ) {
       await this.upsertQuizHeartbeat(input, context);
     } else {
       await this.upsertVideoHeartbeat(input, context, lesson.duration);
     }
 
+    // 7. Ghi nhận thời gian hoạt động học tập hàng ngày (phục vụ streak/goal)
     if (activeSeconds > 0) {
       await this.recordDailyActivity(input.userId, activeSeconds, 1, 0, 0);
     }
 
+    // 8. Tính toán lại tổng tiến độ khóa học (phần trăm hoàn thành)
     await this.recalculateCourseProgress(input.userId, context, input.lessonId, this.toNumber(input.positionSeconds));
     return this.getCourseProgress(input.userId, input.userRole, input.courseId);
   }
 
+  // [NỘP ĐIỂM TRẮC NGHIỆM - BƯỚC 4]
+  // Được gọi khi học viên hoàn thành một bài trắc nghiệm (Quiz) thành công ở course-service.
+  // Đồng bộ điểm số và cập nhật tiến độ bài học Quiz thành COMPLETED.
   public async quizComplete(input: QuizCompleteInput): Promise<CourseProgressResponse> {
     this.assertQuizCompletePayload(input);
+    
+    // Đọc context khóa học qua gRPC
     const context = await this.loadAllowedContext(input.userId, input.userRole, input.courseId);
     await this.ensureCurrentVersionLessonProgress(input.userId, context);
     this.resolveLesson(context, input.lessonId, LessonProgressType.QUIZ);
@@ -161,11 +183,13 @@ class ProgressService {
       courseId: context.courseId,
       lessonId: input.lessonId,
     });
+    
     const wasCompleted = existing?.status === LessonProgressStatus.COMPLETED;
     const isCompleted = wasCompleted || Boolean(input.passed);
     const completedAt = isCompleted ? existing?.completedAt || now : null;
     const shouldPublishLessonCompleted = Boolean(input.passed) && !wasCompleted;
     const shouldUpdateCompletionMetadata = Boolean(input.passed) || !wasCompleted;
+    
     const update = {
       userId: input.userId,
       courseId: context.courseId,
@@ -173,6 +197,7 @@ class ProgressService {
       lessonId: input.lessonId,
       lessonType: LessonProgressType.QUIZ,
       quizAttemptId: shouldUpdateCompletionMetadata ? input.attemptId : existing?.quizAttemptId || '',
+      // Lưu lại điểm số cao nhất của bài quiz này
       quizScore: input.passed ? Math.max(existing?.quizScore || 0, score) : wasCompleted ? existing?.quizScore || 0 : score,
       quizPassed: Boolean(existing?.quizPassed || input.passed),
       status: isCompleted ? LessonProgressStatus.COMPLETED : LessonProgressStatus.IN_PROGRESS,
@@ -185,9 +210,13 @@ class ProgressService {
       { upsert: true, new: true }
     );
 
+    // Kết thúc phiên học active khi làm xong bài
     await this.endActiveLearningSessions(input.userId, context.courseId, input.lessonId);
+    
     if (shouldPublishLessonCompleted && completedAt) {
       await this.recordDailyActivity(input.userId, 0, 0, 1, 0);
+      
+      // Phát sự kiện hoàn thành bài học qua RabbitMQ (Exchange: PROGRESS)
       await publishLessonCompleted({
         userId: input.userId,
         courseId: context.courseId,
@@ -201,6 +230,7 @@ class ProgressService {
       });
     }
 
+    // Tính toán lại tổng tiến độ khóa học
     await this.recalculateCourseProgress(input.userId, context, input.lessonId, 0);
     return this.getCourseProgress(input.userId, input.userRole, input.courseId);
   }
