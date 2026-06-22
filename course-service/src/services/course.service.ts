@@ -209,6 +209,34 @@ interface CourseReviewResponse {
   courseId: string;
 }
 
+interface AdminCourseListResponse {
+  _id: string;
+  title: string;
+  slug: string;
+  thumbnail: string;
+  instructorId: string;
+  instructorName: string;
+  category: {
+    _id: string;
+    name: string;
+    slug: string;
+    parentId: string | null;
+  } | null;
+  level: string;
+  status: string;
+  subscriptionStatus: SubscriptionCatalogStatus;
+  price: number;
+  totalLessons: number;
+  totalSections: number;
+  totalDuration: number;
+  enrollmentCount: number;
+  ratingAverage: number;
+  ratingCount: number;
+  currentVersionId: string | null;
+  draftVersionId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
 type ReviewerSnapshot = {
   adminId: string;
   adminName: string;
@@ -801,6 +829,161 @@ class CourseService {
     };
   }
 
+  public async getAdminCourses(query: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+    subscriptionStatus?: SubscriptionCatalogStatus;
+    categoryId?: string;
+    level?: string;
+    instructorId?: string;
+    sort?: string;
+  }): Promise<{
+    courses: AdminCourseListResponse[];
+    total: number;
+    page: number;
+    totalPages: number;
+    summary: {
+      total: number;
+      subscriptionApproved: number;
+      subscriptionPending: number;
+      withDraft: number;
+    };
+  }> {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(100, Math.max(1, query.limit || 20));
+    const filter: Record<string, unknown> = {
+      status: CourseStatus.PUBLISHED,
+      currentVersionId: { $ne: null },
+    };
+
+    if (query.search?.trim()) {
+      const search = query.search.trim();
+      filter.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { slug: { $regex: search, $options: "i" } },
+        { instructorName: { $regex: search, $options: "i" } },
+        {
+          $expr: {
+            $regexMatch: {
+              input: { $toString: "$_id" },
+              regex: search,
+              options: "i",
+            },
+          },
+        },
+      ];
+    }
+    if (query.subscriptionStatus)
+      filter.subscriptionStatus = query.subscriptionStatus;
+    if (query.categoryId && Types.ObjectId.isValid(query.categoryId)) {
+      filter.categoryId = new Types.ObjectId(query.categoryId);
+    }
+    if (query.level) filter.level = query.level;
+    if (query.instructorId?.trim()) filter.instructorId = query.instructorId.trim();
+
+    let sortOption: Record<string, 1 | -1> = { updatedAt: -1 };
+    switch (query.sort) {
+      case "newest":
+        sortOption = { createdAt: -1 };
+        break;
+      case "updated":
+        sortOption = { updatedAt: -1 };
+        break;
+      case "popular":
+        sortOption = { enrollmentCount: -1, updatedAt: -1 };
+        break;
+      case "rating_desc":
+        sortOption = { ratingAverage: -1, ratingCount: -1, updatedAt: -1 };
+        break;
+      case "price_asc":
+        sortOption = { price: 1, updatedAt: -1 };
+        break;
+      case "price_desc":
+        sortOption = { price: -1, updatedAt: -1 };
+        break;
+    }
+
+    const [courses, total, summaryCounts] = await Promise.all([
+      Course.find(filter)
+        .populate("categoryId", "name slug parentId")
+        .sort(sortOption)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Course.countDocuments(filter),
+      Course.aggregate<{
+        total: number;
+        subscriptionApproved: number;
+        subscriptionPending: number;
+        withDraft: number;
+      }>([
+        {
+          $match: {
+            status: CourseStatus.PUBLISHED,
+            currentVersionId: { $ne: null },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            subscriptionApproved: {
+              $sum: {
+                $cond: [
+                  {
+                    $eq: [
+                      "$subscriptionStatus",
+                      SubscriptionCatalogStatus.APPROVED,
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            withDraft: {
+              $sum: {
+                $cond: [{ $ne: ["$draftVersionId", null] }, 1, 0],
+              },
+            },
+            subscriptionPending: {
+              $sum: {
+                $cond: [
+                  {
+                    $eq: [
+                      "$subscriptionStatus",
+                      SubscriptionCatalogStatus.PENDING,
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+    ]);
+
+    const summary = summaryCounts[0] || {
+      total: 0,
+      subscriptionApproved: 0,
+      subscriptionPending: 0,
+      withDraft: 0,
+    };
+
+    return {
+      courses: courses.map((course: any) =>
+        this.mapAdminCourseListResponse(course),
+      ),
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+      summary,
+    };
+  }
   public async getCourseReviewDetail(
     versionId: string,
   ): Promise<CourseResponse> {
@@ -1797,6 +1980,50 @@ class CourseService {
     };
   }
 
+  private mapAdminCourseListResponse(course: any): AdminCourseListResponse {
+    const category =
+      course.categoryId &&
+      typeof course.categoryId === "object" &&
+      "slug" in course.categoryId
+        ? {
+            _id: course.categoryId._id.toString(),
+            name: course.categoryId.name || "",
+            slug: course.categoryId.slug || "",
+            parentId: course.categoryId.parentId
+              ? course.categoryId.parentId.toString()
+              : null,
+          }
+        : null;
+
+    return {
+      _id: course._id.toString(),
+      title: course.title || "",
+      slug: course.slug || "",
+      thumbnail: course.thumbnail || "",
+      instructorId: course.instructorId || "",
+      instructorName: course.instructorName || "",
+      category,
+      level: course.level,
+      status: course.status,
+      subscriptionStatus:
+        course.subscriptionStatus || SubscriptionCatalogStatus.NOT_OPTED_IN,
+      price: course.price || 0,
+      totalLessons: course.totalLessons || 0,
+      totalSections: course.totalSections || 0,
+      totalDuration: course.totalDuration || 0,
+      enrollmentCount: course.enrollmentCount || 0,
+      ratingAverage: course.ratingAverage || 0,
+      ratingCount: course.ratingCount || 0,
+      currentVersionId: course.currentVersionId
+        ? course.currentVersionId.toString()
+        : null,
+      draftVersionId: course.draftVersionId
+        ? course.draftVersionId.toString()
+        : null,
+      createdAt: course.createdAt,
+      updatedAt: course.updatedAt,
+    };
+  }
   private mapReviewerSnapshot(version: VersionLike) {
     if (!version.reviewedBy) return undefined;
     return {

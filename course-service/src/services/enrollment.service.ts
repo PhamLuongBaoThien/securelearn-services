@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Enrollment Service
 // Mục đích:
 // - quản lý ghi danh mua đứt và ghi danh bằng thuê bao
@@ -253,7 +253,43 @@ class EnrollmentService {
       })),
     };
   }
+
+  /**
+   * Lấy danh sách học viên đăng ký khóa học cho giao diện Admin.
+   */
+  public async getCourseStudentsForAdmin(courseId: string, page: number, limit: number): Promise<any> {
+    const skip = (page - 1) * limit;
+
+    const [enrollments, total] = await Promise.all([
+      Enrollment.find({ courseId })
+        .sort({ enrolledAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Enrollment.countDocuments({ courseId }),
+    ]);
+
+    const progressList = enrollments.map((enrollment: any) => ({
+      _id: enrollment._id?.toString(),
+      user: {
+        _id: enrollment.userId,
+        fullName: enrollment.learnerName || 'Học viên ẩn danh',
+        email: enrollment.learnerEmail || '',
+        avatarUrl: enrollment.learnerAvatarUrl || '',
+      },
+      enrolledAt: enrollment.enrolledAt,
+      progressPercent: 0, // Giá trị mặc định
+      completedLessons: 0,
+      totalLessons: 0,
+      totalWatchTime: 0,
+      lastActivityAt: enrollment.enrolledAt,
+    }));
+
+    return {
+      progress: progressList,
+      total,
+    };
+  }
 }
 
 export default new EnrollmentService();
-

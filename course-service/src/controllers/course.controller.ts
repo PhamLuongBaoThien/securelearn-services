@@ -7,6 +7,7 @@
 import { Request, Response } from 'express';
 import { CategoryResolutionStatus, CourseLevel, CourseProgressionMode } from '../models/course.model';
 import courseService from '../services/course.service';
+import enrollmentService from '../services/enrollment.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
 type UpdateCoursePayload = {
@@ -283,6 +284,39 @@ class CourseController {
   }
 
   /**
+   * [GET] /api/admin/courses
+   * Danh sách tất cả khóa học cho trang quản trị nội dung.
+   */
+  public async getAdminCourses(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const {
+        page,
+        limit,
+        search,
+        status,
+        subscriptionStatus,
+        categoryId,
+        level,
+        instructorId,
+        sort,
+      } = req.query;
+      const result = await courseService.getAdminCourses({
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+        search: search as string,
+        status: status as string,
+        subscriptionStatus: subscriptionStatus as any,
+        categoryId: categoryId as string,
+        level: level as string,
+        instructorId: instructorId as string,
+        sort: sort as string,
+      });
+      res.status(200).json({ status: 'OK', data: result });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
+  /**
    * [GET] /api/admin/courses/review
    * Danh sách khóa học/revision đang chờ admin duyệt.
    */
@@ -367,6 +401,22 @@ class CourseController {
       res.status(200).json({ status: 'OK', message: 'Đã gửi yêu cầu chỉnh sửa.', data: course });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
+   * [GET] /api/admin/courses/:id/students
+   * Lấy danh sách học viên đã ghi danh vào khóa học.
+   */
+  public async getCourseStudents(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const courseId = String(req.params.id);
+      const page = Number(req.query.page || 1);
+      const limit = Number(req.query.limit || 8);
+      const result = await enrollmentService.getCourseStudentsForAdmin(courseId, page, limit);
+      res.status(200).json({ status: 'OK', data: result });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
     }
   }
 }
