@@ -5,6 +5,7 @@
 import bcrypt from 'bcryptjs';
 import { Admin, IAdmin, SUPER_ADMIN_ROLE } from '../models/admin.model';
 import { RolePermission, IRolePermissionDoc as IRolePermission } from '../models/rolePermission.model';
+import { User } from '../models/user.model';
 
 class AdminService {
   // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -143,7 +144,14 @@ class AdminService {
     await this.ensureRoleExists(payload.adminRole || 'SUPPORT_AGENT');
 
     const existingAdmin = await Admin.findOne({ email: payload.email });
-    if (existingAdmin) throw new Error('Email này đã được sử dụng.');
+    const existingUser = await User.findOne({ email: payload.email });
+    if (existingAdmin || existingUser) throw new Error('Email này đã được sử dụng.');
+
+    if (payload.phone) {
+      const existingPhoneAdmin = await Admin.findOne({ phone: payload.phone });
+      const existingPhoneUser = await User.findOne({ phone: payload.phone });
+      if (existingPhoneAdmin || existingPhoneUser) throw new Error('Số điện thoại này đã được sử dụng.');
+    }
 
     const hashPassword = await bcrypt.hash(payload.password, 10);
     const newAdmin = await Admin.create({
@@ -174,6 +182,14 @@ class AdminService {
     }
 
     await this.ensureRoleExists(sanitizedUpdate.adminRole);
+
+    if (sanitizedUpdate.phone) {
+      const existingPhoneAdmin = await Admin.findOne({ phone: sanitizedUpdate.phone, _id: { $ne: adminId } });
+      const existingPhoneUser = await User.findOne({ phone: sanitizedUpdate.phone });
+      if (existingPhoneAdmin || existingPhoneUser) {
+        throw new Error('Số điện thoại này đã được sử dụng bởi một tài khoản khác.');
+      }
+    }
 
     const admin = await Admin.findByIdAndUpdate(
       adminId,
