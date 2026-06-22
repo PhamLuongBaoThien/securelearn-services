@@ -1,5 +1,5 @@
 import { Category, ICategory } from '../models/category.model';
-import { Course } from '../models/course.model';
+import { Course, CourseStatus } from '../models/course.model';
 
 const MAX_CATEGORY_DEPTH = 4;
 
@@ -11,6 +11,7 @@ interface CategoryNode {
   isActive: boolean;
   sortOrder: number;
   parentId: string | null;
+  courseCount: number;
   children: CategoryNode[];
   createdAt: Date;
   updatedAt: Date;
@@ -54,7 +55,8 @@ class CategoryService {
       .sort({ sortOrder: 1, name: 1 })
       .lean();
 
-    return this.buildTree(categories);
+    const countMap = await this.getCourseCountsMap();
+    return this.buildTree(categories, countMap);
   }
 
   public async getAdminCategories(): Promise<CategoryNode[]> {
@@ -62,7 +64,22 @@ class CategoryService {
       .sort({ sortOrder: 1, name: 1 })
       .lean();
 
-    return this.buildTree(categories);
+    const countMap = await this.getCourseCountsMap();
+    return this.buildTree(categories, countMap);
+  }
+
+  private async getCourseCountsMap(): Promise<Map<string, number>> {
+    const courseCounts = await Course.aggregate([
+      { $match: { categoryId: { $ne: null }, status: CourseStatus.PUBLISHED } },
+      { $group: { _id: '$categoryId', count: { $sum: 1 } } }
+    ]);
+    const countMap = new Map<string, number>();
+    for (const item of courseCounts) {
+      if (item._id) {
+        countMap.set(item._id.toString(), item.count);
+      }
+    }
+    return countMap;
   }
 
   public async updateCategory(
@@ -101,6 +118,18 @@ class CategoryService {
     if (data.isActive !== undefined) category.isActive = data.isActive;
 
     await category.save();
+
+    if (data.isActive === false) {
+      const descendantAndSelfIds = await this.getDescendantAndSelfIds(categoryId);
+      const descendantIds = descendantAndSelfIds.filter((id) => id !== categoryId);
+      if (descendantIds.length > 0) {
+        await Category.updateMany(
+          { _id: { $in: descendantIds } },
+          { $set: { isActive: false } }
+        );
+      }
+    }
+
     return category;
   }
 
@@ -112,6 +141,18 @@ class CategoryService {
 
     category.isActive = isActive;
     await category.save();
+
+    if (isActive === false) {
+      const descendantAndSelfIds = await this.getDescendantAndSelfIds(categoryId);
+      const descendantIds = descendantAndSelfIds.filter((id) => id !== categoryId);
+      if (descendantIds.length > 0) {
+        await Category.updateMany(
+          { _id: { $in: descendantIds } },
+          { $set: { isActive: false } }
+        );
+      }
+    }
+
     return category;
   }
 
@@ -276,7 +317,8 @@ class CategoryService {
       parentId?: any;
       createdAt: Date;
       updatedAt: Date;
-    }>
+    }>,
+    countMap: Map<string, number>
   ): CategoryNode[] {
     const nodeMap = new Map<string, CategoryNode>();
 
@@ -290,6 +332,7 @@ class CategoryService {
         isActive: category.isActive,
         sortOrder: category.sortOrder,
         parentId: category.parentId ? category.parentId.toString() : null,
+        courseCount: 0,
         children: [],
         createdAt: category.createdAt,
         updatedAt: category.updatedAt,
@@ -304,6 +347,17 @@ class CategoryService {
       } else {
         roots.push(node);
       }
+    }
+
+    const populateCourseCount = (node: CategoryNode): number => {
+      const directCount = countMap.get(node._id) || 0;
+      const childrenCount = node.children.reduce((sum, child) => sum + populateCourseCount(child), 0);
+      node.courseCount = directCount + childrenCount;
+      return node.courseCount;
+    };
+
+    for (const root of roots) {
+      populateCourseCount(root);
     }
 
     const sortNodes = (nodes: CategoryNode[]) => {
