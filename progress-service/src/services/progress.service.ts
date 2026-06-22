@@ -124,9 +124,26 @@ export type LessonProgressSummary = {
 };
 
 class ProgressService {
-  // [TIẾN ĐỘ & HEARTBEAT - BƯỚC 3]
-  // Xử lý sự kiện heartbeat gửi lên từ Frontend mỗi 15 giây.
-  // Đồng bộ thời gian thực học, cập nhật segment xem video và tính toán tiến độ.
+  /**
+   * [TIẾN ĐỘ & HEARTBEAT - BƯỚC 3]
+   * Hàm: heartbeat
+   * Vai trò: Xử lý sự kiện heartbeat gửi lên từ Frontend định kỳ (mỗi 10 - 15 giây) để đồng bộ thời gian thực học,
+   *  cập nhật phân đoạn video đã xem, kiểm tra mở khóa bài học tiếp theo và tính tổng tiến độ khóa học.
+   * Cách thức hoạt động:
+   *  1. Xác thực payload đầu vào để ngăn chặn thiếu thông tin cơ bản.
+   *  2. Gọi gRPC (getContext) sang course-service để lấy cấu trúc khóa học hiện tại và kiểm tra quyền học viên.
+   *  3. Tự động đồng bộ tiến độ cũ nếu khóa học có phiên bản mới (ensureCurrentVersionLessonProgress).
+   *  4. Xác định bài học hiện tại (resolveLesson) và kiểm tra bảo mật xem bài học này có bị khóa hay không (assertLessonUnlocked).
+   *  5. Chuẩn hóa delta thực học (normalizeActiveSeconds) để tránh gian lận thay đổi dữ liệu heartbeat.
+   *  6. Ghi nhận/cập nhật phiên học hoạt động (LearningSession).
+   *  7. Cập nhật tiến độ:
+   *     - Nếu là video: tính watchedSegments bằng cách gộp các phân đoạn (mergeSegments) và tính phần trăm. Nếu đạt >= 90%,
+   *       chuyển trạng thái thành COMPLETED và phát sự kiện PROGRESS_LESSON_COMPLETED qua RabbitMQ.
+   *     - Nếu là quiz: ghi nhận trạng thái quiz.
+   *  8. Ghi nhận thời gian hoạt động ngày (recordDailyActivity) để duy trì streak học tập.
+   *  9. Tính toán lại tổng tiến độ khóa học (recalculateCourseProgress). Nếu hoàn thành 100%, phát sự kiện PROGRESS_COURSE_COMPLETED qua RabbitMQ.
+   * Khi nào sử dụng: Gọi mỗi khi frontend gửi request POST lên endpoint /api/progress/heartbeat.
+   */
   public async heartbeat(input: HeartbeatInput): Promise<CourseProgressResponse> {
     this.assertHeartbeatPayload(input);
     
@@ -141,7 +158,7 @@ class ProgressService {
     // 3. Bảo vệ: Kiểm tra xem bài học hiện tại có bị khóa do ProgressionMode hay không
     await this.assertLessonUnlocked(input.userId, context, input.lessonId);
     
-    // 4. Chuẩn hóa delta thực học của học viên (giới hạn tối đa 15s để tránh gian lận)
+    // 4. Chuẩn hóa delta thực học của học viên (giới hạn tối đa 20s để tránh gian lận gửi số lớn)
     const activeSeconds = this.normalizeActiveSeconds(input.watchedSecondsDelta);
     
     // 5. Ghi nhận hoặc cập nhật LearningSession (phiên học đang chạy)
@@ -858,6 +875,16 @@ class ProgressService {
     return context;
   }
 
+  /**
+   * Hàm: assertLessonUnlocked
+   * Vai trò: Kiểm tra an ninh ở tầng Backend để đảm bảo học viên không thể "vượt rào" học bài học bị khóa (ví dụ: qua Postman hoặc tự gọi API).
+   * Cách thức hoạt động:
+   *  - Lấy danh sách các bài học đã hoàn thành của người dùng.
+   *  - Sắp xếp thứ tự các bài học theo giáo trình khóa học hiện tại.
+   *  - Gọi resolveLessonAccess để kiểm tra xem bài học hiện tại có bị khóa không.
+   *  - Nếu bị khóa (locked = true), ném lỗi chặn đứng request heartbeat/tiến độ.
+   * Khi nào sử dụng: Gọi trong heartbeat và quizComplete để bảo vệ nội dung học tập.
+   */
   private async assertLessonUnlocked(userId: string, context: CourseProgressContext, lessonId: string) {
     const completedRows = await LessonProgress.find({
       userId,
@@ -893,6 +920,19 @@ class ProgressService {
     });
   }
 
+  /**
+   * Hàm: resolveLessonAccess
+   * Vai trò: Phân tích quyền mở khóa của một bài học dựa trên ProgressionMode của khóa học.
+   * Cách thức hoạt động:
+   *  - Nếu progressionMode là 'FREE' hoặc bài học không bắt buộc (required = false): Trả về locked = false.
+   *  - Nếu là 'SEQUENTIAL' (học tuần tự):
+   *     + Lọc danh sách các bài học bắt buộc đứng trước bài hiện tại.
+   *     + Tìm các bài chưa nằm trong tập hợp các bài đã hoàn thành (missing).
+   *     + Nếu tồn tại bài chưa hoàn thành, khóa bài học hiện tại (locked = true).
+   *  - Nếu là 'QUIZ_REQUIRES_PREVIOUS_LESSONS' (quiz yêu cầu các bài trước trong cùng phần):
+   *     + Nếu bài hiện tại là Quiz, yêu cầu hoàn thành tất cả các bài trước đó trong cùng Section.
+   * Khi nào sử dụng: Gọi bởi assertLessonUnlocked ở Backend và getCourseAccess để gửi access map về cho Frontend.
+   */
   private resolveLessonAccess(
     lesson: CourseLessonContext,
     index: number,
@@ -1073,11 +1113,31 @@ class ProgressService {
     return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
   }
 
+  /**
+   * Hàm: normalizeActiveSeconds
+   * Vai trò: Chuẩn hóa khoảng thời gian thực học (delta) gửi lên từ heartbeat để ngăn chặn hành vi gian lận.
+   * Cách thức hoạt động:
+   *  - Chuyển giá trị delta về dạng số nguyên.
+   *  - Nếu số giây học delta lớn hơn 20 giây hoặc nhỏ hơn hoặc bằng 0, coi như không hợp lệ và đưa về 0.
+   *  - Vì Frontend gửi heartbeat mỗi 10-15 giây, một request hợp lệ chỉ có delta khoảng 10-15s. Nếu học viên chỉnh sửa request
+   *    gửi delta cực lớn (ví dụ 3600s để hoàn thành ngay khóa học), Backend sẽ phát hiện ra và đưa delta về 0.
+   * Khi nào sử dụng: Gọi mỗi khi tính toán activeSeconds trong heartbeat.
+   */
   private normalizeActiveSeconds(value: unknown) {
     const parsed = this.toNumber(value);
     return parsed > 0 && parsed <= 20 ? parsed : 0;
   }
 
+  /**
+   * Hàm: buildHeartbeatSegments
+   * Vai trò: Tạo ra một đoạn video đã xem (start -> end) dựa trên heartbeat hiện tại của học viên.
+   * Cách thức hoạt động:
+   *  - Kiểm tra xem bài học có phải là video, có hoạt động học (activeSeconds > 0) và tab browser có đang mở không (tabVisible = true).
+   *  - Kiểm tra tốc độ phát (playbackRate), tốc độ phát hợp lệ phải nằm trong khoảng (0, 2].
+   *  - Tính toán điểm bắt đầu (start): lấy từ segmentStartSeconds của Frontend, hoặc nếu thiếu thì mặc định bằng position - activeSeconds.
+   *  - Tính toán điểm kết thúc (end): bằng thời gian hiện tại phát của video (positionSeconds).
+   * Trả về: Mảng chứa phân đoạn vừa xem `{ start, end }`.
+   */
   private buildHeartbeatSegments(input: HeartbeatInput, position: number, durationSeconds: number): WatchedSegment[] {
     const activeSeconds = this.normalizeActiveSeconds(input.watchedSecondsDelta);
     if (input.lessonType !== LessonProgressType.VIDEO || activeSeconds <= 0 || input.tabVisible === false) return [];
@@ -1093,6 +1153,20 @@ class ProgressService {
     return end > start ? [{ start, end }] : [];
   }
 
+  /**
+   * Hàm: mergeSegments
+   * Vai trò: Thuật toán gộp các phân đoạn video đã xem.
+   * Cách thức hoạt động:
+   *  - Thuật toán này rất quan trọng để đảm bảo tính chính xác và chống gian lận khi học viên tua đi tua lại.
+   *  - Sắp xếp danh sách các phân đoạn (gồm các phân đoạn cũ đã lưu trong DB và phân đoạn mới từ heartbeat) theo mốc start tăng dần.
+   *  - Duyệt qua từng phân đoạn:
+   *     + Nếu phân đoạn hiện tại không chồng lấn (overlap) với phân đoạn trước đó (segment.start > previous.end),
+   *       đẩy nó như một phân đoạn độc lập mới vào kết quả.
+   *     + Nếu có chồng lấn (segment.start <= previous.end), gộp hai phân đoạn lại bằng cách cập nhật mốc kết thúc của phân đoạn trước:
+   *       `previous.end = Math.max(previous.end, segment.end)`.
+   * Trả về: Danh sách các phân đoạn không chồng lấn đã được gộp lại tối ưu.
+   * Khi nào sử dụng: Gọi trong upsertVideoHeartbeat để cập nhật watchedSegments trước khi lưu vào MongoDB.
+   */
   private mergeSegments(segments: WatchedSegment[]) {
     const sorted = segments
       .map((segment) => ({
