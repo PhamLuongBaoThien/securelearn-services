@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // Coupon Model
 // Mục đích:
 // - lưu cấu hình coupon do Admin Finance quản lý cho flow mua khóa học
@@ -26,7 +26,9 @@ export interface ICoupon extends Document {
   isActive: boolean;
   combinable: boolean; 
   createdBy: string;
+  createdByName?: string;
   updatedBy: string;
+  updatedByName?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,7 +49,9 @@ const couponSchema = new Schema<ICoupon>(
     isActive: { type: Boolean, default: true, index: true },
     combinable: { type: Boolean, default: false },
     createdBy: { type: String, default: '' },
+    createdByName: { type: String, default: '' },
     updatedBy: { type: String, default: '' },
+    updatedByName: { type: String, default: '' },
   },
   { timestamps: true }
 );
@@ -55,3 +59,4 @@ const couponSchema = new Schema<ICoupon>(
 couponSchema.index({ code: 'text', name: 'text' });
 
 export const Coupon = model<ICoupon>('Coupon', couponSchema);
+

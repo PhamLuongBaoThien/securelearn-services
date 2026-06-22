@@ -73,7 +73,7 @@ class CouponService {
     };
   }
 
-  public async createCoupon(input: CouponInput, adminId: string) {
+  public async createCoupon(input: CouponInput, adminId: string, adminName = '') {
     const payload = this.normalizeInput(input);
     const existing = await Coupon.findOne({ code: payload.code });
     if (existing) throw new Error('Mã coupon đã tồn tại.');
@@ -81,12 +81,14 @@ class CouponService {
     const coupon = await Coupon.create({
       ...payload,
       createdBy: adminId,
+      createdByName: adminName,
       updatedBy: adminId,
+      updatedByName: adminName,
     });
     return this.mapCoupon(coupon);
   }
 
-  public async updateCoupon(id: string, input: Partial<CouponInput>, adminId: string) {
+  public async updateCoupon(id: string, input: Partial<CouponInput>, adminId: string, adminName = '') {
     if (!Types.ObjectId.isValid(id)) throw new Error('Coupon không hợp lệ.');
     const payload = this.normalizeInput(input, true);
     if (payload.code) {
@@ -96,18 +98,18 @@ class CouponService {
 
     const coupon = await Coupon.findByIdAndUpdate(
       id,
-      { $set: { ...payload, updatedBy: adminId } },
+      { $set: { ...payload, updatedBy: adminId, updatedByName: adminName } },
       { new: true }
     );
     if (!coupon) throw new Error('Coupon không tồn tại.');
     return this.mapCoupon(coupon);
   }
 
-  public async updateStatus(id: string, isActive: boolean, adminId: string) {
+  public async updateStatus(id: string, isActive: boolean, adminId: string, adminName = '') {
     if (!Types.ObjectId.isValid(id)) throw new Error('Coupon không hợp lệ.');
     const coupon = await Coupon.findByIdAndUpdate(
       id,
-      { $set: { isActive, updatedBy: adminId } },
+      { $set: { isActive, updatedBy: adminId, updatedByName: adminName } },
       { new: true }
     );
     if (!coupon) throw new Error('Coupon không tồn tại.');
@@ -344,7 +346,9 @@ class CouponService {
       combinable: coupon.combinable ?? false,
       computedStatus: this.getComputedStatus(coupon),
       createdBy: coupon.createdBy,
+      createdByName: coupon.createdByName || '',
       updatedBy: coupon.updatedBy,
+      updatedByName: coupon.updatedByName || '',
       createdAt: coupon.createdAt,
       updatedAt: coupon.updatedAt,
     };
@@ -495,4 +499,7 @@ class CouponService {
 }
 
 export default new CouponService();
+
+
+
 

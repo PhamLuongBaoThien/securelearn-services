@@ -31,7 +31,8 @@ class CouponController {
 
   public async create(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const data = await couponService.createCoupon(req.body as CouponInput, req.userId || '');
+      const actorName = req.userName || req.userEmail || req.userId || '';
+      const data = await couponService.createCoupon(req.body as CouponInput, req.userId || '', actorName);
       res.status(201).json({ status: 'OK', message: 'Đã tạo coupon.', data });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
@@ -40,7 +41,8 @@ class CouponController {
 
   public async update(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const data = await couponService.updateCoupon(String(req.params.id || ''), req.body as Partial<CouponInput>, req.userId || '');
+      const actorName = req.userName || req.userEmail || req.userId || '';
+      const data = await couponService.updateCoupon(String(req.params.id || ''), req.body as Partial<CouponInput>, req.userId || '', actorName);
       res.status(200).json({ status: 'OK', message: 'Đã cập nhật coupon.', data });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
@@ -49,7 +51,8 @@ class CouponController {
 
   public async updateStatus(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const data = await couponService.updateStatus(String(req.params.id || ''), Boolean(req.body.isActive), req.userId || '');
+      const actorName = req.userName || req.userEmail || req.userId || '';
+      const data = await couponService.updateStatus(String(req.params.id || ''), Boolean(req.body.isActive), req.userId || '', actorName);
       res.status(200).json({ status: 'OK', message: 'Đã cập nhật trạng thái coupon.', data });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
@@ -178,4 +181,6 @@ class CouponController {
 }
 
 export default new CouponController();
+
+
 
