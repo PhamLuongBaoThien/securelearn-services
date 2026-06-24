@@ -293,7 +293,6 @@ services:
 
       - name: media-playback-public
         paths:
-          - ~/api/media/videos/[^/]+/playback-session/renew$
           - ~/api/media/videos/[^/]+/playback$
           - ~/api/media/videos/[^/]+/key$
         regex_priority: 400

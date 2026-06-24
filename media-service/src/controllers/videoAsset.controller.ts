@@ -83,7 +83,7 @@ class VideoAssetController {
 
   // [BẢO MẬT STREAMING - BƯỚC 2]
   // Endpoint khởi tạo phiên xem video (Playback Session).
-  // Tạo One-Time Playback Token (hết hạn trong 60s) và Media Session Token dài hạn (30 phút) trong Redis.
+  // Kiểm tra entitlement qua middleware rồi tạo One-Time Playback Token hết hạn trong 60 giây.
   public async createPlaybackSession(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -97,57 +97,12 @@ class VideoAssetController {
       // Tạo token xem manifest dùng một lần trong Redis
       const token = await playbackAccessService.createOneTimePlayback(playbackInput);
       
-      // Tạo session xem video dài hạn lưu trong Redis để FE gia hạn không cần login lại
-      const mediaSessionToken = await playbackAccessService.createMediaSession(playbackInput);
-      
       res.status(201).json({
         status: 'OK',
         data: {
           asset: sanitizeVideoAsset(asset),
           playbackUrl: `/api/media/videos/${videoAssetId}/playback?token=${encodeURIComponent(token)}`,
           expiresIn: 60,
-          mediaSessionToken,
-          mediaSessionExpiresIn: playbackAccessService.mediaSessionTtlSeconds,
-          segmentExpiresIn: videoAssetService.playbackSegmentUrlTtlSeconds,
-        },
-      });
-    } catch (error: any) {
-      res.status(400).json({ status: 'ERR', message: error.message });
-    }
-  }
-
-  public async renewPlaybackSession(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const videoAssetId = req.params.videoAssetId as string;
-      const mediaSessionToken =
-        req.header('x-media-session-token') ||
-        (typeof req.body?.mediaSessionToken === 'string' ? req.body.mediaSessionToken : '');
-      if (!mediaSessionToken) {
-        res.status(401).json({ status: 'ERR', message: 'Thiếu media session token.' });
-        return;
-      }
-
-      const mediaSession = await playbackAccessService.validateMediaSession(mediaSessionToken, videoAssetId);
-      if (!mediaSession) {
-        res.status(401).json({ status: 'ERR', message: 'Media session đã hết hạn hoặc không hợp lệ.' });
-        return;
-      }
-
-      const asset = await videoAssetService.getAsset(videoAssetId);
-      const token = await playbackAccessService.createOneTimePlayback({
-        userId: mediaSession.userId,
-        videoAssetId,
-        courseId: mediaSession.courseId,
-      });
-
-      res.status(201).json({
-        status: 'OK',
-        data: {
-          asset: sanitizeVideoAsset(asset),
-          playbackUrl: `/api/media/videos/${videoAssetId}/playback?token=${encodeURIComponent(token)}`,
-          expiresIn: 60,
-          mediaSessionToken,
-          mediaSessionExpiresIn: playbackAccessService.mediaSessionTtlSeconds,
           segmentExpiresIn: videoAssetService.playbackSegmentUrlTtlSeconds,
         },
       });
