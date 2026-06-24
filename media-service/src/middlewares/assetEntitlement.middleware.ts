@@ -1,9 +1,6 @@
-// ========================
-// Asset Entitlement Middleware
-// Mục đích:
-// - cho owner hoặc learner có entitlement hợp lệ đọc asset học tập
-// - nối media-service với course-service để kiểm tra quyền học tập trung
-// ========================
+// [BƯỚC 2.2: MIDDLEWARE KIỂM DUYỆT QUYỀN TRUY CẬP (ENTITLEMENT CHECK)]
+// Cổng kiểm duyệt xem learner có quyền học khóa học chứa tài nguyên (video/document) này hay không.
+// Tích hợp cache Redis (entitlementCacheService) và giao tiếp gRPC sang course-service.
 import { NextFunction, Response } from 'express';
 import { AuthRequest } from './auth.middleware';
 import { courseGrpcClient } from '../grpc/course.client';

@@ -1,9 +1,6 @@
-// ========================
-// Video Asset Access Middleware
-// Mục đích:
-// - bảo vệ route video asset theo owner hoặc entitlement học tập
-// - cho phép learner thuê bao đọc video mà không cần là người upload asset
-// ========================
+// [BƯỚC 2.2: MIDDLEWARE BẢO VỆ TÀI NGUYÊN VIDEO (VIDEO ASSET ACCESS CONTROL)]
+// - verify course entitlement cho phép học viên đã thanh toán/đăng ký học được quyền lấy manifest (.m3u8) và giải mã key.
+// - requireVideoAssetOwner dành riêng cho Admin/Giảng viên (người upload asset).
 import { NextFunction, Response } from 'express';
 import { VideoAsset } from '../models/videoAsset.model';
 import { AuthRequest } from './auth.middleware';

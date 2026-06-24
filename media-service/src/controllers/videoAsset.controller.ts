@@ -1,9 +1,6 @@
-// ========================
-// Video Asset Controller
-// Mục đích:
-// - mở API upload, polling và đọc key/manifest cho video asset
-// - chỉ trả metadata an toàn sau khi middleware đã check owner hoặc learner entitlement
-// ========================
+// [BƯỚC 2 & BƯỚC 2.4 & BƯỚC 2.7: CONTROLLER QUẢN LÝ TÀI NGUYÊN VIDEO]
+// Xử lý các nghiệp vụ: Upload, Polling, sinh Manifest an toàn, kiểm tra Key Session để cấp khóa giải mã AES-128.
+
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import videoAssetService from '../services/videoAsset.service';
@@ -46,9 +43,9 @@ class VideoAssetController {
     }
   }
 
-  // [BẢO MẬT STREAMING - BƯỚC 2]
+  // [BƯỚC 2 / BƯỚC 2.2: CẤP PHÁT KEY GIẢI MÃ NHỊ PHÂN QUA XÁC THỰC KEY SESSION]
   // Endpoint lấy key giải mã AES-128 của phân đoạn HLS (.ts).
-  // Đảm bảo chỉ người dùng đang xem thực tế mới lấy được key giải mã nhị phân.
+  // Đảm bảo chỉ người dùng đang xem thực tế có keySession hợp lệ mới lấy được key giải mã.
   public async getEncryptionKey(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -81,7 +78,7 @@ class VideoAssetController {
     }
   }
 
-  // [BẢO MẬT STREAMING - BƯỚC 2]
+  // [BƯỚC 2: KHỞI TẠO PHIÊN PHÁT VIDEO - CẤP ONE-TIME PLAYBACK TOKEN]
   // Endpoint khởi tạo phiên xem video (Playback Session).
   // Kiểm tra entitlement qua middleware rồi tạo One-Time Playback Token hết hạn trong 60 giây.
   public async createPlaybackSession(req: AuthRequest, res: Response): Promise<void> {
@@ -111,8 +108,8 @@ class VideoAssetController {
     }
   }
 
-  // [BẢO MẬT STREAMING - BƯỚC 2]
-  // Endpoint consume Playback Token dùng 1 lần và trả về nội dung file manifest HLS.
+  // [BƯỚC 2.4: TIÊU THỤ PLAYBACK TOKEN & REWRITE MANIFEST (.m3u8)]
+  // Endpoint consume Playback Token dùng 1 lần, sinh Key Session mới, rewrite URL của key giải mã và trả về nội dung file manifest HLS.
   public async getOneTimePlaybackManifest(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;

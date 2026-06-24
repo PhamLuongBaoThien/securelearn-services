@@ -1,9 +1,6 @@
-// ========================
-// Video Asset Routes
-// Mục đích:
-// - khai báo route upload và đọc video asset của media-service
-// - tách route owner-only với route learner access đã qua entitlement check
-// ========================
+// [BƯỚC 2 & BƯỚC 2.2 & BƯỚC 2.4: ĐỊNH TUYẾN TÀI NGUYÊN VIDEO (VIDEO ASSET ROUTING)]
+// Phân chia các route dành riêng cho Admin/Giảng viên (Ownership) và Học viên (Entitlement).
+
 import { Router } from 'express';
 import videoAssetController from '../controllers/videoAsset.controller';
 import { requireVideoAssetAccess, requireVideoAssetOwner } from '../middlewares/videoAssetOwnership.middleware';
@@ -30,18 +27,18 @@ router.get('/:videoAssetId/batch-part-urls', requireVideoAssetOwner, videoAssetC
 // Polling trạng thái/video manifest cho cả owner và learner có entitlement hợp lệ.
 router.get('/:videoAssetId', requireVideoAssetAccess, videoAssetController.getAsset);
 
-// [POST] /api/media/videos/:videoAssetId/playback-session
-// Kiểm tra quyền Redis-first rồi sinh one-time URL để lấy manifest HLS.
+// [BƯỚC 2 / BƯỚC 2.2: KHỞI TẠO PHIÊN PHÁT VIDEO (PLAYBACK SESSION)]
+// Kiểm tra quyền Redis-first rồi sinh one-time token để lấy manifest HLS.
 router.post('/:videoAssetId/playback-session', requireVideoAssetAccess, videoAssetController.createPlaybackSession);
 
-// [GET] /api/media/videos/:videoAssetId/playback?token=...
-// Consume one-time URL và trả manifest đã rewrite key session.
+// [BƯỚC 2.4: TIÊU THỤ PLAYBACK TOKEN & TRẢ MANIFEST (.m3u8)]
+// Consume one-time token và trả manifest đã rewrite link key.
 router.get('/:videoAssetId/playback', videoAssetController.getOneTimePlaybackManifest);
 
 // [GET] /api/media/videos/:videoAssetId/manifest
 router.get('/:videoAssetId/manifest', requireVideoAssetAccess, videoAssetController.getPlaybackManifest);
 
-// [GET] /api/media/videos/:videoAssetId/key
+// [BƯỚC 2 / BƯỚC 2.2: LẤY KEY GIẢI MÃ TRONG PHIÊN (AES KEY DECRYPTION)]
 router.get('/:videoAssetId/key', requireVideoAssetAccess, videoAssetController.getEncryptionKey);
 
 export default router;
