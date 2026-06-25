@@ -31,13 +31,6 @@ router.get('/:videoAssetId', requireVideoAssetAccess, videoAssetController.getAs
 // Kiểm tra quyền Redis-first rồi sinh one-time token để lấy manifest HLS.
 router.post('/:videoAssetId/playback-session', requireVideoAssetAccess, videoAssetController.createPlaybackSession);
 
-// [BƯỚC 2.4: TIÊU THỤ PLAYBACK TOKEN & TRẢ MANIFEST (.m3u8)]
-// Consume one-time token và trả manifest đã rewrite link key.
-router.get('/:videoAssetId/playback', videoAssetController.getOneTimePlaybackManifest);
-
-// [GET] /api/media/videos/:videoAssetId/manifest
-router.get('/:videoAssetId/manifest', requireVideoAssetAccess, videoAssetController.getPlaybackManifest);
-
 // [BƯỚC 2 / BƯỚC 2.2: LẤY KEY GIẢI MÃ TRONG PHIÊN (AES KEY DECRYPTION)]
 router.get('/:videoAssetId/key', requireVideoAssetAccess, videoAssetController.getEncryptionKey);
 

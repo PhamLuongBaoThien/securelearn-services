@@ -294,7 +294,6 @@ services:
       - name: media-playback-public
         paths:
           - ~/api/media/videos/[^/]+/playback$
-          - ~/api/media/videos/[^/]+/key$
         regex_priority: 400
         strip_path: false
         methods:

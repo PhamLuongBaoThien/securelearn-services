@@ -52,15 +52,23 @@ class VideoAssetController {
       const asset = await videoAssetService.getAsset(videoAssetId);
       const session = typeof req.query.session === 'string' ? req.query.session : '';
       
-      if (session) {
-        // Kiểm tra Key Session có đúng của user đang request và đúng video này không
-        const validSession = await playbackAccessService.validateKeySession(session, videoAssetId, req.userId);
-        if (!validSession) {
-          res.status(403).send('Invalid key session');
-          return;
-        }
-      } else if (asset.ownerUserId !== req.userId && req.userRole !== 'ADMIN') {
+      // Route này đã qua JWT + extractUser. Key chỉ được cấp khi key session
+      // đồng thời thuộc đúng user trong access token và đúng video đang request.
+      if (!req.userId) {
+        res.status(401).send('Authentication required');
+        return;
+      }
+      if (!session) {
         res.status(403).send('Key requires playback session');
+        return;
+      }
+      const validSession = await playbackAccessService.validateKeySession(
+        session,
+        videoAssetId,
+        req.userId,
+      );
+      if (!validSession) {
+        res.status(403).send('Invalid key session');
         return;
       }
       
@@ -139,22 +147,6 @@ class VideoAssetController {
       const manifest = await videoAssetService.getPlaybackManifest(videoAssetId, keyUri);
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'private, no-store'); // Chặn caching manifest
-      res.send(manifest);
-    } catch (error: any) {
-      res.status(404).json({ status: 'ERR', message: error.message });
-    }
-  }
-
-  public async getPlaybackManifest(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const asset = await videoAssetService.getAsset(String(req.params.videoAssetId));
-      if (asset.ownerUserId !== req.userId && req.userRole !== 'ADMIN') {
-        res.status(403).json({ status: 'ERR', message: 'Vui lòng tạo playback session để xem video.' });
-        return;
-      }
-      const manifest = await videoAssetService.getPlaybackManifest(String(req.params.videoAssetId));
-      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-      res.setHeader('Cache-Control', 'private, no-store');
       res.send(manifest);
     } catch (error: any) {
       res.status(404).json({ status: 'ERR', message: error.message });

@@ -71,13 +71,13 @@ class PlaybackAccessService {
     return token;
   }
 
-  public async validateKeySession(token: string, videoAssetId: string, userId?: string): Promise<boolean> {
-    // Kiểm tra key session có đúng video, và nếu có userId thì phải đúng user hiện tại.
+  public async validateKeySession(token: string, videoAssetId: string, userId: string): Promise<boolean> {
+    // Key session chỉ hợp lệ khi đồng thời đúng video và đúng user từ access token.
     const raw = await redisClient.get(keySessionKey(token));
     if (!raw) return false;
     try {
       const value = JSON.parse(raw) as KeySessionValue;
-      return value.videoAssetId === videoAssetId && (!userId || value.userId === userId);
+      return value.videoAssetId === videoAssetId && value.userId === userId;
     } catch {
       return false;
     }

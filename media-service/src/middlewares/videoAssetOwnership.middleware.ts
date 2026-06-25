@@ -26,7 +26,7 @@ export const requireVideoAssetOwner = async (
   next();
 };
 
-// middleware này giúp learner đã có entitlement học đọc manifest/key mà không phải là owner upload của asset.
+// middleware này giúp learner đã có entitlement (đã thanh toán hoặc đã đăng ký học khóa học) đọc manifest/key mà không phải là owner upload của video asset.
 export const requireVideoAssetAccess = async (
   req: AuthRequest,
   res: Response,
