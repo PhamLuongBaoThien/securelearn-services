@@ -55,6 +55,11 @@ class PlaybackAccessService {
       end
       return value
     `;
+
+    // 1. Hàm EVAL trong Redis là gì? 
+    // Hàm EVAL là một hàm của Redis cho phép thực thi một script Lua (script Lua là một ngôn ngữ lập trình kịch bản nhẹ, được định nghĩa ngay tại thời điểm gọi).
+    // Trong trường hợp này, script Lua được sử dụng để đọc và xóa token ngay trong một thao tác duy nhất (atomic operation), 
+    // giúp ngăn chặn việc token bị đọc bởi nhiều request cùng một lúc.
     const raw = await redisClient.eval(script, 1, playbackKey(token));
     if (typeof raw !== 'string') return null;
     return JSON.parse(raw) as OneTimePlaybackValue;
@@ -67,6 +72,10 @@ class PlaybackAccessService {
       ...input,
       createdAt: new Date().toISOString(),
     };
+
+    // 1. SETEX trong Redis là gì?
+    // SETEX là một lệnh trong Redis (SET with EXpiration - SET với thời gian hết hạn) được sử dụng để lưu trữ một chuỗi (String) vào Redis với thời gian sống (TTL - Time To Live).
+    // Trong trường hợp này, nó được sử dụng để lưu trữ key session với thời gian sống là 5 phút (KEY_SESSION_TTL_SECONDS).
     await redisClient.setex(keySessionKey(token), KEY_SESSION_TTL_SECONDS, JSON.stringify(value));
     return token;
   }

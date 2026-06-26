@@ -62,6 +62,8 @@ class VideoAssetController {
         res.status(403).send('Key requires playback session');
         return;
       }
+
+      // Kiểm tra session có hợp lệ không (user và video khớp với session đã tạo ở bước trước)
       const validSession = await playbackAccessService.validateKeySession(
         session,
         videoAssetId,
@@ -117,11 +119,13 @@ class VideoAssetController {
   }
 
   // [BƯỚC 2.4: TIÊU THỤ PLAYBACK TOKEN & REWRITE MANIFEST (.m3u8)]
-  // Endpoint consume Playback Token dùng 1 lần, sinh Key Session mới, rewrite URL của key giải mã và trả về nội dung file manifest HLS.
+  // Endpoint consume Playback Token (consume - tiêu thụ) dùng 1 lần, sinh Key Session mới, rewrite URL của key giải mã và trả về nội dung file manifest HLS.
   public async getOneTimePlaybackManifest(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const token = typeof req.query.token === 'string' ? req.query.token : '';
+
+      // Kiểm tra token có tồn tại không
       if (!token) {
         res.status(400).json({ status: 'ERR', message: 'Thiếu playback token.' });
         return;
@@ -135,6 +139,10 @@ class VideoAssetController {
       }
       
       // Tạo Key Session mới trong Redis (hết hạn sau 5 phút) để cấp quyền lấy AES key giải mã
+      // 1. KeySession là gì? 
+      // KeySession là một token tạm thời (hết hạn sau 5 phút) được tạo ra sau khi Playback Token hợp lệ được tiêu thụ.
+      // Mục đích của KeySession là để cấp quyền truy cập vào endpoint /api/media/videos/:videoAssetId/key, 
+      // nơi người dùng có thể lấy AES key giải mã phân đoạn HLS.
       const keySession = await playbackAccessService.createKeySession({
         userId: playback.userId,
         videoAssetId,
@@ -147,6 +155,10 @@ class VideoAssetController {
       const manifest = await videoAssetService.getPlaybackManifest(videoAssetId, keyUri);
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'private, no-store'); // Chặn caching manifest
+
+      // 2. Hàm send trong Express.js là gì? 
+      // Hàm send trong Express.js là một phương thức của đối tượng Response được sử dụng để gửi dữ liệu response đến client.
+      // Nó có thể gửi nhiều loại dữ liệu khác nhau, bao gồm chuỗi (String), Buffer, JSON, và mảng.
       res.send(manifest);
     } catch (error: any) {
       res.status(404).json({ status: 'ERR', message: error.message });

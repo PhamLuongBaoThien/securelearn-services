@@ -220,6 +220,8 @@ class VideoAssetService {
   // đồng thời ký presigned URL có thời hạn ngắn (1 giờ) cho các phân đoạn video (.ts).
   public async getPlaybackManifest(videoAssetId: string, keyUri?: string) {
     const asset = await VideoAsset.findById(videoAssetId).lean();
+
+    // Nếu manifestKey không có hoặc asset chưa ở trạng thái READY thì throw error
     if (!asset?.manifestKey || asset.status !== 'READY') {
       throw new Error('Video chưa sẵn sàng để phát.');
     }
@@ -227,6 +229,7 @@ class VideoAssetService {
     // Nếu có keyUri, kiểm tra xem manifest đã viết lại đã có sẵn trong Redis cache chưa
     if (keyUri) {
       const cached = await this.getCachedPlaybackManifest(asset.manifestKey);
+      // Nếu tìm thấy cache, thay thế chuỗi giữ chỗ bằng keyUri chứa session cá nhân của học viên
       if (cached) return cached.replaceAll(KEY_URI_PLACEHOLDER, keyUri);
     }
 
@@ -268,6 +271,8 @@ class VideoAssetService {
     return `playback:manifest:v1:${manifestKey}`;
   }
 
+  // 1. Hàm getCachedPlaybackManifest có tác dụng là lấy manifest từ Redis cache
+
   private async getCachedPlaybackManifest(manifestKey: string): Promise<string | null> {
     try {
       return await redisClient.get(this.playbackManifestCacheKey(manifestKey));
@@ -277,6 +282,7 @@ class VideoAssetService {
     }
   }
 
+  // 2. Hàm cachePlaybackManifest có tác dụng là lưu manifest vào Redis cache
   private async cachePlaybackManifest(manifestKey: string, manifest: string): Promise<void> {
     try {
       await redisClient.setex(
