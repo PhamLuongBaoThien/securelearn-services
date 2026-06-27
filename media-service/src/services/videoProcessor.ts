@@ -1,157 +1,286 @@
-import ffmpeg from 'fluent-ffmpeg';
+﻿import ffmpeg from 'fluent-ffmpeg';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 export type ProgressCallback = (percent: number) => Promise<void>;
 
-/**
- * Probe codec của video để quyết định copy hay re-encode.
- *
- * Hàm này được dùng ở 2 nơi:
- * 1. videoAsset.service — Validate file có phải video thật không (trước khi chạy FFmpeg).
- *    Nếu probe thất bại hoặc không tìm thấy video stream → reject file ngay, không tốn CPU encode.
- * 2. processVideoToHLS — Quyết định copy stream (nhanh) hay re-encode (chậm hơn).
- *
- * Được export ra ngoài để videoAsset.service dùng chung, tránh duplicate logic.
- */
-export const probeVideoMetadata = (inputPath: string): Promise<{ video: string; audio: string; durationSec: number }> =>
+export type ProbedVideoMetadata = {
+  video: string;
+  audio: string;
+  durationSec: number;
+  width: number;
+  height: number;
+};
+
+export type ProcessedRendition = {
+  quality: string;
+  width: number;
+  height: number;
+  bandwidth: number;
+  manifestFileName: string;
+  manifestOutputPath: string;
+  manifestKeySuffix: string;
+};
+
+export type ProcessedHlsOutput = {
+  masterManifestOutputPath: string;
+  masterManifestFileName: string;
+  encryptionKeyHex: string;
+  durationSec: number;
+  renditions: ProcessedRendition[];
+  availableQualities: string[];
+  sourceWidth: number;
+  sourceHeight: number;
+};
+
+const HLS_SEGMENT_DURATION_SECONDS = 6;
+const MASTER_MANIFEST_FILE_NAME = 'master.m3u8';
+const DEFAULT_RENDITION_BANDWIDTHS: Record<number, number> = {
+  360: 800_000,
+  720: 2_800_000,
+  1080: 5_000_000,
+};
+
+const QUALITY_PRESETS = [360, 720, 1080] as const;
+const QUALITY_CODECS = 'avc1.42e028,mp4a.40.2';
+const TARGET_FPS = 30;
+
+const normalizeEven = (value: number) => {
+  const rounded = Math.max(2, Math.round(value));
+  return rounded % 2 === 0 ? rounded : rounded - 1;
+};
+
+const sanitizeQualityLabel = (quality: string) => quality.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+const estimateBandwidth = (height: number) => {
+  const preset = DEFAULT_RENDITION_BANDWIDTHS[height];
+  if (preset) return preset;
+  return Math.max(500_000, Math.round((height / 360) * DEFAULT_RENDITION_BANDWIDTHS[360]));
+};
+
+export const buildQualityLadder = (sourceHeight: number): string[] => {
+  const normalizedSourceHeight = Math.max(1, Math.round(sourceHeight));
+  const qualities = QUALITY_PRESETS.filter((height) => height <= normalizedSourceHeight).map((height) => `${height}p`);
+
+  if (normalizedSourceHeight < 720) {
+    const exactSourceLabel = `${normalizedSourceHeight}p`;
+    if (!qualities.includes(exactSourceLabel)) qualities.push(exactSourceLabel);
+  }
+
+  if (qualities.length === 0) qualities.push(`${normalizedSourceHeight}p`);
+  return Array.from(new Set(qualities)).sort((left, right) => Number.parseInt(left, 10) - Number.parseInt(right, 10));
+};
+
+const buildRenditions = (sourceWidth: number, sourceHeight: number): ProcessedRendition[] => {
+  const aspectRatio = sourceWidth > 0 && sourceHeight > 0 ? sourceWidth / sourceHeight : 16 / 9;
+  return buildQualityLadder(sourceHeight).map((quality) => {
+    const height = Math.max(1, Number.parseInt(quality, 10) || sourceHeight);
+    const width = height >= sourceHeight
+      ? normalizeEven(sourceWidth || aspectRatio * height)
+      : normalizeEven(aspectRatio * height);
+    const folderName = sanitizeQualityLabel(quality);
+    const manifestFileName = 'playlist.m3u8';
+
+    return {
+      quality,
+      width,
+      height,
+      bandwidth: estimateBandwidth(height),
+      manifestFileName,
+      manifestOutputPath: path.join(folderName, manifestFileName),
+      manifestKeySuffix: path.posix.join(folderName, manifestFileName),
+    };
+  });
+};
+
+export const probeVideoMetadata = (inputPath: string): Promise<ProbedVideoMetadata> =>
   new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(inputPath, (err: any, metadata: any) => {
+    ffmpeg.ffprobe(inputPath, (err: unknown, metadata: ffmpeg.FfprobeData) => {
       if (err) return reject(err);
-      const streams: any[] = metadata.streams || [];
-      const video = streams.find((s) => s.codec_type === 'video')?.codec_name ?? '';
-      const audio = streams.find((s) => s.codec_type === 'audio')?.codec_name ?? '';
+      const streams = metadata.streams || [];
+      const videoStream = streams.find((stream) => stream.codec_type === 'video');
+      const audioStream = streams.find((stream) => stream.codec_type === 'audio');
       const rawDuration =
         Number(metadata?.format?.duration) ||
-        Number(streams.find((s) => s.codec_type === 'video')?.duration) ||
+        Number(videoStream?.duration) ||
         0;
       const durationSec = Math.max(0, Math.round(rawDuration));
-      resolve({ video, audio, durationSec });
+      resolve({
+        video: videoStream?.codec_name ?? '',
+        audio: audioStream?.codec_name ?? '',
+        durationSec,
+        width: Number(videoStream?.width) || 0,
+        height: Number(videoStream?.height) || 0,
+      });
     });
   });
 
-/**
- * Xử lý video: Chuyển đổi file video sang định dạng HLS chia nhỏ (.ts)
- * và mã hoá AES-128 trên từng phân đoạn.
- *
- * Tối ưu #1: Nếu video đã là H.264+AAC → dùng copy mode (không re-encode) → cực nhanh.
- * Tối ưu #1: Nếu cần encode → dùng preset ultrafast + threads 0 (nhanh hơn 5-10x so với medium).
- * Tối ưu #3: Báo cáo progress thực qua callback mỗi 5%.
- *
- * @param inputPath   Đường dẫn tới file video gốc (local)
- * @param outputDir   Thư mục chứa các file đầu ra (.m3u8 và .ts)
- * @param videoId     ID định danh của video (dùng đặt tên file và key)
- * @param onProgress  Callback nhận % tiến trình (0-99), được gọi mỗi 5%
- */
+const encodeRenditionToHls = async (params: {
+  inputPath: string;
+  outputDir: string;
+  rendition: ProcessedRendition;
+  keyInfoPath: string;
+  onProgress?: (percent: number) => Promise<void>;
+}): Promise<void> => {
+  const {
+    inputPath,
+    outputDir,
+    rendition,
+    keyInfoPath,
+    onProgress,
+  } = params;
+
+  const renditionDir = path.join(outputDir, sanitizeQualityLabel(rendition.quality));
+  fs.mkdirSync(renditionDir, { recursive: true });
+
+  const playlistPath = path.join(renditionDir, rendition.manifestFileName);
+  const segmentPattern = path.join(renditionDir, `${sanitizeQualityLabel(rendition.quality)}_%03d.ts`);
+
+  await new Promise<void>((resolve, reject) => {
+    const cmd = ffmpeg(inputPath);
+
+    cmd
+      .videoCodec('libx264')
+      .audioCodec('aac')
+      .audioBitrate('128k')
+      .addOptions([
+        '-preset veryfast',
+        '-crf 23',
+        '-threads 0',
+        '-profile:v baseline',
+        '-level 4.0',
+        '-pix_fmt yuv420p',
+        '-sc_threshold 0',
+        `-r ${TARGET_FPS}`,
+        `-force_key_frames expr:gte(t,n_forced*${HLS_SEGMENT_DURATION_SECONDS})`,
+        `-vf scale=${rendition.width}:${rendition.height}:force_original_aspect_ratio=decrease,pad=${rendition.width}:${rendition.height}:(ow-iw)/2:(oh-ih)/2`,
+      ]);
+
+    cmd
+      .addOptions([
+        '-start_number 0',
+        `-hls_time ${HLS_SEGMENT_DURATION_SECONDS}`,
+        '-hls_list_size 0',
+        '-hls_playlist_type vod',
+        `-hls_key_info_file ${keyInfoPath}`,
+        `-hls_segment_filename ${segmentPattern}`,
+      ])
+      .output(playlistPath)
+      .on('progress', (progress: { percent?: number }) => {
+        if (!onProgress) return;
+        const pct = Math.min(Math.round(progress.percent || 0), 99);
+        void onProgress(pct);
+      })
+      .on('end', () => resolve())
+      .on('error', (error: Error) => reject(error))
+      .run();
+  });
+};
 export const processVideoToHLS = async (
   inputPath: string,
   outputDir: string,
   videoId: string,
   onProgress?: ProgressCallback,
-  /**
-   * Kết quả probe đã chạy sẵn từ bước validation (videoAsset.service).
-   * Nếu có → dùng luôn, KHÔNG probe lại → tiết kiệm I/O.
-   * Nếu không truyền → tự probe bên trong (giữ tương thích ngược).
-   */
-  preProbed?: { video: string; audio: string; durationSec: number },
-): Promise<{ m3u8OutputPath: string; encryptionKeyHex: string; durationSec: number }> => {
-  // --- Xác định codec để chọn chế độ xử lý (copy vs encode) ---
-  let canCopyVideo = false;
-  let canCopyAudio = false;
+  preProbed?: ProbedVideoMetadata,
+): Promise<ProcessedHlsOutput> => {
   let durationSec = 0;
+  let sourceWidth = 0;
+  let sourceHeight = 0;
+
   try {
-    // Dùng kết quả probe sẵn nếu có, tránh đọc file lần thứ 2
     const metadata = preProbed ?? await probeVideoMetadata(inputPath);
-    canCopyVideo = metadata.video === 'h264';
-    canCopyAudio = ['aac', 'mp3'].includes(metadata.audio);
     durationSec = metadata.durationSec;
-    console.log(`[MediaService] Codec probe: video=${metadata.video}, audio=${metadata.audio}, duration=${durationSec}s`);
-    console.log(`[MediaService] Chế độ xử lý: ${canCopyVideo && canCopyAudio ? '⚡ COPY (không encode)' : '🔄 ENCODE (libx264+ultrafast)'}`);
-  } catch (e) {
-    console.warn('[MediaService] Probe codec thất bại, fallback sang encode mode:', e);
+    sourceWidth = metadata.width;
+    sourceHeight = metadata.height;
+    console.log(
+      `[MediaService] Codec probe: video=${metadata.video}, audio=${metadata.audio}, duration=${durationSec}s, resolution=${sourceWidth}x${sourceHeight}`,
+    );
+  } catch (error) {
+    console.warn('[MediaService] Probe codec thất bại, fallback sang encode mode:', error);
   }
 
-  // --- Setup mã hoá AES-128 ---
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
+  const renditions = buildRenditions(sourceWidth || 1280, sourceHeight || 720);
   const key = crypto.randomBytes(16);
   const keyHex = key.toString('hex');
   const keyFilePath = path.join(outputDir, `${videoId}.key`);
   fs.writeFileSync(keyFilePath, key);
 
-  const keyInfoPath = path.join(outputDir, 'key_info.txt');
   const apiUrl = process.env.API_URL || 'http://localhost:8000';
   const keyUri = `${apiUrl}/api/media/videos/${videoId}/key`;
-  const ivHex = crypto.randomBytes(16).toString('hex');
-  fs.writeFileSync(keyInfoPath, `${keyUri}\n${keyFilePath}\n${ivHex}`);
+  const masterManifestOutputPath = path.join(outputDir, MASTER_MANIFEST_FILE_NAME);
+  const keyInfoPaths: string[] = [];
 
-  const m3u8OutputPath = path.join(outputDir, `${videoId}_playlist.m3u8`);
-  const segmentPattern = path.join(outputDir, `${videoId}_segment_%03d.ts`);
+  try {
+    for (let index = 0; index < renditions.length; index += 1) {
+      const rendition = renditions[index];
+      const keyInfoPath = path.join(outputDir, `key_info_${sanitizeQualityLabel(rendition.quality)}.txt`);
+      keyInfoPaths.push(keyInfoPath);
+      const ivHex = crypto.randomBytes(16).toString('hex');
+      fs.writeFileSync(keyInfoPath, `${keyUri}\n${keyFilePath}\n${ivHex}`);
 
-  console.log(`[MediaService] Bắt đầu HLS processing cho video: ${videoId}...`);
-
-  // --- Chạy FFmpeg ---
-  return new Promise((resolve, reject) => {
-    let lastReported = 0;
-
-    const cmd = ffmpeg(inputPath);
-
-    // #1 — Copy stream nếu codec tương thích, ngược lại encode với ultrafast
-    if (canCopyVideo && canCopyAudio) {
-      cmd.videoCodec('copy').audioCodec('copy');
-    } else {
-      cmd
-        .videoCodec('libx264')
-        .audioCodec('aac')
-        .addOptions([
-          '-preset ultrafast', // #1 — Nhanh hơn 5-10x so với preset mặc định "medium"
-          '-crf 26',           // Chất lượng tốt, giảm kích thước file
-          '-threads 0',        // Dùng tất cả CPU cores
-          '-profile:v baseline',
-          '-level 3.0',
-        ]);
+      let lastReported = -1;
+      await encodeRenditionToHls({
+        inputPath,
+        outputDir,
+        rendition,
+        keyInfoPath,
+        onProgress: onProgress
+          ? async (percent) => {
+              const weighted = Math.min(
+                99,
+                Math.round(((index + percent / 100) / renditions.length) * 99),
+              );
+              if (weighted === lastReported) return;
+              lastReported = weighted;
+              await onProgress(weighted);
+            }
+          : undefined,
+      });
     }
 
-    cmd
-      .addOptions([
-        '-start_number 0',
-        '-hls_time 10',
-        '-hls_list_size 0',
-        '-hls_key_info_file ' + keyInfoPath,
-        '-hls_segment_filename ' + segmentPattern,
-      ])
-      .output(m3u8OutputPath)
-      .on('progress', (progress: any) => {
-        // #3 — Real progress: gọi callback mỗi 5% thay vì giả lập
-        if (!onProgress) return;
-        const pct = Math.min(Math.round(progress.percent || 0), 99);
-        if (pct - lastReported >= 5) {
-          lastReported = pct;
-          void onProgress(pct);
-        }
-      })
-      .on('end', () => {
-        console.log(`[MediaService] ✅ Hoàn tất HLS processing cho ${videoId}`);
-        // Dọn dẹp file bảo mật — không upload lên storage
-        try {
-          if (fs.existsSync(keyInfoPath)) fs.unlinkSync(keyInfoPath);
-          if (fs.existsSync(keyFilePath)) fs.unlinkSync(keyFilePath);
-        } catch (cleanupErr) {
-          console.error('[MediaService] Lỗi khi dọn dẹp file bảo mật:', cleanupErr);
-        }
-        resolve({ m3u8OutputPath, encryptionKeyHex: keyHex, durationSec });
-      })
-      .on('error', (err: any) => {
-        console.error(`[MediaService] Lỗi khi xử lý video ${videoId}:`, err);
-        try {
-          if (fs.existsSync(keyInfoPath)) fs.unlinkSync(keyInfoPath);
-          if (fs.existsSync(keyFilePath)) fs.unlinkSync(keyFilePath);
-        } catch (_) { /* ignore */ }
-        reject(err);
-      })
-      .run();
-  });
+    const masterLines = ['#EXTM3U', '#EXT-X-VERSION:3'];
+    for (const rendition of renditions) {
+      masterLines.push(
+        `#EXT-X-STREAM-INF:BANDWIDTH=${rendition.bandwidth},RESOLUTION=${rendition.width}x${rendition.height},CODECS="${QUALITY_CODECS}"`,
+        rendition.manifestOutputPath.replace(/\\/g, '/'),
+      );
+    }
+    fs.writeFileSync(masterManifestOutputPath, masterLines.join('\n'));
+
+    if (onProgress) await onProgress(99);
+
+    return {
+      masterManifestOutputPath,
+      masterManifestFileName: MASTER_MANIFEST_FILE_NAME,
+      encryptionKeyHex: keyHex,
+      durationSec,
+      renditions,
+      availableQualities: renditions.map((rendition) => rendition.quality),
+      sourceWidth,
+      sourceHeight,
+    };
+  } finally {
+    for (const keyInfoPath of keyInfoPaths) {
+      try {
+        if (fs.existsSync(keyInfoPath)) fs.unlinkSync(keyInfoPath);
+      } catch (error) {
+        console.error('[MediaService] Lỗi khi dọn dẹp key_info:', error);
+      }
+    }
+    try {
+      if (fs.existsSync(keyFilePath)) fs.unlinkSync(keyFilePath);
+    } catch (error) {
+      console.error('[MediaService] Lỗi khi dọn dẹp file key:', error);
+    }
+  }
 };
+
+
+
+
+

@@ -3,34 +3,60 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 export enum VideoAssetStatus {
-  INITIATED  = 'INITIATED',   // Asset vừa được tạo, chưa upload
-  UPLOADING  = 'UPLOADING',   // Đang upload multipart lên storage
-  UPLOADED   = 'UPLOADED',    // Upload xong storage, chờ FFmpeg xử lý
-  PROCESSING = 'PROCESSING',  // FFmpeg đang encode HLS
-  READY      = 'READY',       // Hoàn tất, sẵn sàng phát
-  FAILED     = 'FAILED',      // Thất bại
+  INITIATED  = 'INITIATED',
+  UPLOADING  = 'UPLOADING',
+  UPLOADED   = 'UPLOADED',
+  PROCESSING = 'PROCESSING',
+  READY      = 'READY',
+  FAILED     = 'FAILED',
+}
+
+export interface IVideoAssetRendition {
+  quality: string;
+  width: number;
+  height: number;
+  bandwidth: number;
+  manifestKey: string;
+  playlistPath: string;
 }
 
 export interface IVideoAsset extends Document {
-  ownerUserId: string; // id của user sở hữu video
-  courseId: string; // id của course mà video này thuộc về
-  lessonId: string; // id của lesson mà video này thuộc về
-  originalFileName: string; // tên file gốc
-  mimeType: string; // loại file
-  durationSec: number; // thời lượng video
-  rawObjectKey: string; // khóa object logical của file gốc
-  manifestKey: string; // khóa object logical của manifest HLS
-  multipartUploadId?: string | null;  // S3 Multipart UploadId (null khi đã complete/abort)
-  uploadCompletedAt?: Date | null;     // Thời điểm storage confirm upload xong
-  sourceSizeBytes: number;             // Kích thước file gốc FE báo lên (bytes)
-  encryptionKey?: string | null;       // Khoá AES-128
-  processingProgress: number; // tiến độ xử lý
+  ownerUserId: string;
+  courseId: string;
+  lessonId: string;
+  originalFileName: string;
+  mimeType: string;
+  durationSec: number;
+  rawObjectKey: string;
+  manifestKey: string;
+  masterManifestKey?: string | null;
+  multipartUploadId?: string | null;
+  uploadCompletedAt?: Date | null;
+  sourceSizeBytes: number;
+  encryptionKey?: string | null;
+  processingProgress: number;
   status: VideoAssetStatus;
   isAttached: boolean;
   errorMessage?: string | null;
+  availableQualities: string[];
+  sourceWidth?: number | null;
+  sourceHeight?: number | null;
+  renditions: IVideoAssetRendition[];
   createdAt: Date;
   updatedAt: Date;
 }
+
+const renditionSchema = new Schema<IVideoAssetRendition>(
+  {
+    quality: { type: String, required: true },
+    width: { type: Number, required: true },
+    height: { type: Number, required: true },
+    bandwidth: { type: Number, required: true },
+    manifestKey: { type: String, required: true },
+    playlistPath: { type: String, required: true },
+  },
+  { _id: false },
+);
 
 const videoAssetSchema = new Schema<IVideoAsset>(
   {
@@ -38,20 +64,25 @@ const videoAssetSchema = new Schema<IVideoAsset>(
     courseId: { type: String, required: true, index: true },
     lessonId: { type: String, required: true, index: true },
     originalFileName: { type: String, default: '' },
-    mimeType: { type: String, default: '' }, // mimiType là
+    mimeType: { type: String, default: '' },
     durationSec: { type: Number, default: 0 },
     rawObjectKey: { type: String, default: '' },
     manifestKey: { type: String, default: '' },
+    masterManifestKey: { type: String, default: null },
     multipartUploadId: { type: String, default: null },
     uploadCompletedAt: { type: Date, default: null },
     sourceSizeBytes: { type: Number, default: 0 },
-    encryptionKey: { type: String, default: null }, // Khoá AES-128 dạng Hex
+    encryptionKey: { type: String, default: null },
     processingProgress: { type: Number, default: 0, min: 0, max: 100 },
     status: { type: String, enum: Object.values(VideoAssetStatus), default: VideoAssetStatus.INITIATED, index: true },
     isAttached: { type: Boolean, default: false, index: true },
     errorMessage: { type: String, default: null },
+    availableQualities: { type: [String], default: [] },
+    sourceWidth: { type: Number, default: null },
+    sourceHeight: { type: Number, default: null },
+    renditions: { type: [renditionSchema], default: [] },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export const VideoAsset = mongoose.model<IVideoAsset>('VideoAsset', videoAssetSchema);

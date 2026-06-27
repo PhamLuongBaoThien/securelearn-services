@@ -43,17 +43,12 @@ class VideoAssetController {
     }
   }
 
-  // [BƯỚC 2 / BƯỚC 2.2: CẤP PHÁT KEY GIẢI MÃ NHỊ PHÂN QUA XÁC THỰC KEY SESSION]
-  // Endpoint lấy key giải mã AES-128 của phân đoạn HLS (.ts).
-  // Đảm bảo chỉ người dùng đang xem thực tế có keySession hợp lệ mới lấy được key giải mã.
   public async getEncryptionKey(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const asset = await videoAssetService.getAsset(videoAssetId);
       const session = typeof req.query.session === 'string' ? req.query.session : '';
-      
-      // Route này đã qua JWT + extractUser. Key chỉ được cấp khi key session
-      // đồng thời thuộc đúng user trong access token và đúng video đang request.
+
       if (!req.userId) {
         res.status(401).send('Authentication required');
         return;
@@ -63,7 +58,6 @@ class VideoAssetController {
         return;
       }
 
-      // Kiểm tra session có hợp lệ không (user và video khớp với session đã tạo ở bước trước)
       const validSession = await playbackAccessService.validateKeySession(
         session,
         videoAssetId,
@@ -73,24 +67,20 @@ class VideoAssetController {
         res.status(403).send('Invalid key session');
         return;
       }
-      
+
       if (!asset.encryptionKey) {
         res.status(404).send('Key not found or not ready');
         return;
       }
-      
-      // Chuyển đổi chuỗi hex lưu trong DB thành dữ liệu binary buffer nhị phân thô để gửi về player giải mã
+
       const keyBuffer = Buffer.from(asset.encryptionKey, 'hex');
       res.setHeader('Content-Type', 'application/octet-stream');
       res.send(keyBuffer);
-    } catch (error: any) {
+    } catch {
       res.status(404).send('Asset not found');
     }
   }
 
-  // [BƯỚC 2: KHỞI TẠO PHIÊN PHÁT VIDEO - CẤP ONE-TIME PLAYBACK TOKEN]
-  // Endpoint khởi tạo phiên xem video (Playback Session).
-  // Kiểm tra entitlement qua middleware rồi tạo One-Time Playback Token hết hạn trong 60 giây.
   public async createPlaybackSession(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -100,10 +90,9 @@ class VideoAssetController {
         videoAssetId,
         courseId: String(asset.courseId),
       };
-      
-      // Tạo token xem manifest dùng một lần trong Redis
+
       const token = await playbackAccessService.createOneTimePlayback(playbackInput);
-      
+
       res.status(201).json({
         status: 'OK',
         data: {
@@ -118,47 +107,62 @@ class VideoAssetController {
     }
   }
 
-  // [BƯỚC 2.4: TIÊU THỤ PLAYBACK TOKEN & REWRITE MANIFEST (.m3u8)]
-  // Endpoint consume Playback Token (consume - tiêu thụ) dùng 1 lần, sinh Key Session mới, rewrite URL của key giải mã và trả về nội dung file manifest HLS.
   public async getOneTimePlaybackManifest(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const token = typeof req.query.token === 'string' ? req.query.token : '';
 
-      // Kiểm tra token có tồn tại không
       if (!token) {
         res.status(400).json({ status: 'ERR', message: 'Thiếu playback token.' });
         return;
       }
-      
-      // Đọc và xóa (GET + DEL) token trong Redis ngay lập tức để chặn replay link
+
       const playback = await playbackAccessService.consumeOneTimePlayback(token);
       if (!playback || playback.videoAssetId !== videoAssetId) {
         res.status(410).json({ status: 'ERR', message: 'Playback URL đã hết hạn hoặc đã được sử dụng.' });
         return;
       }
-      
-      // Tạo Key Session mới trong Redis (hết hạn sau 5 phút) để cấp quyền lấy AES key giải mã
-      // 1. KeySession là gì? 
-      // KeySession là một token tạm thời (hết hạn sau 5 phút) được tạo ra sau khi Playback Token hợp lệ được tiêu thụ.
-      // Mục đích của KeySession là để cấp quyền truy cập vào endpoint /api/media/videos/:videoAssetId/key, 
-      // nơi người dùng có thể lấy AES key giải mã phân đoạn HLS.
+
       const keySession = await playbackAccessService.createKeySession({
         userId: playback.userId,
         videoAssetId,
       });
-      
-      // Viết lại URL của Key trong manifest để trỏ về API cấp key bảo mật kèm theo token Key Session
-      const keyUri = `/api/media/videos/${videoAssetId}/key?session=${encodeURIComponent(keySession)}`;
-      
-      // Đọc manifest từ MinIO, rewrite và trả về trực tiếp
-      const manifest = await videoAssetService.getPlaybackManifest(videoAssetId, keyUri);
-      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-      res.setHeader('Cache-Control', 'private, no-store'); // Chặn caching manifest
 
-      // 2. Hàm send trong Express.js là gì? 
-      // Hàm send trong Express.js là một phương thức của đối tượng Response được sử dụng để gửi dữ liệu response đến client.
-      // Nó có thể gửi nhiều loại dữ liệu khác nhau, bao gồm chuỗi (String), Buffer, JSON, và mảng.
+      const keyUri = `/api/media/videos/${videoAssetId}/key?session=${encodeURIComponent(keySession)}`;
+      const manifest = await videoAssetService.getPlaybackManifest(videoAssetId, keyUri, keySession);
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(manifest);
+    } catch (error: any) {
+      res.status(404).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async getRenditionManifest(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const videoAssetId = req.params.videoAssetId as string;
+      const quality = typeof req.query.quality === 'string' ? req.query.quality : '';
+      const session = typeof req.query.session === 'string' ? req.query.session : '';
+
+      if (!req.userId) {
+        res.status(401).json({ status: 'ERR', message: 'Authentication required.' });
+        return;
+      }
+      if (!quality || !session) {
+        res.status(400).json({ status: 'ERR', message: 'Thiếu quality hoặc session.' });
+        return;
+      }
+
+      const validSession = await playbackAccessService.validateKeySession(session, videoAssetId, req.userId);
+      if (!validSession) {
+        res.status(403).json({ status: 'ERR', message: 'Key session không hợp lệ.' });
+        return;
+      }
+
+      const keyUri = `/api/media/videos/${videoAssetId}/key?session=${encodeURIComponent(session)}`;
+      const manifest = await videoAssetService.getRenditionManifest(videoAssetId, quality, keyUri);
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'private, no-store');
       res.send(manifest);
     } catch (error: any) {
       res.status(404).json({ status: 'ERR', message: error.message });
@@ -197,7 +201,10 @@ class VideoAssetController {
         return;
       }
       const asset = await videoAssetService.confirmUpload(videoAssetId, parts);
-      res.status(200).json({ status: 'OK', message: 'Đang xử lý video.', data: asset });
+      const normalized = typeof (asset as { toObject?: () => unknown }).toObject === 'function'
+        ? (asset as { toObject: () => unknown }).toObject()
+        : asset;
+      res.status(200).json({ status: 'OK', message: 'Đang xử lý video.', data: sanitizeVideoAsset(normalized as Awaited<ReturnType<typeof videoAssetService.getAsset>>) });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }
