@@ -195,8 +195,8 @@ class CourseController {
         data: course,
       });
     } catch (error: any) {
-      const status = error.message.includes('quyền') ? 403 : 400;
-      res.status(status).json({ status: 'ERR', message: error.message });
+      const status = error.code === 'INSTRUCTOR_PROFILE_INCOMPLETE' ? 422 : error.message.includes('quyền') ? 403 : 400;
+      res.status(status).json({ status: 'ERR', message: error.message, ...(error.code && { code: error.code }), ...(error.missingFields && { data: { missingFields: error.missingFields } }) });
     }
   }
 

@@ -6,7 +6,7 @@
     "dev": "npx ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run build && node dist/utils/identity.utils.test.js"
   },
   "keywords": [],
   "author": "",

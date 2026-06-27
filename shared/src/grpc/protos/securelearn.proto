@@ -2,6 +2,13 @@ syntax = "proto3";
 
 package securelearn;
 
+service IdentityInternalService {
+  rpc CheckInstructorProfile (InstructorProfileRequest) returns (InstructorProfileReply);
+}
+
+message InstructorProfileRequest { string userId = 1; }
+message InstructorProfileReply { bool complete = 1; repeated string missingFields = 2; }
+
 service MediaInternalService {
   rpc GetVideoAssetBinding (AssetByIdRequest) returns (MediaAssetBindingReply);
   rpc GetDocumentAssetBinding (AssetByIdRequest) returns (MediaAssetBindingReply);

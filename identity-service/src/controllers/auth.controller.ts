@@ -16,41 +16,21 @@ class AuthController {
    */
   public async register(req: Request, res: Response): Promise<void> {
     try {
-      const { email, password, fullName } = req.body;
-
-      if (!email || !password || !fullName) {
-        res.status(400).json({
-          status: 'ERR',
-          message: 'Vui lòng cung cấp đầy đủ: email, password, fullName.',
-        });
-        return;
-      }
-
-      if (password.length < 6) {
-        res.status(400).json({
-          status: 'ERR',
-          message: 'Mật khẩu phải có ít nhất 6 ký tự.',
-        });
-        return;
-      }
-
-      const newUser = await authService.register(email, password, fullName);
-
-      res.status(201).json({
-        status: 'OK',
-        message: 'Đăng ký tài khoản thành công!',
-        data: {
-          _id: newUser._id,
-          email: newUser.email,
-          fullName: newUser.fullName,
-          role: newUser.role,
-        },
-      });
-    } catch (error: any) {
-      res.status(400).json({ status: 'ERR', message: error.message });
-    }
+      const { email, password, confirmPassword, fullName } = req.body;
+      if (!email || !password || !confirmPassword || !fullName) { res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp đầy đủ họ tên, email, mật khẩu và nhập lại mật khẩu.' }); return; }
+      await authService.register(email, password, confirmPassword, fullName);
+      res.status(200).json({ status: 'OK', message: 'Mã OTP đã được gửi đến email của bạn.', data: { email: email.trim().toLowerCase(), expiresIn: 300 } });
+    } catch (error: any) { res.status(400).json({ status: 'ERR', message: error.message }); }
   }
 
+  public async verifyRegistration(req: Request, res: Response): Promise<void> {
+    try {
+      const { email, otp } = req.body;
+      if (!email || !otp) { res.status(400).json({ status: 'ERR', message: 'Vui lòng nhập email và OTP.' }); return; }
+      const user = await authService.verifyRegistration(email, otp);
+      res.status(201).json({ status: 'OK', message: 'Đăng ký tài khoản thành công!', data: { _id: user._id, email: user.email, fullName: user.fullName, role: user.role } });
+    } catch (error: any) { res.status(400).json({ status: 'ERR', message: error.message }); }
+  }
   /**
    * [POST] /api/auth/login
    * Đăng nhập bằng email + mật khẩu.

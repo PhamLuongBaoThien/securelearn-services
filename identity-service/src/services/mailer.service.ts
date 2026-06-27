@@ -14,6 +14,13 @@ const transporter = nodemailer.createTransport({
 });
 
 class MailerService {
+  private async sendOTP(to: string, otp: string, title: string, description: string): Promise<void> {
+    try {
+      await transporter.sendMail({ from: `"SecureLearn Support" <${process.env.SMTP_USER}>`, to, subject: title, html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto"><h2>${title}</h2><p>${description}</p><div style="font-size:32px;font-weight:700;letter-spacing:8px;padding:20px;background:#f4f4f5;text-align:center">${otp}</div><p>Mã có hiệu lực trong 5 phút.</p></div>` });
+    } catch { throw new Error('Lỗi xảy ra khi gửi email, vui lòng thử lại sau.'); }
+  }
+  public sendRegistrationOTP(to: string, otp: string): Promise<void> { return this.sendOTP(to, otp, 'Xác nhận đăng ký SecureLearn', 'Nhập mã dưới đây để hoàn tất tạo tài khoản.'); }
+
   /**
    * Gửi email OTP khôi phục mật khẩu
    * @param to Địa chỉ email người nhận
@@ -41,7 +48,7 @@ class MailerService {
                 </span>
               </div>
               <p style="color: #555; line-height: 1.6;">
-                Mã này có hiệu lực trong vòng <strong>15 phút</strong>. Vui lòng không chia sẻ mã này cho bất kỳ ai.
+                Mã này có hiệu lực trong vòng <strong>5 phút</strong>. Vui lòng không chia sẻ mã này cho bất kỳ ai.
               </p>
               <p style="color: #777; font-size: 14px; margin-top: 30px;">
                 Nếu bạn không thức hiện yêu cầu này, xin vui lòng bỏ qua email này hoặc liên lạc với bộ phận hỗ trợ.

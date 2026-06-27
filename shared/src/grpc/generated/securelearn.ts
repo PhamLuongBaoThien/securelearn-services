@@ -21,6 +21,15 @@ import {
 
 export const protobufPackage = "securelearn";
 
+export interface InstructorProfileRequest {
+  userId: string;
+}
+
+export interface InstructorProfileReply {
+  complete: boolean;
+  missingFields: string[];
+}
+
 export interface AssetByIdRequest {
   assetId: string;
 }
@@ -92,6 +101,142 @@ export interface SubscriptionUsageReply {
   usageId: string;
   duplicate: boolean;
 }
+
+function createBaseInstructorProfileRequest(): InstructorProfileRequest {
+  return { userId: "" };
+}
+
+export const InstructorProfileRequest: MessageFns<InstructorProfileRequest> = {
+  encode(message: InstructorProfileRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.userId !== "") {
+      writer.uint32(10).string(message.userId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): InstructorProfileRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseInstructorProfileRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.userId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): InstructorProfileRequest {
+    return { userId: isSet(object.userId) ? globalThis.String(object.userId) : "" };
+  },
+
+  toJSON(message: InstructorProfileRequest): unknown {
+    const obj: any = {};
+    if (message.userId !== "") {
+      obj.userId = message.userId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<InstructorProfileRequest>): InstructorProfileRequest {
+    return InstructorProfileRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<InstructorProfileRequest>): InstructorProfileRequest {
+    const message = createBaseInstructorProfileRequest();
+    message.userId = object.userId ?? "";
+    return message;
+  },
+};
+
+function createBaseInstructorProfileReply(): InstructorProfileReply {
+  return { complete: false, missingFields: [] };
+}
+
+export const InstructorProfileReply: MessageFns<InstructorProfileReply> = {
+  encode(message: InstructorProfileReply, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.complete !== false) {
+      writer.uint32(8).bool(message.complete);
+    }
+    for (const v of message.missingFields) {
+      writer.uint32(18).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): InstructorProfileReply {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseInstructorProfileReply();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.complete = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.missingFields.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): InstructorProfileReply {
+    return {
+      complete: isSet(object.complete) ? globalThis.Boolean(object.complete) : false,
+      missingFields: globalThis.Array.isArray(object?.missingFields)
+        ? object.missingFields.map((e: any) => globalThis.String(e))
+        : [],
+    };
+  },
+
+  toJSON(message: InstructorProfileReply): unknown {
+    const obj: any = {};
+    if (message.complete !== false) {
+      obj.complete = message.complete;
+    }
+    if (message.missingFields?.length) {
+      obj.missingFields = message.missingFields;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<InstructorProfileReply>): InstructorProfileReply {
+    return InstructorProfileReply.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<InstructorProfileReply>): InstructorProfileReply {
+    const message = createBaseInstructorProfileReply();
+    message.complete = object.complete ?? false;
+    message.missingFields = object.missingFields?.map((e) => e) || [];
+    return message;
+  },
+};
 
 function createBaseAssetByIdRequest(): AssetByIdRequest {
   return { assetId: "" };
@@ -1238,6 +1383,56 @@ export const SubscriptionUsageReply: MessageFns<SubscriptionUsageReply> = {
     message.duplicate = object.duplicate ?? false;
     return message;
   },
+};
+
+export type IdentityInternalServiceService = typeof IdentityInternalServiceService;
+export const IdentityInternalServiceService = {
+  checkInstructorProfile: {
+    path: "/securelearn.IdentityInternalService/CheckInstructorProfile" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: InstructorProfileRequest): Buffer =>
+      Buffer.from(InstructorProfileRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): InstructorProfileRequest => InstructorProfileRequest.decode(value),
+    responseSerialize: (value: InstructorProfileReply): Buffer =>
+      Buffer.from(InstructorProfileReply.encode(value).finish()),
+    responseDeserialize: (value: Buffer): InstructorProfileReply => InstructorProfileReply.decode(value),
+  },
+} as const;
+
+export interface IdentityInternalServiceServer extends UntypedServiceImplementation {
+  checkInstructorProfile: handleUnaryCall<InstructorProfileRequest, InstructorProfileReply>;
+}
+
+export interface IdentityInternalServiceClient extends Client {
+  checkInstructorProfile(
+    request: InstructorProfileRequest,
+    callback: (error: ServiceError | null, response: InstructorProfileReply) => void,
+  ): ClientUnaryCall;
+  checkInstructorProfile(
+    request: InstructorProfileRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: InstructorProfileReply) => void,
+  ): ClientUnaryCall;
+  checkInstructorProfile(
+    request: InstructorProfileRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: InstructorProfileReply) => void,
+  ): ClientUnaryCall;
+}
+
+export const IdentityInternalServiceClient = makeGenericClientConstructor(
+  IdentityInternalServiceService,
+  "securelearn.IdentityInternalService",
+) as unknown as {
+  new (
+    address: string,
+    credentials: ChannelCredentials,
+    options?: Partial<ClientOptions>,
+  ): IdentityInternalServiceClient;
+  service: typeof IdentityInternalServiceService;
+  serviceName: string;
 };
 
 export type MediaInternalServiceService = typeof MediaInternalServiceService;

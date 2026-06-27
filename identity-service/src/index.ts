@@ -8,12 +8,16 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { connectDB } from './config/db';
-import { RabbitMQConnection } from '@securelearn/common';
+import { RabbitMQConnection, startGrpcServer } from '@securelearn/common';
 import app from './app';
 import { seedRolePermissions } from './models/rolePermission.model';
 import { registerEventHandlers } from './events/handlers';
+import { createInternalGrpcServer } from './grpc/server';
+import { User } from './models/user.model';
 
 const PORT = process.env.PORT || 5001;
+const GRPC_BIND = process.env.IDENTITY_GRPC_BIND || '0.0.0.0:6001';
+let grpcServer: { forceShutdown: () => void } | null = null;
 
 const bootServer = async () => {
   try {
@@ -21,6 +25,8 @@ const bootServer = async () => {
 
     // Kết nối MongoDB Atlas
     await connectDB();
+
+    await User.updateMany({ emailVerifiedAt: { $exists: false } }, [{ $set: { emailVerifiedAt: { $ifNull: ['$createdAt', new Date()] } } }]);
 
     // Seed RolePermission mặc định (chỉ chạy nếu collection rỗng)
     await seedRolePermissions();
@@ -30,6 +36,8 @@ const bootServer = async () => {
     await RabbitMQConnection.getInstance().connect(rabbitmqUrl);
     // Bật consumer để projection subscriptionStatus luôn theo kịp lifecycle term từ payment-service.
     await registerEventHandlers();
+
+    grpcServer = await startGrpcServer(createInternalGrpcServer(), GRPC_BIND);
 
     // Bật server Express
     app.listen(PORT, () => {
@@ -46,6 +54,7 @@ const bootServer = async () => {
 // Khi process nhận tín hiệu tắt (Ctrl+C hoặc Docker stop), đóng kết nối sạch sẽ
 const gracefulShutdown = async () => {
   console.log('\nĐang tắt Identity Service...');
+  grpcServer?.forceShutdown();
   await RabbitMQConnection.getInstance().close();
   process.exit(0);
 };

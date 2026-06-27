@@ -13,6 +13,7 @@ const router = Router();
 
 // [POST] /api/auth/register — Đăng ký tài khoản mới
 router.post('/register', authController.register);
+router.post('/register/verify-otp', authController.verifyRegistration);
 
 // [POST] /api/auth/login — Đăng nhập
 router.post('/login', authController.login);

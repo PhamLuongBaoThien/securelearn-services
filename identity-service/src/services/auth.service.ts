@@ -6,6 +6,9 @@ import bcrypt from 'bcryptjs';
 import { User, IUser, Role } from '../models/user.model';
 import redisClient from '../config/redis';
 import mailerService from './mailer.service';
+import otpService from './otp.service';
+import { normalizeEmail, normalizeVietnamPhone } from '../utils/identity.utils';
+import { getMissingInstructorFields } from '../validators/profile-completeness';
 import {
   publishUserRegistered,
   publishUserUpdated,
@@ -22,45 +25,36 @@ class AuthService {
   /**
    * Đăng ký tài khoản mới (email + mật khẩu).
    */
-  public async register(email: string, password: string, fullName: string): Promise<IUser> {
-    // 1. Kiểm tra email đã tồn tại chưa
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      throw new Error('Email này đã được sử dụng.');
-    }
+  public async register(emailInput: string, password: string, confirmPassword: string, fullName: string): Promise<void> {
+    const email = normalizeEmail(emailInput);
+    if (!fullName) throw new Error('Vui lòng cung cấp họ và tên.');
+    const trimmedName = fullName.trim().normalize('NFC');
+    if (!trimmedName) throw new Error('Vui lòng nhập họ và tên.');
+    if (trimmedName.length < 2) throw new Error('Họ và tên phải có tối thiểu 2 ký tự.');
+    if (/\d/.test(trimmedName)) throw new Error('Họ và tên không được chứa số.');
 
-    // 2. Hash mật khẩu bằng bcrypt (salt 10 rounds)
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // 3. Lưu user mới vào MongoDB
-    const newUser = new User({
-      email,
-      password: hashedPassword,
-      hasPassword: true,
-      fullName,
-      role: Role.STUDENT,
-    });
-
-    await newUser.save();
-
-    // Publish event: Thông báo cho các service khác biết có user mới
-    await publishUserRegistered({
-      userId: newUser._id.toString(),
-      email: newUser.email,
-      fullName: newUser.fullName,
-      role: newUser.role,
-      registeredAt: new Date().toISOString(),
-    });
-
-    return newUser;
+    if (password !== confirmPassword) throw new Error('Mật khẩu nhập lại không khớp.');
+    if (password.length < 6) throw new Error('Mật khẩu phải có ít nhất 6 ký tự.');
+    if (await User.exists({ email })) throw new Error('Email này đã được sử dụng.');
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const otp = await otpService.issue('register', email, { hashedPassword, fullName: trimmedName });
+    await mailerService.sendRegistrationOTP(email, otp);
   }
 
+  public async verifyRegistration(emailInput: string, otp: string): Promise<IUser> {
+    const email = normalizeEmail(emailInput);
+    const pending = await otpService.verify<{ hashedPassword: string; fullName: string }>('register', email, otp);
+    if (await User.exists({ email })) throw new Error('Email này đã được sử dụng.');
+    const newUser = await User.create({ email, password: pending.hashedPassword, hasPassword: true, fullName: pending.fullName, role: Role.STUDENT, emailVerifiedAt: new Date() });
+    await publishUserRegistered({ userId: newUser._id.toString(), email: newUser.email, fullName: newUser.fullName, role: newUser.role, registeredAt: new Date().toISOString() });
+    return newUser;
+  }
   /**
    * Đăng nhập bằng email + mật khẩu.
    * Chỉ xác minh thông tin — việc sinh token do Controller gọi jwt.service.
    */
-  public async login(email: string, password: string): Promise<IUser> {
+  public async login(emailInput: string, password: string): Promise<IUser> {
+    const email = normalizeEmail(emailInput);
     // 1. Tìm user theo email
     const user = await User.findOne({ email });
     if (!user) {
@@ -140,7 +134,17 @@ class AuthService {
     }
 
     if (data.fullName !== undefined) user.fullName = data.fullName;
-    if (data.phone !== undefined) user.phone = data.phone;
+    if (data.phone !== undefined) {
+      const phoneInput = data.phone.trim();
+      if (!phoneInput) {
+        user.phone = undefined;
+      } else {
+        const phone = normalizeVietnamPhone(phoneInput);
+        const existingUser = await User.exists({ phone, _id: { $ne: userId } });
+        if (existingUser) throw new Error('Số điện thoại này đã được tài khoản khác sử dụng.');
+        user.phone = phone;
+      }
+    }
     
     // Khởi tạo profile object nếu chưa có
     if (!user.profile) {
@@ -151,7 +155,14 @@ class AuthService {
     if (data.bio !== undefined) user.profile.bio = data.bio;
     if (data.headline !== undefined) user.profile.headline = data.headline;
 
-    await user.save();
+    try {
+      await user.save();
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        throw new Error('Số điện thoại này đã được tài khoản khác sử dụng.');
+      }
+      throw error;
+    }
 
     // Publish event: Thông báo profile đã được cập nhật
     // Gửi kèm fullName (nếu có thay đổi) để course-service tự đồng bộ instructorName
@@ -169,6 +180,13 @@ class AuthService {
     return this.sanitizeUser(user) as any;
   }
 
+  public async checkInstructorProfile(userId: string): Promise<{ complete: boolean; missingFields: string[] }> {
+    const user = await User.findById(userId).lean();
+    if (!user || user.role !== Role.INSTRUCTOR) return { complete: false, missingFields: ['role'] };
+    const missingFields = getMissingInstructorFields(user);
+
+    return { complete: missingFields.length === 0, missingFields };
+  }
   /**
    * Xóa tài khoản của user theo ID.
    */
@@ -210,7 +228,8 @@ class AuthService {
   }
 
   /**
-   * Quên mật khẩu: Gửi OTP (15 phút) qua email cho user.
+   * Quên mật khẩu: Gửi OTP qua email cho user.
+   * Sử dụng otpService chung: HMAC digest, cooldown 60s, rate-limit 5 lần/giờ.
    */
   public async forgotPassword(email: string): Promise<void> {
     const user = await User.findOne({ email });
@@ -221,49 +240,27 @@ class AuthService {
     // Cho phép cả tài khoản Google-only dùng chức năng này
     // Mục đích: Tạo mật khẩu cục bộ để có thể đăng nhập bằng cả 2 cách
 
-    // Tạo mã OTP 6 số
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // Lưu OTP vào Redis với TTL là 15 phút = 900s
-    await redisClient.setex(`password_reset_otp:${email}`, 900, otp);
-
-    // Gửi OTP mail
+    const otp = await otpService.issue('password_reset', email, { email }, 300);
     await mailerService.sendPasswordResetOTP(email, otp);
   }
 
   /**
-   * Quét và kiểm tra tính hợp lệ của OTP (không xoá khỏi Redis)
+   * Kiểm tra tính hợp lệ của OTP (không xoá khỏi Redis — bước trung gian).
    */
   public async verifyResetOTP(email: string, otp: string): Promise<void> {
-    const savedOtp = await redisClient.get(`password_reset_otp:${email}`);
-    
-    if (!savedOtp) {
-       throw new Error('Mã OTP đã hết hạn hoặc không tồn tại. Vui lòng yêu cầu lại.');
-    }
-
-    if (savedOtp !== otp) {
-       throw new Error('Mã OTP không chính xác.');
-    }
+    await otpService.check('password_reset', email, otp);
   }
 
   /**
-   * Reset mật khẩu thông qua OTP
+   * Reset mật khẩu thông qua OTP (xoá OTP sau khi thành công).
    */
   public async resetPasswordByOTP(email: string, otp: string, newPassword: string): Promise<void> {
     if (!newPassword || newPassword.length < 6) {
       throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự.');
     }
 
-    // Lấy OTP từ Redis
-    const savedOtp = await redisClient.get(`password_reset_otp:${email}`);
-    
-    if (!savedOtp) {
-       throw new Error('Mã OTP đã hết hạn hoặc không tồn tại. Vui lòng yêu cầu lại.');
-    }
-
-    if (savedOtp !== otp) {
-       throw new Error('Mã OTP không chính xác.');
-    }
+    // Verify và consume OTP
+    await otpService.verify('password_reset', email, otp);
 
     // Tìm và update User
     const user = await User.findOne({ email });
@@ -273,9 +270,6 @@ class AuthService {
     user.password = await bcrypt.hash(newPassword, salt);
     user.hasPassword = true;
     await user.save();
-
-    // Xóa OTP khỏi Redis
-    await redisClient.del(`password_reset_otp:${email}`);
   }
 
   /**

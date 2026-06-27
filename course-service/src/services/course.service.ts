@@ -4,6 +4,7 @@
 // - xử lý nghiệp vụ catalog, review, publish và curriculum của khóa học
 // - phân tách public course detail với learning detail có entitlement để hỗ trợ flow thuê bao an toàn
 // ========================
+import { identityGrpcClient } from '../grpc/identity.client';
 import { Types } from "mongoose";
 import {
   CategoryResolutionStatus,
@@ -682,6 +683,17 @@ class CourseService {
       throw new Error(
         "Chỉ bản nháp hoặc bản cần chỉnh sửa mới có thể gửi duyệt.",
       );
+    }
+    let profileCheck;
+    try { profileCheck = await identityGrpcClient.checkInstructorProfile(instructorId); }
+    catch { throw new Error('Không thể xác minh hồ sơ giảng viên lúc này. Vui lòng thử lại sau.'); }
+    if (!profileCheck.complete) {
+      const labels: Record<string, string> = { role: 'vai trò giảng viên', fullName: 'họ tên', email: 'email đã xác minh', phone: 'số điện thoại', avatar: 'ảnh đại diện', headline: 'chức danh', bio: 'tiểu sử' };
+      const missing = profileCheck.missingFields.map((field: string) => labels[field] || field).join(', ');
+      const error = new Error(`Hồ sơ giảng viên chưa đầy đủ: ${missing}.`);
+      (error as any).code = 'INSTRUCTOR_PROFILE_INCOMPLETE';
+      (error as any).missingFields = profileCheck.missingFields;
+      throw error;
     }
     const validation = await this.validateCoursePublish(
       versionId,

@@ -27,6 +27,7 @@ export interface IUser extends Document {
   unlockReason?: string;
   subscriptionStatus: SubscriptionStatus;
   phone?: string;
+  emailVerifiedAt?: Date;
   profile?: {
     avatarUrl?: string;
     bio?: string;
@@ -108,6 +109,8 @@ const userSchema: Schema = new Schema(
       trim: true,
     },
 
+    emailVerifiedAt: { type: Date },
+
     lastLoginAt: {
       type: Date,
     },
@@ -121,6 +124,11 @@ const userSchema: Schema = new Schema(
   {
     timestamps: true, // Tự động thêm createdAt và updatedAt
   }
+);
+
+userSchema.index(
+  { phone: 1 },
+  { unique: true, partialFilterExpression: { phone: { $type: 'string' } } },
 );
 
 userSchema.pre('save', function (next) {

@@ -1,6 +1,11 @@
 import * as grpc from '@grpc/grpc-js';
 import {
   AssetByIdRequest,
+  IdentityInternalServiceClient,
+  IdentityInternalServiceService,
+  IdentityInternalServiceServer,
+  InstructorProfileRequest,
+  InstructorProfileReply,
   CourseEntitlementReply,
   CourseEntitlementRequest,
   CourseInternalServiceClient,
@@ -96,6 +101,28 @@ export const startGrpcServer = async (server: grpc.Server, bindAddress: string):
     });
   });
 
+export const createIdentityGrpcServer = (handlers: {
+  checkInstructorProfile: (userId: string) => Promise<InstructorProfileReply>;
+}): grpc.Server => {
+  const server = new grpc.Server();
+  const implementation: IdentityInternalServiceServer = {
+    checkInstructorProfile: async (call, callback) => {
+      try { callback(null, await handlers.checkInstructorProfile(call.request.userId)); }
+      catch (error) { callback(error as grpc.ServiceError, null); }
+    },
+  };
+  server.addService(IdentityInternalServiceService, implementation);
+  return server;
+};
+
+export const createIdentityGrpcClient = (target: string) => {
+  const client = new IdentityInternalServiceClient(target, grpc.credentials.createInsecure());
+  const rpcClient = client as unknown as Record<string, Function>;
+  return {
+    checkInstructorProfile: (userId: string) => promisifyUnary<InstructorProfileRequest, InstructorProfileReply>(rpcClient, 'checkInstructorProfile', { userId }),
+    close: () => client.close(),
+  };
+};
 export const createMediaGrpcServer = (handlers: {
   getVideoAssetBinding: (assetId: string) => Promise<MediaAssetBinding>;
   getDocumentAssetBinding: (assetId: string) => Promise<MediaAssetBinding>;

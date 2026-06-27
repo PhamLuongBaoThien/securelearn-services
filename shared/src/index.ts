@@ -51,6 +51,8 @@ export {
   GrpcStatus,
   createGrpcError,
   startGrpcServer,
+  createIdentityGrpcServer,
+  createIdentityGrpcClient,
   createMediaGrpcServer,
   createCourseGrpcServer,
   createPaymentGrpcServer,

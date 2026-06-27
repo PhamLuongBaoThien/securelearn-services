@@ -41,6 +41,7 @@ passport.use(
           // Tự động tạo tài khoản mới (OAuth2 Auto Provisioning)
           user = await User.create({
             email,
+            emailVerifiedAt: new Date(),
             fullName: profile.displayName || 'Người dùng Google',
             role: Role.STUDENT,
             profile: {
@@ -69,6 +70,7 @@ passport.use(
           // Account Linking: User đã tồn tại (đăng ký bằng email/password)
           // → Cập nhật avatar nếu chưa có
           let needSave = false;
+          if (!user.emailVerifiedAt) { user.emailVerifiedAt = new Date(); needSave = true; }
 
           if (!user.profile?.avatarUrl && profile.photos?.[0]?.value) {
             if (!user.profile) user.profile = {};
