@@ -170,13 +170,17 @@ class CourseReviewService {
       .select('_id enrollmentCount ratingAverage ratingCount title slug')
       .lean();
 
+    const uniqueStudentIds = await Enrollment.distinct('userId', {
+      courseId: { $in: courses.map((course) => course._id) },
+      status: { $ne: EnrollmentStatus.CANCELLED },
+    });
     return {
       instructorId,
       averageRating: stats ? Math.round(stats.averageRating * 10) / 10 : 0,
       reviewCount: stats?.reviewCount || 0,
       fiveStarCount: stats?.fiveStarCount || 0,
       courseCount: courses.length,
-      studentCount: courses.reduce((sum, course) => sum + (course.enrollmentCount || 0), 0),
+      studentCount: uniqueStudentIds.length,
       courses: courses.map((course) => ({
         _id: course._id.toString(),
         title: course.title,

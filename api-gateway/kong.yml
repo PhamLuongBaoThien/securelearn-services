@@ -1,4 +1,4 @@
-﻿# ========================
+# ========================
 # Kong Declarative Configuration
 # API Gateway cho SecureLearn Microservices
 #
@@ -46,6 +46,8 @@ services:
           - /api/auth/verify-reset-otp
           - /api/auth/reset-password
           - /api/auth/google
+          - /api/auth/instructors
+          - /api/auth/users
           - ~/api/auth/instructors/[^/]+/public-profile$
         strip_path: false
 

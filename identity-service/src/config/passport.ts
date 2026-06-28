@@ -4,6 +4,7 @@
 import passport from 'passport';
 import { Strategy as GoogleStrategy, Profile } from 'passport-google-oauth20';
 import { User, Role } from '../models/user.model';
+import publicProfileSlugService from '../services/publicProfileSlug.service';
 import {
   publishMessage,
   Exchange,
@@ -48,6 +49,7 @@ passport.use(
               avatarUrl: profile.photos?.[0]?.value || '',
             },
           });
+          await publicProfileSlugService.ensureForUser(user);
 
           // Publish event: User mới đăng ký qua Google
           await publishMessage<UserRegisteredPayload>(

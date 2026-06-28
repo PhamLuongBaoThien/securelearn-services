@@ -17,6 +17,7 @@ export interface IUser extends Document {
   password?: string;
   hasPassword: boolean;
   fullName: string;
+  publicSlug?: string;
   role: Role;
   isLocked: boolean;
   lockedAt?: Date;
@@ -32,6 +33,11 @@ export interface IUser extends Document {
     avatarUrl?: string;
     bio?: string;
     headline?: string;
+    website?: string;
+    github?: string;
+    facebook?: string;
+    youtube?: string;
+    linkedin?: string;
   };
   lastLoginAt?: Date;
   createdAt: Date;
@@ -54,6 +60,14 @@ const userSchema: Schema = new Schema(
       type: String,
       required: true,
       trim: true,
+    },
+    publicSlug: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      unique: true,
+      sparse: true,
+      index: true,
     },
     role: {
       type: String,
@@ -119,6 +133,11 @@ const userSchema: Schema = new Schema(
       avatarUrl: String,
       bio: String,
       headline: String,
+      website: String,
+      github: String,
+      facebook: String,
+      youtube: String,
+      linkedin: String,
     },
   },
   {

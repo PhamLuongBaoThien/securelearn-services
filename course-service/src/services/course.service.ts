@@ -1173,19 +1173,27 @@ class CourseService {
     minDuration?: number; // seconds
     maxDuration?: number; // seconds
     sort?: string;
+    instructorId?: string;
+    ids?: string;
   }): Promise<{
     courses: CourseResponse[];
     total: number;
     page: number;
     totalPages: number;
   }> {
-    const page = query.page || 1;
-    const limit = query.limit || 12;
+    const page = Math.max(query.page || 1, 1);
+    const limit = Math.min(Math.max(query.limit || 12, 1), 50);
     const skip = (page - 1) * limit;
     const filter: Record<string, unknown> = {
       status: CourseStatus.PUBLISHED,
       currentVersionId: { $ne: null },
     };
+
+    if (query.instructorId) filter.instructorId = query.instructorId;
+    if (query.ids) {
+      const ids = query.ids.split(',').map((id) => id.trim()).filter((id) => Types.ObjectId.isValid(id)).slice(0, 50);
+      filter._id = { $in: ids };
+    }
 
     if (query.search)
       filter.$or = [

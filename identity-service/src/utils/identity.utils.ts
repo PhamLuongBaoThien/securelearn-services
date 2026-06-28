@@ -17,3 +17,18 @@ export const normalizeVietnamPhone = (phone: string): string => {
   if (!/^0\d{9}$/.test(normalized)) throw new Error('Số điện thoại không hợp lệ. Vui lòng dùng số Việt Nam gồm 10 chữ số.');
   return normalized;
 };
+
+export const normalizePublicSlugBase = (fullName: string): string => {
+  const normalized = fullName
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/gi, (character) => (character === 'Đ' ? 'D' : 'd'))
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+  return normalized || 'nguoi-dung';
+};
+export const buildPublicSlugCandidate = (base: string, suffix: number): string =>
+  suffix <= 1 ? base : `${base}-${suffix}`;

@@ -7,7 +7,8 @@ import { User, IUser, Role } from '../models/user.model';
 import redisClient from '../config/redis';
 import mailerService from './mailer.service';
 import otpService from './otp.service';
-import { normalizeEmail, normalizeVietnamPhone } from '../utils/identity.utils';
+import { normalizeEmail, normalizePublicSlugBase, normalizeVietnamPhone } from '../utils/identity.utils';
+import publicProfileSlugService from './publicProfileSlug.service';
 import { getMissingInstructorFields } from '../validators/profile-completeness';
 import {
   publishUserRegistered,
@@ -46,6 +47,7 @@ class AuthService {
     const pending = await otpService.verify<{ hashedPassword: string; fullName: string }>('register', email, otp);
     if (await User.exists({ email })) throw new Error('Email này đã được sử dụng.');
     const newUser = await User.create({ email, password: pending.hashedPassword, hasPassword: true, fullName: pending.fullName, role: Role.STUDENT, emailVerifiedAt: new Date() });
+    await publicProfileSlugService.ensureForUser(newUser);
     await publishUserRegistered({ userId: newUser._id.toString(), email: newUser.email, fullName: newUser.fullName, role: newUser.role, registeredAt: new Date().toISOString() });
     return newUser;
   }
@@ -99,87 +101,111 @@ class AuthService {
     return user;
   }
 
-  public async getPublicInstructorProfile(userId: string): Promise<{
-    _id: string;
-    fullName: string;
-    profile: {
-      avatarUrl?: string;
-      bio?: string;
-      headline?: string;
-    };
-  } | null> {
-    const user = await User.findOne({ _id: userId, role: Role.INSTRUCTOR, isLocked: false })
-      .select('fullName profile.avatarUrl profile.bio profile.headline')
-      .lean();
-    if (!user) return null;
-
+  private mapPublicProfile(user: IUser, canonicalSlug: string) {
     return {
-      _id: user._id.toString(),
-      fullName: user.fullName,
+      _id: user._id.toString(), publicSlug: canonicalSlug, fullName: user.fullName,
+      role: user.role, createdAt: user.createdAt,
       profile: {
         avatarUrl: user.profile?.avatarUrl || '',
         bio: user.profile?.bio || '',
         headline: user.profile?.headline || '',
+        website: user.profile?.website || '',
+        github: user.profile?.github || '',
+        facebook: user.profile?.facebook || '',
+        youtube: user.profile?.youtube || '',
+        linkedin: user.profile?.linkedin || '',
       },
     };
   }
 
-  /**
-   * Cập nhật thông tin profile của user.
-   */
-  public async updateProfile(userId: string, data: { fullName?: string; phone?: string; avatarUrl?: string; bio?: string; headline?: string }): Promise<IUser | null> {
-    const user = await User.findById(userId);
-    if (!user) {
-      throw new Error('Người dùng không tồn tại.');
-    }
+  public async getPublicProfileBySlug(slug: string) {
+    const resolved = await publicProfileSlugService.resolve(slug);
+    return resolved ? this.mapPublicProfile(resolved.user, resolved.canonicalSlug) : null;
+  }
 
-    if (data.fullName !== undefined) user.fullName = data.fullName;
+  public async searchPublicInstructors(searchInput: string, limitInput: number) {
+    const search = searchInput.trim().slice(0, 100);
+    const limit = Math.min(Math.max(limitInput || 3, 1), 10);
+    if (!search) return [];
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const users = await User.find({
+      role: Role.INSTRUCTOR,
+      isLocked: false,
+      publicSlug: { $exists: true, $ne: '' },
+      $or: [
+        { fullName: { $regex: escaped, $options: 'i' } },
+        { 'profile.headline': { $regex: escaped, $options: 'i' } },
+      ],
+    })
+      .select('fullName publicSlug profile.avatarUrl profile.headline')
+      .limit(limit)
+      .lean();
+    return users.map((user) => ({
+      _id: user._id.toString(),
+      publicSlug: user.publicSlug,
+      fullName: user.fullName,
+      headline: user.profile?.headline || '',
+      avatarUrl: user.profile?.avatarUrl || '',
+    }));
+  }
+
+  public async getPublicInstructorProfile(userId: string) {
+    const user = await User.findOne({ _id: userId, role: Role.INSTRUCTOR, isLocked: false });
+    if (!user) return null;
+    return this.mapPublicProfile(user, await publicProfileSlugService.ensureForUser(user));
+  }
+
+  /** Cập nhật thông tin profile của user. */
+  public async updateProfile(userId: string, data: { fullName?: string; phone?: string; avatarUrl?: string; bio?: string; headline?: string; website?: string; github?: string; facebook?: string; youtube?: string; linkedin?: string }): Promise<IUser | null> {
+    const user = await User.findById(userId);
+    if (!user) throw new Error('Người dùng không tồn tại.');
+    const previousSlug = user.publicSlug;
+    let reservedSlug: string | undefined;
+    if (data.fullName !== undefined) {
+      const fullName = data.fullName.trim().normalize('NFC');
+      if (fullName.length < 2) throw new Error('Họ và tên phải có tối thiểu 2 ký tự.');
+      if (/\d/.test(fullName)) throw new Error('Họ và tên không được chứa số.');
+      if (normalizePublicSlugBase(fullName) !== normalizePublicSlugBase(user.fullName)) {
+        reservedSlug = await publicProfileSlugService.reserve(userId, fullName);
+        user.publicSlug = reservedSlug;
+      }
+      user.fullName = fullName;
+    }
     if (data.phone !== undefined) {
       const phoneInput = data.phone.trim();
-      if (!phoneInput) {
-        user.phone = undefined;
-      } else {
+      if (!phoneInput) user.phone = undefined;
+      else {
         const phone = normalizeVietnamPhone(phoneInput);
-        const existingUser = await User.exists({ phone, _id: { $ne: userId } });
-        if (existingUser) throw new Error('Số điện thoại này đã được tài khoản khác sử dụng.');
+        if (await User.exists({ phone, _id: { $ne: userId } })) throw new Error('Số điện thoại này đã được tài khoản khác sử dụng.');
         user.phone = phone;
       }
     }
-    
-    // Khởi tạo profile object nếu chưa có
-    if (!user.profile) {
-      user.profile = {};
-    }
-
+    if (!user.profile) user.profile = {};
     if (data.avatarUrl !== undefined) user.profile.avatarUrl = data.avatarUrl;
     if (data.bio !== undefined) user.profile.bio = data.bio;
     if (data.headline !== undefined) user.profile.headline = data.headline;
-
+    if (data.website !== undefined) user.profile.website = data.website;
+    if (data.github !== undefined) user.profile.github = data.github;
+    if (data.facebook !== undefined) user.profile.facebook = data.facebook;
+    if (data.youtube !== undefined) user.profile.youtube = data.youtube;
+    if (data.linkedin !== undefined) user.profile.linkedin = data.linkedin;
     try {
       await user.save();
+      if (reservedSlug) await publicProfileSlugService.activate(userId, reservedSlug, previousSlug);
     } catch (error: any) {
-      if (error?.code === 11000) {
-        throw new Error('Số điện thoại này đã được tài khoản khác sử dụng.');
-      }
+      if (reservedSlug) await publicProfileSlugService.releaseReservation(userId, reservedSlug);
+      if (error?.code === 11000) throw new Error('Thông tin cập nhật đã được tài khoản khác sử dụng.');
       throw error;
     }
-
-    // Publish event: Thông báo profile đã được cập nhật
-    // Gửi kèm fullName (nếu có thay đổi) để course-service tự đồng bộ instructorName
-    const updatedFields = Object.keys(data).filter(
-      (key) => data[key as keyof typeof data] !== undefined
-    );
+    const updatedFields = Object.keys(data).filter((key) => data[key as keyof typeof data] !== undefined);
     await publishUserUpdated({
-      userId,
-      updatedFields,
+      userId, updatedFields,
       ...(data.fullName !== undefined && { fullName: user.fullName }),
       ...(data.avatarUrl !== undefined && { avatarUrl: user.profile?.avatarUrl || '' }),
       ...(data.bio !== undefined && { bio: user.profile?.bio || '' }),
     });
-
     return this.sanitizeUser(user) as any;
   }
-
   public async checkInstructorProfile(userId: string): Promise<{ complete: boolean; missingFields: string[] }> {
     const user = await User.findById(userId).lean();
     if (!user || user.role !== Role.INSTRUCTOR) return { complete: false, missingFields: ['role'] };
@@ -192,6 +218,7 @@ class AuthService {
    */
   public async deleteAccount(userId: string): Promise<void> {
     const result = await User.findByIdAndDelete(userId);
+    if (result) await publicProfileSlugService.tombstoneUser(userId);
     if (!result) {
       throw new Error('Người dùng không tồn tại.');
     }

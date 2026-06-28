@@ -14,6 +14,7 @@ import { seedRolePermissions } from './models/rolePermission.model';
 import { registerEventHandlers } from './events/handlers';
 import { createInternalGrpcServer } from './grpc/server';
 import { User } from './models/user.model';
+import publicProfileSlugService from './services/publicProfileSlug.service';
 
 const PORT = process.env.PORT || 5001;
 const GRPC_BIND = process.env.IDENTITY_GRPC_BIND || '0.0.0.0:6001';
@@ -27,6 +28,7 @@ const bootServer = async () => {
     await connectDB();
 
     await User.updateMany({ emailVerifiedAt: { $exists: false } }, [{ $set: { emailVerifiedAt: { $ifNull: ['$createdAt', new Date()] } } }]);
+    await publicProfileSlugService.ensureExistingUsers();
 
     // Seed RolePermission mặc định (chỉ chạy nếu collection rỗng)
     await seedRolePermissions();

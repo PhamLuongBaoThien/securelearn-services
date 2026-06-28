@@ -167,6 +167,28 @@ class AuthController {
     }
   }
 
+  public async getPublicProfileBySlug(req: Request, res: Response): Promise<void> {
+    try {
+      const profile = await authService.getPublicProfileBySlug(String(req.params.slug));
+      if (!profile) {
+        res.status(404).json({ status: 'ERR', message: 'Không tìm thấy hồ sơ công khai.' });
+        return;
+      }
+      res.status(200).json({ status: 'OK', data: profile });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async searchPublicInstructors(req: Request, res: Response): Promise<void> {
+    try {
+      const data = await authService.searchPublicInstructors(String(req.query.search || ''), Number(req.query.limit || 3));
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   /**
    * Callback sau khi Google OAuth2 xác thực thành công.
    */
@@ -207,7 +229,7 @@ class AuthController {
    */
   public async updateProfile(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { fullName, phone, bio, headline } = req.body;
+      const { fullName, phone, bio, headline, website, github, facebook, youtube, linkedin } = req.body;
       const avatarUrl = req.file?.path; // Lấy URL từ Cloudinary nếu có up file
 
       const updatedUser = await authService.updateProfile(req.userId!, {
@@ -215,6 +237,11 @@ class AuthController {
         phone,
         bio,
         headline,
+        website,
+        github,
+        facebook,
+        youtube,
+        linkedin,
         avatarUrl,
       });
 

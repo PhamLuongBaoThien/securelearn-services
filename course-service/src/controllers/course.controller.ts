@@ -235,7 +235,7 @@ class CourseController {
    */
   public async getPublishedCourses(req: Request, res: Response): Promise<void> {
     try {
-      const { page, limit, search, category, level, minPrice, maxPrice, rating, minDuration, maxDuration, sort } = req.query;
+      const { page, limit, search, category, level, minPrice, maxPrice, rating, minDuration, maxDuration, sort, instructorId, ids } = req.query;
 
       const result = await courseService.getPublishedCourses({
         page: page ? Number(page) : undefined,
@@ -249,6 +249,8 @@ class CourseController {
         minDuration: minDuration ? Number(minDuration) : undefined,
         maxDuration: maxDuration ? Number(maxDuration) : undefined,
         sort: sort as string,
+        instructorId: instructorId as string,
+        ids: ids as string,
       });
 
       res.status(200).json({ status: 'OK', data: result });
