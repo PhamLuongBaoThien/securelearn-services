@@ -9,6 +9,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 import { User } from '../models/user.model';
 import { Admin } from '../models/admin.model';
 import redisClient from '../config/redis';
+import authSessionService from '../services/authSession.service';
 
 const REFRESH_TOKEN_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 ngày
 
@@ -397,6 +398,7 @@ class AdminController {
         return;
       }
       await redisClient.set(`locked_user:${user._id.toString()}`, '1');
+      await authSessionService.revokeAll(user._id.toString(), 'ACCOUNT_LOCKED');
       res.status(200).json({ status: 'OK', message: 'Đã khóa tài khoản.' });
     } catch (err: any) {
       res.status(500).json({ status: 'ERR', message: err.message });

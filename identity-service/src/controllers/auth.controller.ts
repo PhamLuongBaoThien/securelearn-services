@@ -3,9 +3,11 @@
 // ========================
 import { Request, Response } from 'express';
 import authService from '../services/auth.service';
-import { generalAccessToken, generalRefreshToken, refreshTokenJwtService } from '../services/jwt.service';
+import { generalAccessToken, refreshTokenJwtService } from '../services/jwt.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import redisClient from '../config/redis';
+import authSessionService from '../services/authSession.service';
+import { getSessionMetadata } from '../utils/session.utils';
 
 const REFRESH_TOKEN_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 ngày
 
@@ -39,41 +41,24 @@ class AuthController {
   public async login(req: Request, res: Response): Promise<void> {
     try {
       const { email, password } = req.body;
-
       if (!email || !password) {
-        res.status(400).json({
-          status: 'ERR',
-          message: 'Vui lòng cung cấp email và mật khẩu.',
-        });
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp email và mật khẩu.' });
         return;
       }
-
-      // Service chỉ xác minh thông tin, không sinh token
       const user = await authService.login(email, password);
-
-      // Sinh token từ jwt.service
-      const access_token = generalAccessToken({ id: user._id.toString(), role: user.role, fullName: user.fullName, email: user.email });
-      const refresh_token = generalRefreshToken({ id: user._id.toString(), role: user.role });
-
-      // Lưu Refresh Token vào HttpOnly Cookie (chống XSS — JS không đọc được)
-      res.cookie('refresh_token', refresh_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
+      const { sessionId, refreshToken } = await authSessionService.createSession(
+        user._id.toString(), user.role, getSessionMetadata(req),
+      );
+      const access_token = generalAccessToken({
+        id: user._id.toString(), role: user.role, fullName: user.fullName, email: user.email, sid: sessionId,
       });
-
+      res.cookie('refresh_token', refreshToken, {
+        httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
+      });
       res.status(200).json({
-        status: 'OK',
-        message: 'Đăng nhập thành công!',
+        status: 'OK', message: 'Đăng nhập thành công!',
         data: {
-          user: {
-            _id: user._id,
-            email: user.email,
-            fullName: user.fullName,
-            role: user.role,
-            subscriptionStatus: user.subscriptionStatus,
-          },
+          user: { _id: user._id, email: user.email, fullName: user.fullName, role: user.role, subscriptionStatus: user.subscriptionStatus },
           access_token,
         },
       });
@@ -84,8 +69,7 @@ class AuthController {
 
   /**
    * [POST] /api/auth/refresh-token
-   * Dùng Refresh Token (từ cookie) để cấp lại Access Token mới.
-   * Giúp user duy trì đăng nhập mà không cần nhập lại mật khẩu.
+   * Rotate refresh token của phiên hiện tại và cấp access token mới.
    */
   public async refreshToken(req: Request, res: Response): Promise<void> {
     try {
@@ -94,40 +78,35 @@ class AuthController {
         res.status(401).json({ status: 'ERR', message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
         return;
       }
-
       const result = await refreshTokenJwtService(token);
-
-      if (result.status === 'ERR') {
+      if (result.status === 'ERR' || !result.decoded?.id || !result.decoded.sid) {
         res.clearCookie('refresh_token');
-        res.status(401).json(result);
+        res.status(401).json({ status: 'ERR', message: 'Phiên đăng nhập cũ không còn hợp lệ. Vui lòng đăng nhập lại.' });
         return;
       }
-
-      // Query DB lấy fullName hiện tại — đảm bảo access token luôn có tên mới nhất
-      const user = await authService.getProfile(result.decoded!.id);
+      const user = await authService.getProfile(result.decoded.id);
       if (!user || user.isLocked) {
-        if (user?.isLocked) {
-          await redisClient.set(`locked_user:${result.decoded!.id}`, '1');
-        }
+        if (user?.isLocked) await redisClient.set(`locked_user:${result.decoded.id}`, '1');
+        await authSessionService.revokeAll(result.decoded.id, 'ACCOUNT_LOCKED');
         res.clearCookie('refresh_token');
         res.status(403).json({ status: 'ERR', message: 'Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.' });
         return;
       }
+      const rotated = await authSessionService.rotateSession(
+        token,
+        { id: result.decoded.id, role: user.role, sid: result.decoded.sid },
+        getSessionMetadata(req),
+      );
       const access_token = generalAccessToken({
-        id: result.decoded!.id,
-        role: result.decoded!.role,
-        fullName: user?.fullName ?? '',
-        email: user?.email ?? '',
+        id: result.decoded.id, role: user.role, fullName: user.fullName ?? '', email: user.email ?? '', sid: rotated.sessionId,
       });
-
-      res.status(200).json({
-        status: 'OK',
-        message: 'Cấp lại access token thành công.',
-        access_token,
+      res.cookie('refresh_token', rotated.refreshToken, {
+        httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
       });
+      res.status(200).json({ status: 'OK', message: 'Cấp lại access token thành công.', access_token });
     } catch (error: any) {
       res.clearCookie('refresh_token');
-      res.status(401).json({ status: 'ERR', message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
+      res.status(401).json({ status: 'ERR', message: error.message || 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
     }
   }
 
@@ -195,38 +174,65 @@ class AuthController {
   public async googleCallback(req: Request, res: Response): Promise<void> {
     try {
       const user: any = req.user;
-      const access_token = generalAccessToken({ id: user._id.toString(), role: user.role, fullName: user.fullName, email: user.email });
-      const refresh_token = generalRefreshToken({ id: user._id.toString(), role: user.role });
-
-      // Gắn refresh token vào cookie
-      res.cookie('refresh_token', refresh_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
+      const { sessionId, refreshToken } = await authSessionService.createSession(
+        user._id.toString(), user.role, getSessionMetadata(req),
+      );
+      const access_token = generalAccessToken({
+        id: user._id.toString(), role: user.role, fullName: user.fullName, email: user.email, sid: sessionId,
       });
-
-      // Redirect về frontend kèm access token qua query param
+      res.cookie('refresh_token', refreshToken, {
+        httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
+      });
       const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
       res.redirect(`${clientUrl}/oauth-callback?token=${access_token}`);
-    } catch (error: any) {
+    } catch (_error: any) {
       res.status(500).json({ status: 'ERR', message: 'Lỗi xử lý đăng nhập Google.' });
     }
   }
 
-  /**
-   * [POST] /api/auth/logout
-   * Đăng xuất — xóa cookie refresh token.
-   */
-  public async logout(_req: Request, res: Response): Promise<void> {
-    res.clearCookie('refresh_token');
+  /** [POST] /api/auth/logout */
+  public async logout(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      await authSessionService.revokeCurrent(req.userId!, req.sessionId!);
+    } finally {
+      res.clearCookie('refresh_token');
+    }
     res.status(200).json({ status: 'OK', message: 'Đăng xuất thành công.' });
   }
 
-  /**
-   * [PUT] /api/auth/profile
-   * Cập nhật thông tin profile của user
-   */
+  /** [GET] /api/auth/sessions */
+  public async getSessions(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const data = await authSessionService.listActiveSessions(req.userId!, req.sessionId!);
+      res.status(200).json({ status: 'OK', message: 'Lấy danh sách phiên đăng nhập thành công.', data });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async revokeSession(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const sessionId = String(req.params.sessionId || '');
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)) {
+        res.status(400).json({ status: 'ERR', message: 'Mã phiên đăng nhập không hợp lệ.' });
+        return;
+      }
+      await authSessionService.revokeSession(req.userId!, sessionId, req.sessionId!);
+      res.status(200).json({ status: 'OK', message: 'Đã đăng xuất thiết bị.' });
+    } catch (error: any) {
+      const status = String(error.message).includes('Không tìm thấy') ? 404 : 400;
+      res.status(status).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async revokeOtherSessions(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const revokedCount = await authSessionService.revokeOthers(req.userId!, req.sessionId!);
+      res.status(200).json({ status: 'OK', message: 'Đã đăng xuất khỏi tất cả thiết bị khác.', data: { revokedCount } });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message });
+    }
+  }
   public async updateProfile(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { fullName, phone, bio, headline, website, github, facebook, youtube, linkedin } = req.body;
@@ -253,6 +259,7 @@ class AuthController {
           role: req.userRole!,
           fullName: updatedUser.fullName,
           email: updatedUser.email ?? '',
+          sid: req.sessionId,
         });
       }
 
@@ -274,6 +281,7 @@ class AuthController {
    */
   public async deleteAccount(req: AuthRequest, res: Response): Promise<void> {
     try {
+      await authSessionService.revokeAll(req.userId!, 'ACCOUNT_DELETED');
       await authService.deleteAccount(req.userId!);
       res.clearCookie('refresh_token');
       res.status(200).json({ status: 'OK', message: 'Đã xóa tài khoản thành công.' });
@@ -289,6 +297,8 @@ class AuthController {
     try {
       const { oldPassword, newPassword } = req.body;
       const updatedUser = await authService.changePassword(req.userId!, oldPassword, newPassword);
+      await authSessionService.revokeAll(req.userId!, 'PASSWORD_CHANGED');
+      res.clearCookie('refresh_token');
       res.status(200).json({
         status: 'OK',
         message: 'Mật khẩu đã được cập nhật thành công.',
@@ -349,7 +359,8 @@ class AuthController {
          return;
        }
 
-       await authService.resetPasswordByOTP(email, otp, newPassword);
+       const userId = await authService.resetPasswordByOTP(email, otp, newPassword);
+       await authSessionService.revokeAll(userId, 'PASSWORD_RESET');
        res.status(200).json({ status: 'OK', message: 'Khôi phục mật khẩu thành công. Vui lòng đăng nhập lại.' });
     } catch (error: any) {
        res.status(400).json({ status: 'ERR', message: error.message });
@@ -365,33 +376,23 @@ class AuthController {
   public async switchToInstructor(req: AuthRequest, res: Response): Promise<void> {
     try {
       const updatedUser = await authService.switchToInstructor(req.userId!);
-
-      // Sinh token mới với role INSTRUCTOR vừa được cập nhật
+      const refresh_token = await authSessionService.replaceSessionRole(
+        updatedUser!._id.toString(), req.sessionId!, updatedUser!.role,
+      );
       const access_token = generalAccessToken({
         id: updatedUser!._id.toString(),
         role: updatedUser!.role,
         fullName: updatedUser!.fullName,
         email: updatedUser!.email ?? '',
+        sid: req.sessionId,
       });
-      const refresh_token = generalRefreshToken({
-        id: updatedUser!._id.toString(),
-        role: updatedUser!.role,
-      });
-
-      // Ghi đè refresh token cũ trong cookie
       res.cookie('refresh_token', refresh_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
         maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
       });
-
-      res.status(200).json({
-        status: 'OK',
-        message: 'Chuyển vai trò thành công',
-        data: updatedUser,
-        access_token, // Frontend lưu token mới vào state/localStorage
-      });
+      res.status(200).json({ status: 'OK', message: 'Chuyển vai trò thành công', data: updatedUser, access_token });
     } catch (error: any) {
       res.status(500).json({ status: 'ERR', message: error.message });
     }

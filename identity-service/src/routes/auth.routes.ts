@@ -18,11 +18,14 @@ router.post('/register/verify-otp', authController.verifyRegistration);
 // [POST] /api/auth/login — Đăng nhập
 router.post('/login', authController.login);
 
-// [POST] /api/auth/logout — Đăng xuất (xóa cookie)
-router.post('/logout', authController.logout);
-
 // [GET] /api/auth/me — Lấy thông tin user đang đăng nhập (cần Access Token)
 router.get('/me', extractUser, authController.getMe);
+router.post('/logout', extractUser, authController.logout);
+
+// Quản lý các phiên đăng nhập đang hoạt động
+router.get('/sessions', extractUser, authController.getSessions);
+router.post('/sessions/revoke-others', extractUser, authController.revokeOtherSessions);
+router.delete('/sessions/:sessionId', extractUser, authController.revokeSession);
 
 // Public profile và tìm kiếm giảng viên
 router.get('/users/:slug/public-profile', authController.getPublicProfileBySlug);

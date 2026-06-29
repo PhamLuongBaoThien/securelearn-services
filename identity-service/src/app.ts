@@ -14,6 +14,9 @@ import routes from './routes/index.routes';
 
 const app: Application = express();
 
+// Chỉ tin địa chỉ client do API gateway gần nhất chuyển tiếp.
+app.set('trust proxy', 1);
+
 // ===== Middlewares =====
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:5173',

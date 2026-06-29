@@ -281,7 +281,7 @@ class AuthService {
   /**
    * Reset mật khẩu thông qua OTP (xoá OTP sau khi thành công).
    */
-  public async resetPasswordByOTP(email: string, otp: string, newPassword: string): Promise<void> {
+  public async resetPasswordByOTP(email: string, otp: string, newPassword: string): Promise<string> {
     if (!newPassword || newPassword.length < 6) {
       throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự.');
     }
@@ -297,6 +297,7 @@ class AuthService {
     user.password = await bcrypt.hash(newPassword, salt);
     user.hasPassword = true;
     await user.save();
+    return user._id.toString();
   }
 
   /**

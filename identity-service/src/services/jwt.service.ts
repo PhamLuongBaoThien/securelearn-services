@@ -14,6 +14,7 @@ const generalAccessToken = (payload: {
   role: string;
   fullName: string;
   email?: string;
+  sid?: string;
   permissions?: string[];
 }) => {
   const access_token = jwt.sign(
@@ -26,7 +27,7 @@ const generalAccessToken = (payload: {
 
 // ===== Sinh Refresh Token (dài hạn — 7 ngày) =====
 // Chỉ chứa {id, role} — KHÔNG chứa fullName để tránh reset thời gian session khi đổi tên
-const generalRefreshToken = (payload: { id: string; role: string }) => {
+const generalRefreshToken = (payload: { id: string; role: string; sid?: string }) => {
   const refresh_token = jwt.sign(
     { ...payload, iss: 'securelearn' },
     process.env.REFRESH_TOKEN as string,
@@ -69,7 +70,7 @@ const verifyResetToken = (token: string): Promise<{ status: string; message?: st
 
 // ===== Xác minh Refresh Token — chỉ verify, trả về decoded payload =====
 // Controller sẽ query DB lấy fullName mới nhất rồi mới gọi generalAccessToken
-const refreshTokenJwtService = (token: string): Promise<{ status: string; message: string; decoded?: { id: string; role: string } }> => {
+const refreshTokenJwtService = (token: string): Promise<{ status: string; message: string; decoded?: { id: string; role: string; sid?: string } }> => {
   return new Promise((resolve, reject) => {
     try {
       jwt.verify(token, process.env.REFRESH_TOKEN as string, (err, user: any) => {
@@ -79,7 +80,7 @@ const refreshTokenJwtService = (token: string): Promise<{ status: string; messag
         resolve({
           status: 'OK',
           message: 'Token hợp lệ.',
-          decoded: { id: user?.id, role: user?.role },
+          decoded: { id: user?.id, role: user?.role, sid: user?.sid },
         });
       });
     } catch (error) {

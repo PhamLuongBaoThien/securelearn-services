@@ -40,7 +40,6 @@ services:
         paths:
           - /api/auth/login
           - /api/auth/register
-          - /api/auth/logout
           - /api/auth/refresh-token
           - /api/auth/forgot-password
           - /api/auth/verify-reset-otp
@@ -58,10 +57,27 @@ services:
           - /api/auth/profile/role
           - /api/auth/account
           - /api/auth/password
+          - /api/auth/logout
         strip_path: false
         methods:
           - OPTIONS
 
+      - name: identity-sessions-preflight
+        paths:
+          - /api/auth/sessions
+        strip_path: false
+        methods:
+          - OPTIONS
+
+      - name: identity-sessions-protected
+        paths:
+          - /api/auth/sessions
+        regex_priority: 200
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - DELETE
       - name: identity-protected
         paths:
           - /api/auth/me
@@ -69,6 +85,7 @@ services:
           - /api/auth/profile/role
           - /api/auth/account
           - /api/auth/password
+          - /api/auth/logout
         strip_path: false
         methods:
           - GET
@@ -381,6 +398,20 @@ plugins:
       header_name: Authorization
       policy: local
 
+  - name: rate-limiting
+    route: identity-sessions-protected
+    config:
+      minute: 30
+      limit_by: header
+      header_name: Authorization
+      policy: local
+
+  - name: jwt
+    route: identity-sessions-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
   - name: jwt
     route: identity-protected
     config:
