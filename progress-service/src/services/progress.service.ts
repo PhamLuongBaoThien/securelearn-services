@@ -10,6 +10,7 @@ import { LearningSession, LearningSessionStatus } from '../models/learningSessio
 import { LearnerActivityDaily } from '../models/learnerActivityDaily.model';
 import { publishCourseCompleted, publishLessonCompleted } from '../events/publishers';
 import courseContextService, { CourseLessonContext, CourseProgressContext, ProgressionMode } from './courseContext.service';
+import learningSessionAccessService, { LearningSessionAccessError } from './learningSessionAccess.service';
 
 const VIDEO_COMPLETE_PERCENT = 90;
 const STREAK_MIN_ACTIVE_SECONDS = 30;
@@ -22,6 +23,8 @@ type HeartbeatInput = {
   lessonId: string;
   lessonType: LessonProgressType;
   sessionId: string;
+  authSessionId: string;
+  learningSessionToken: string;
   positionSeconds?: number;
   watchedSecondsDelta?: number;
   segmentStartSeconds?: number;
@@ -147,6 +150,17 @@ class ProgressService {
   public async heartbeat(input: HeartbeatInput): Promise<CourseProgressResponse> {
     this.assertHeartbeatPayload(input);
     
+    // Gia hạn lease trước các lời gọi gRPC/DB. Nếu để sau, một heartbeat đến gần hạn
+    // có thể tự hết TTL trong lúc request vẫn đang kiểm tra context khóa học.
+    const activeLease = input.lessonType === LessonProgressType.VIDEO
+      ? await learningSessionAccessService.renew(
+        input.userId,
+        input.authSessionId,
+        input.sessionId,
+        input.learningSessionToken,
+      )
+      : null;
+
     // 1. Gọi gRPC sang course-service để lấy thông tin giáo trình và check quyền của học viên
     const context = await this.loadAllowedContext(input.userId, input.userRole, input.courseId);
     
@@ -157,7 +171,9 @@ class ProgressService {
     
     // 3. Bảo vệ: Kiểm tra xem bài học hiện tại có bị khóa do ProgressionMode hay không
     await this.assertLessonUnlocked(input.userId, context, input.lessonId);
-    
+    if (activeLease && (activeLease.courseId !== context.courseId || activeLease.lessonId !== input.lessonId)) {
+      throw new LearningSessionAccessError(409, 'LEARNING_SESSION_REPLACED', 'Phiên học không còn thuộc bài học đang phát.');
+    }
     // 4. Chuẩn hóa delta thực học của học viên (giới hạn tối đa 20s để tránh gian lận gửi số lớn)
     const activeSeconds = this.normalizeActiveSeconds(input.watchedSecondsDelta);
     
@@ -192,7 +208,6 @@ class ProgressService {
     await this.ensureCurrentVersionLessonProgress(input.userId, context);
     this.resolveLesson(context, input.lessonId, LessonProgressType.QUIZ);
     await this.assertLessonUnlocked(input.userId, context, input.lessonId);
-
     const now = new Date();
     const score = Math.max(0, Math.min(100, Math.round(Number(input.score))));
     const existing = await LessonProgress.findOne({
@@ -827,6 +842,7 @@ class ProgressService {
           courseVersionId: context.courseVersionId,
           lessonId: input.lessonId,
           lessonType: input.lessonType,
+          authSessionId: input.authSessionId || '',
           lastHeartbeatAt: now,
           deviceInfo: input.deviceInfo || '',
           status: ended ? LearningSessionStatus.ENDED : LearningSessionStatus.ACTIVE,

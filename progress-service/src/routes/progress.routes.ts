@@ -6,6 +6,8 @@ const router = Router();
 
 router.use(extractUser, requireStudentOrInstructor);
 
+router.post('/learning-sessions/acquire', progressController.acquireLearningSession);
+router.delete('/learning-sessions/:sessionId', progressController.releaseLearningSession);
 router.post('/heartbeat', progressController.heartbeat);
 router.post('/quiz-complete', progressController.quizComplete);
 router.get('/me/activity', progressController.getLearnerActivity);

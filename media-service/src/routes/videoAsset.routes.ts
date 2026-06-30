@@ -14,6 +14,7 @@ router.get('/:videoAssetId/batch-part-urls', requireVideoAssetOwner, videoAssetC
 router.get('/:videoAssetId', requireVideoAssetAccess, videoAssetController.getAsset);
 router.post('/:videoAssetId/playback-session', requireVideoAssetAccess, videoAssetController.createPlaybackSession);
 router.get('/:videoAssetId/manifest', requireVideoAssetAccess, videoAssetController.getRenditionManifest);
+router.get('/:videoAssetId/segment', requireVideoAssetAccess, videoAssetController.getSegment);
 router.get('/:videoAssetId/key', requireVideoAssetAccess, videoAssetController.getEncryptionKey);
 
 export default router;

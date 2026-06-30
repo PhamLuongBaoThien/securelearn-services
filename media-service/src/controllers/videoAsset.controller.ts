@@ -5,6 +5,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import videoAssetService from '../services/videoAsset.service';
 import playbackAccessService from '../services/playbackAccess.service';
+import learningLeaseService, { MediaLearningLeaseError } from '../services/learningLease.service';
 
 const sanitizeVideoAsset = (asset: Awaited<ReturnType<typeof videoAssetService.getAsset>>) => {
   const { encryptionKey: _hiddenKey, rawObjectKey: _hiddenRawKey, multipartUploadId: _hiddenUploadId, ...safeAsset } = asset;
@@ -62,6 +63,8 @@ class VideoAssetController {
         session,
         videoAssetId,
         req.userId,
+        req.sessionId,
+        String(req.get('x-learning-client-instance-id') || ''),
       );
       if (!validSession) {
         res.status(403).send('Invalid key session');
@@ -76,7 +79,11 @@ class VideoAssetController {
       const keyBuffer = Buffer.from(asset.encryptionKey, 'hex');
       res.setHeader('Content-Type', 'application/octet-stream');
       res.send(keyBuffer);
-    } catch {
+    } catch (error: any) {
+      if (error instanceof MediaLearningLeaseError) {
+        res.status(error.statusCode).json({ status: 'ERR', code: error.code, message: error.message });
+        return;
+      }
       res.status(404).send('Asset not found');
     }
   }
@@ -85,25 +92,55 @@ class VideoAssetController {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const asset = await videoAssetService.getAsset(videoAssetId);
-      const playbackInput = {
-        userId: req.userId!,
-        videoAssetId,
-        courseId: String(asset.courseId),
-      };
-
-      const token = await playbackAccessService.createOneTimePlayback(playbackInput);
-
-      res.status(201).json({
-        status: 'OK',
-        data: {
-          asset: sanitizeVideoAsset(asset),
-          playbackUrl: `/api/media/videos/${videoAssetId}/playback?token=${encodeURIComponent(token)}`,
-          expiresIn: 60,
-          segmentExpiresIn: videoAssetService.playbackSegmentUrlTtlSeconds,
-        },
+      const bypassLearningLease = req.videoAccessMode === 'OWNER_PREVIEW';
+      const learningSessionId = String(req.get('x-learning-session-id') || '');
+      const learningSessionToken = String(req.get('x-learning-session-token') || '');
+      const clientInstanceId = String(req.get('x-learning-client-instance-id') || '');
+      let resolvedLease: {
+        learningSessionId?: string;
+        tokenHash?: string;
+        authSessionId?: string;
+        clientInstanceId?: string;
+      } | null = null;
+      if (!bypassLearningLease) {
+        const lease = await learningLeaseService.validate({
+          userId: req.userId!, authSessionId: req.sessionId!, learningSessionId, learningSessionToken,
+          courseId: String(asset.courseId), lessonId: String(asset.lessonId), videoAssetId,
+        });
+        resolvedLease = {
+          learningSessionId: lease.learningSessionId,
+          tokenHash: lease.tokenHash,
+          authSessionId: lease.authSessionId,
+          clientInstanceId: lease.clientInstanceId,
+        };
+      }
+      const token = await playbackAccessService.createOneTimePlayback({
+        userId: req.userId!, videoAssetId, courseId: String(asset.courseId), lessonId: String(asset.lessonId),
+        bypassLearningLease,
+        learningSessionId: bypassLearningLease ? undefined : resolvedLease?.learningSessionId || learningSessionId,
+        learningTokenHash: bypassLearningLease ? undefined : resolvedLease?.tokenHash || learningLeaseService.tokenHash(learningSessionToken),
+        authSessionId: bypassLearningLease ? undefined : resolvedLease?.authSessionId || req.sessionId!,
+        clientInstanceId: bypassLearningLease ? undefined : resolvedLease?.clientInstanceId || clientInstanceId,
       });
+      res.status(201).json({ status: 'OK', data: {
+        asset: sanitizeVideoAsset(asset),
+        playbackUrl: `/api/media/videos/${videoAssetId}/playback?token=${encodeURIComponent(token)}`,
+        expiresIn: 60, segmentExpiresIn: videoAssetService.playbackSegmentUrlTtlSeconds,
+      }});
     } catch (error: any) {
-      res.status(400).json({ status: 'ERR', message: error.message });
+      if (error instanceof MediaLearningLeaseError) {
+        console.warn('[MediaPlayback] createPlaybackSession failed', {
+          code: error.code,
+          message: error.message,
+          userId: req.userId,
+          sessionId: req.sessionId,
+          learningSessionId: String(req.get('x-learning-session-id') || ''),
+          clientInstanceId: String(req.get('x-learning-client-instance-id') || ''),
+          videoAssetId: req.params.videoAssetId,
+        });
+      }
+      const status = error instanceof MediaLearningLeaseError ? error.statusCode : 400;
+      res.status(status).json({ status: 'ERR', code: error.code, message: error.message });
     }
   }
 
@@ -111,30 +148,29 @@ class VideoAssetController {
     try {
       const videoAssetId = req.params.videoAssetId as string;
       const token = typeof req.query.token === 'string' ? req.query.token : '';
-
-      if (!token) {
-        res.status(400).json({ status: 'ERR', message: 'Thiếu playback token.' });
-        return;
-      }
-
+      if (!token) { res.status(400).json({ status: 'ERR', message: 'Thiếu playback token.' }); return; }
       const playback = await playbackAccessService.consumeOneTimePlayback(token);
       if (!playback || playback.videoAssetId !== videoAssetId) {
-        res.status(410).json({ status: 'ERR', message: 'Playback URL đã hết hạn hoặc đã được sử dụng.' });
-        return;
+        res.status(410).json({ status: 'ERR', message: 'Playback URL đã hết hạn hoặc đã được sử dụng.' }); return;
       }
-
+      const activePlayback = await playbackAccessService.validatePlaybackReference(playback);
+      if (!activePlayback) {
+        throw new MediaLearningLeaseError(409, 'LEARNING_SESSION_REPLACED', 'Phiên học đã được chuyển sang thiết bị hoặc tab khác.');
+      }
       const keySession = await playbackAccessService.createKeySession({
-        userId: playback.userId,
-        videoAssetId,
+        userId: playback.userId, videoAssetId, courseId: playback.courseId, lessonId: playback.lessonId,
+        bypassLearningLease: playback.bypassLearningLease, learningSessionId: playback.learningSessionId,
+        learningTokenHash: playback.learningTokenHash, authSessionId: playback.authSessionId,
+        clientInstanceId: playback.clientInstanceId,
       });
-
       const keyUri = `/api/media/videos/${videoAssetId}/key?session=${encodeURIComponent(keySession)}`;
       const manifest = await videoAssetService.getPlaybackManifest(videoAssetId, keyUri, keySession);
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'private, no-store');
       res.send(manifest);
     } catch (error: any) {
-      res.status(404).json({ status: 'ERR', message: error.message });
+      const status = error instanceof MediaLearningLeaseError ? error.statusCode : 404;
+      res.status(status).json({ status: 'ERR', code: error.code, message: error.message });
     }
   }
 
@@ -143,29 +179,45 @@ class VideoAssetController {
       const videoAssetId = req.params.videoAssetId as string;
       const quality = typeof req.query.quality === 'string' ? req.query.quality : '';
       const session = typeof req.query.session === 'string' ? req.query.session : '';
-
-      if (!req.userId) {
-        res.status(401).json({ status: 'ERR', message: 'Authentication required.' });
-        return;
-      }
-      if (!quality || !session) {
-        res.status(400).json({ status: 'ERR', message: 'Thiếu quality hoặc session.' });
-        return;
-      }
-
-      const validSession = await playbackAccessService.validateKeySession(session, videoAssetId, req.userId);
-      if (!validSession) {
-        res.status(403).json({ status: 'ERR', message: 'Key session không hợp lệ.' });
-        return;
-      }
-
+      if (!req.userId) { res.status(401).json({ status: 'ERR', message: 'Authentication required.' }); return; }
+      if (!quality || !session) { res.status(400).json({ status: 'ERR', message: 'Thiếu quality hoặc session.' }); return; }
+      const validSession = await playbackAccessService.validateKeySession(session, videoAssetId, req.userId, req.sessionId, String(req.get('x-learning-client-instance-id') || ''));
+      if (!validSession) { res.status(403).json({ status: 'ERR', code: 'INVALID_PLAYBACK_SESSION', message: 'Key session không hợp lệ.' }); return; }
       const keyUri = `/api/media/videos/${videoAssetId}/key?session=${encodeURIComponent(session)}`;
-      const manifest = await videoAssetService.getRenditionManifest(videoAssetId, quality, keyUri);
+      const manifest = await videoAssetService.getRenditionManifest(videoAssetId, quality, keyUri, session);
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'private, no-store');
       res.send(manifest);
     } catch (error: any) {
-      res.status(404).json({ status: 'ERR', message: error.message });
+      const status = error instanceof MediaLearningLeaseError ? error.statusCode : 404;
+      res.status(status).json({ status: 'ERR', code: error.code, message: error.message });
+    }
+  }
+
+  public async getSegment(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const videoAssetId = String(req.params.videoAssetId || '');
+      const session = String(req.query.session || '');
+      const ticket = String(req.query.ticket || '');
+      if (!req.userId || !session || !ticket) { res.status(400).json({ status: 'ERR', message: 'Thiếu thông tin segment.' }); return; }
+      // Segment được redirect sang object storage. Không yêu cầu custom client header tại đây
+      // để trình duyệt không chuyển tiếp header đó sang MinIO và kích hoạt CORS preflight.
+      // Key session vẫn được ràng buộc với user, auth session (sid) và learning lease hiện tại.
+      const validSession = await playbackAccessService.validateKeySession(
+        session,
+        videoAssetId,
+        req.userId,
+        req.sessionId,
+        undefined,
+        { requireClientInstance: false },
+      );
+      if (!validSession) { res.status(403).json({ status: 'ERR', code: 'INVALID_PLAYBACK_SESSION', message: 'Phiên phát video không hợp lệ.' }); return; }
+      const url = await videoAssetService.getSegmentRedirectUrl(videoAssetId, ticket);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.redirect(302, url);
+    } catch (error: any) {
+      const status = error instanceof MediaLearningLeaseError ? error.statusCode : 403;
+      res.status(status).json({ status: 'ERR', code: error.code, message: error.message });
     }
   }
 

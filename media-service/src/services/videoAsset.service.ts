@@ -9,15 +9,13 @@ import { processVideoToHLS, probeVideoMetadata, type ProbedVideoMetadata } from 
 import { VideoAsset, VideoAssetStatus } from '../models/videoAsset.model';
 import { publishVideoFailed, publishVideoReady } from '../events/publishers';
 import s3Service from './s3.service';
-import redisClient from '../config/redis';
+import playbackAccessService from './playbackAccess.service';
 
 const MEDIA_ROOT = path.resolve(process.cwd(), 'tmp-media');
 const ORPHAN_TTL_MS = Number(process.env.MEDIA_ORPHAN_TTL_MS || 30 * 60 * 1000);
 const PROCESSING_TIMEOUT_MS = Number(process.env.MEDIA_PROCESSING_TIMEOUT_MS || 45 * 60 * 1000);
 const HLS_UPLOAD_CONCURRENCY = Number(process.env.HLS_UPLOAD_CONCURRENCY || 10);
-const PLAYBACK_MANIFEST_CACHE_TTL_SECONDS = Number(process.env.PLAYBACK_MANIFEST_CACHE_TTL_SECONDS || 240);
 const PLAYBACK_SEGMENT_URL_TTL_SECONDS = Number(process.env.PLAYBACK_SEGMENT_URL_TTL_SECONDS || 3600);
-const KEY_URI_PLACEHOLDER = '__SECURELEARN_KEY_URI__';
 
 const MAX_CONCURRENT_UPLOADS = 3;
 const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024;
@@ -182,7 +180,7 @@ class VideoAssetService {
     }
 
     if (!sessionToken || !asset.renditions?.length) {
-      return this.rewriteLeafManifest(asset.manifestKey, keyUri);
+      return this.rewriteLeafManifest(asset.manifestKey, keyUri, videoAssetId, sessionToken || '');
     }
 
     const masterManifestKey = asset.masterManifestKey || asset.manifestKey;
@@ -201,7 +199,7 @@ class VideoAssetService {
       .join('\n');
   }
 
-  public async getRenditionManifest(videoAssetId: string, quality: string, keyUri: string) {
+  public async getRenditionManifest(videoAssetId: string, quality: string, keyUri: string, sessionToken: string) {
     const asset = await VideoAsset.findById(videoAssetId).lean();
     if (!asset?.manifestKey || asset.status !== 'READY') {
       throw new Error('Video chưa sẵn sàng để phát.');
@@ -212,61 +210,34 @@ class VideoAssetService {
       throw new Error(`Không tìm thấy chất lượng ${quality} cho video.`);
     }
 
-    return this.rewriteLeafManifest(rendition.manifestKey, keyUri);
+    return this.rewriteLeafManifest(rendition.manifestKey, keyUri, videoAssetId, sessionToken);
   }
 
-  private async rewriteLeafManifest(manifestKey: string, keyUri?: string) {
-    if (keyUri) {
-      const cached = await this.getCachedPlaybackManifest(manifestKey);
-      if (cached) return cached.replaceAll(KEY_URI_PLACEHOLDER, keyUri);
-    }
-
+  private async rewriteLeafManifest(manifestKey: string, keyUri: string | undefined, videoAssetId: string, sessionToken: string) {
     const manifest = await s3Service.getObjectText(manifestKey);
     const baseKey = manifestKey.slice(0, manifestKey.lastIndexOf('/') + 1);
-    const lines = await Promise.all(
-      manifest.split(/\r?\n/).map(async (line) => {
-        const value = line.trim();
-        if (value.startsWith('#EXT-X-KEY') && keyUri) {
-          return line.includes('URI="')
-            ? line.replace(/URI="[^"]*"/, `URI="${KEY_URI_PLACEHOLDER}"`)
-            : `${line},URI="${KEY_URI_PLACEHOLDER}"`;
-        }
-        if (!value || value.startsWith('#') || /^https?:\/\//i.test(value) || value.endsWith('.m3u8')) return line;
-        return s3Service.getDownloadPresignedUrl(`${baseKey}${value}`, PLAYBACK_SEGMENT_URL_TTL_SECONDS);
-      })
-    );
-
-    const rewritten = lines.join('\n');
-    if (!keyUri) return rewritten;
-    await this.cachePlaybackManifest(manifestKey, rewritten);
-    return rewritten.replaceAll(KEY_URI_PLACEHOLDER, keyUri);
+    return manifest.split(/\r?\n/).map((line) => {
+      const value = line.trim();
+      if (value.startsWith('#EXT-X-KEY') && keyUri) {
+        return line.includes('URI="')
+          ? line.replace(/URI="[^"]*"/, `URI="${keyUri}"`)
+          : `${line},URI="${keyUri}"`;
+      }
+      if (!value || value.startsWith('#') || /^https?:\/\//i.test(value) || value.endsWith('.m3u8')) return line;
+      const ticket = playbackAccessService.createSegmentTicket(videoAssetId, `${baseKey}${value}`);
+      return `/api/media/videos/${videoAssetId}/segment?ticket=${encodeURIComponent(ticket)}&session=${encodeURIComponent(sessionToken)}`;
+    }).join('\n');
   }
 
-  private playbackManifestCacheKey(manifestKey: string): string {
-    return `playback:manifest:v2:${manifestKey}`;
+  public async getSegmentRedirectUrl(videoAssetId: string, ticket: string): Promise<string> {
+    const objectKey = playbackAccessService.verifySegmentTicket(ticket, videoAssetId);
+    if (!objectKey) throw new Error('Segment ticket không hợp lệ hoặc đã hết hạn.');
+    const asset = await VideoAsset.findById(videoAssetId).select('_id courseId lessonId status').lean();
+    if (!asset || asset.status !== VideoAssetStatus.READY) throw new Error('Video chưa sẵn sàng để phát.');
+    const allowedPrefix = `courses/${asset.courseId}/lessons/${asset.lessonId}/videos/${asset._id}/hls/`;
+    if (!objectKey.startsWith(allowedPrefix) || objectKey.includes('..')) throw new Error('Đường dẫn segment không hợp lệ.');
+    return s3Service.getDownloadPresignedUrl(objectKey, 15);
   }
-
-  private async getCachedPlaybackManifest(manifestKey: string): Promise<string | null> {
-    try {
-      return await redisClient.get(this.playbackManifestCacheKey(manifestKey));
-    } catch (error) {
-      console.warn('[VideoAssetService] Không thể đọc cache manifest:', error);
-      return null;
-    }
-  }
-
-  private async cachePlaybackManifest(manifestKey: string, manifest: string): Promise<void> {
-    try {
-      await redisClient.setex(
-        this.playbackManifestCacheKey(manifestKey),
-        PLAYBACK_MANIFEST_CACHE_TTL_SECONDS,
-        manifest,
-      );
-    } catch (error) {
-      console.warn('[VideoAssetService] Không thể ghi cache manifest:', error);
-    }
-  }
-
   public async getBindingSnapshot(videoAssetId: string) {
     const asset = await VideoAsset.findById(videoAssetId)
       .select('_id ownerUserId courseId lessonId status isAttached')

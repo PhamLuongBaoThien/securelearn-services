@@ -6,6 +6,7 @@ export interface AuthRequest extends Request {
   userId?: string;
   userRole?: string;
   sessionId?: string;
+  videoAccessMode?: 'LEARNER' | 'OWNER_PREVIEW';
 }
 
 export const extractUser = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {

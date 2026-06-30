@@ -2,8 +2,35 @@ import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import progressService from '../services/progress.service';
 import { LessonProgressType } from '../models/lessonProgress.model';
+import learningSessionAccessService, { LearningSessionAccessError } from '../services/learningSessionAccess.service';
 
 class ProgressController {
+  public async acquireLearningSession(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const data = await learningSessionAccessService.acquire({
+        userId: req.userId!, userRole: req.userRole!, authSessionId: req.sessionId!,
+        clientInstanceId: String(req.body.clientInstanceId || ''), courseId: String(req.body.courseId || ''),
+        lessonId: String(req.body.lessonId || ''), videoAssetId: String(req.body.videoAssetId || ''),
+        force: req.body.force === true, expectedActiveSessionId: String(req.body.expectedActiveSessionId || ''),
+        userAgent: req.get('user-agent') || '',
+      });
+      res.status(201).json({ status: 'OK', data });
+    } catch (error: any) {
+      const status = error instanceof LearningSessionAccessError ? error.statusCode : 400;
+      res.status(status).json({ status: 'ERR', code: error.code, message: error.message, data: error.data });
+    }
+  }
+
+  public async releaseLearningSession(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const released = await learningSessionAccessService.release(
+        req.userId!, req.sessionId!, String(req.params.sessionId || ''), String(req.get('x-learning-session-token') || ''),
+      );
+      res.status(200).json({ status: 'OK', data: { released } });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
   public async heartbeat(req: AuthRequest, res: Response): Promise<void> {
     try {
       const data = await progressService.heartbeat({
@@ -13,6 +40,8 @@ class ProgressController {
         lessonId: String(req.body.lessonId || ''),
         lessonType: req.body.lessonType as LessonProgressType,
         sessionId: String(req.body.sessionId || ''),
+        authSessionId: req.sessionId!,
+        learningSessionToken: String(req.get('x-learning-session-token') || ''),
         positionSeconds: req.body.positionSeconds,
         watchedSecondsDelta: req.body.watchedSecondsDelta,
         segmentStartSeconds: req.body.segmentStartSeconds,
@@ -24,7 +53,8 @@ class ProgressController {
 
       res.status(200).json({ status: 'OK', data });
     } catch (error: any) {
-      res.status(400).json({ status: 'ERR', message: error.message });
+      const status = error instanceof LearningSessionAccessError ? error.statusCode : 400;
+      res.status(status).json({ status: 'ERR', code: error.code, message: error.message, data: error.data });
     }
   }
 

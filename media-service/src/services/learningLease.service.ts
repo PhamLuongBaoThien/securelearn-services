@@ -1,0 +1,54 @@
+import crypto from 'crypto';
+import redisClient from '../config/redis';
+
+export type MediaLearningLease = {
+  learningSessionId: string;
+  tokenHash: string;
+  userId: string;
+  authSessionId: string;
+  clientInstanceId: string;
+  courseId: string;
+  courseVersionId?: string;
+  lessonId: string;
+  videoAssetId: string;
+  leaseVersion: number;
+};
+
+export class MediaLearningLeaseError extends Error {
+  constructor(public statusCode: number, public code: string, message: string) { super(message); }
+}
+
+const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
+
+class LearningLeaseService {
+  async validate(input: {
+    userId: string; authSessionId: string; learningSessionId: string; learningSessionToken?: string;
+    tokenHash?: string; courseId: string; lessonId: string; videoAssetId: string;
+  }): Promise<MediaLearningLease> {
+    if (!input.learningSessionId || input.learningSessionId.length > 128 || (input.learningSessionToken?.length || 0) > 256 || (input.tokenHash?.length || 0) > 128) {
+      throw new MediaLearningLeaseError(400, 'INVALID_LEARNING_SESSION_INPUT', 'Thông tin phiên học không hợp lệ.');
+    }
+    const raw = await redisClient.get(`learning:active:${input.userId}`);
+    if (!raw) throw new MediaLearningLeaseError(409, 'LEARNING_SESSION_EXPIRED', 'Phiên học đã hết hạn. Vui lòng phát lại video.');
+    let lease: MediaLearningLease;
+    try { lease = JSON.parse(raw) as MediaLearningLease; } catch {
+      throw new MediaLearningLeaseError(409, 'LEARNING_SESSION_EXPIRED', 'Phiên học không hợp lệ.');
+    }
+    const suppliedHash = input.tokenHash || hashToken(String(input.learningSessionToken || ''));
+    const matches = lease.learningSessionId === input.learningSessionId
+      && lease.tokenHash === suppliedHash
+      && lease.userId === input.userId
+      && lease.authSessionId === input.authSessionId
+      // VideoAsset.courseId stores the CourseVersion id. The lease keeps both
+      // the stable Course id and the CourseVersion id, so accept either form.
+      && (lease.courseId === input.courseId || lease.courseVersionId === input.courseId)
+      && lease.lessonId === input.lessonId
+      && (!lease.videoAssetId || lease.videoAssetId === input.videoAssetId);
+    if (!matches) throw new MediaLearningLeaseError(409, 'LEARNING_SESSION_REPLACED', 'Phiên học đã được chuyển sang thiết bị hoặc tab khác.');
+    return lease;
+  }
+
+  tokenHash(token: string) { return hashToken(token); }
+}
+
+export default new LearningLeaseService();

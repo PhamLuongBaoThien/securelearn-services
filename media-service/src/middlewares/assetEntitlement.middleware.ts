@@ -29,6 +29,7 @@ export const verifyCourseEntitlement = async (
 
   // Cho phép Admin hoặc Giảng viên sở hữu (ownerUserId) được truy cập trực tiếp.
   if (asset.ownerUserId === req.userId || req.userRole === 'ADMIN') {
+    req.videoAccessMode = 'OWNER_PREVIEW';
     next();
     return;
   }
@@ -43,6 +44,7 @@ export const verifyCourseEntitlement = async (
   const cached = await entitlementCacheService.get(req.userId, asset.courseId);
   if (cached) {
     if (cached.allowed) {
+      req.videoAccessMode = 'LEARNER';
       next(); // Cache ghi nhận: "Đã mua khóa học này" -> Cho qua luôn vào Controller
       return;
     }
@@ -57,6 +59,7 @@ export const verifyCourseEntitlement = async (
       courseId: asset.courseId,
     });
     if (access.allowed) {
+      req.videoAccessMode = 'LEARNER';
       await entitlementCacheService.set(req.userId, asset.courseId, {
         allowed: true,
         source: access.source as 'PURCHASE' | 'SUBSCRIPTION' | undefined,
