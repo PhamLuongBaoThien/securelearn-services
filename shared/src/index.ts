@@ -28,6 +28,8 @@ export {
   type UserUpdatedPayload,
   type UserDeletedPayload,
   type CourseCreatedPayload,
+  type CoursePublishedPayload,
+  type CourseRejectedPayload,
   type CourseVersionPublishedLessonMapping,
   type CourseVersionPublishedPayload,
   type EnrollmentCreatedPayload,

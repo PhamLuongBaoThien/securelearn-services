@@ -11,6 +11,8 @@ import {
   type EnrollmentCreatedPayload,
   type AssetCleanupPayload,
   type AssetAttachedPayload,
+  type CoursePublishedPayload,
+  type CourseRejectedPayload,
 } from "@securelearn/common";
 
 /**
@@ -26,17 +28,12 @@ export const publishCourseCreated = async (
   );
 };
 
-export const publishCoursePublished = async (payload: {
-  courseId: string;
-  versionId?: string;
-  title?: string;
-  slug?: string;
-  instructorId?: string;
-  finalCategoryId?: string;
-  categorySlug?: string;
-  publishedAt?: string;
-}): Promise<void> => {
+export const publishCoursePublished = async (payload: CoursePublishedPayload): Promise<void> => {
   await publishMessage(Exchange.COURSE, RoutingKey.COURSE_PUBLISHED, payload);
+};
+
+export const publishCourseRejected = async (payload: CourseRejectedPayload): Promise<void> => {
+  await publishMessage(Exchange.COURSE, RoutingKey.COURSE_REJECTED, payload);
 };
 
 export const publishCourseVersionPublished = async (

@@ -4,10 +4,15 @@ package securelearn;
 
 service IdentityInternalService {
   rpc CheckInstructorProfile (InstructorProfileRequest) returns (InstructorProfileReply);
+  rpc ListNotificationRecipients (NotificationRecipientRequest) returns (NotificationRecipientReply);
 }
 
 message InstructorProfileRequest { string userId = 1; }
 message InstructorProfileReply { bool complete = 1; repeated string missingFields = 2; }
+
+message NotificationRecipientRequest { string audience = 1; string email = 2; string userId = 3; int32 page = 4; int32 limit = 5; }
+message NotificationRecipient { string userId = 1; string email = 2; string fullName = 3; string role = 4; }
+message NotificationRecipientReply { repeated NotificationRecipient recipients = 1; int32 total = 2; bool hasMore = 3; }
 
 service MediaInternalService {
   rpc GetVideoAssetBinding (AssetByIdRequest) returns (MediaAssetBindingReply);

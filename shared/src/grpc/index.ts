@@ -6,6 +6,8 @@ import {
   IdentityInternalServiceServer,
   InstructorProfileRequest,
   InstructorProfileReply,
+  NotificationRecipientRequest,
+  NotificationRecipientReply,
   CourseEntitlementReply,
   CourseEntitlementRequest,
   CourseInternalServiceClient,
@@ -103,11 +105,16 @@ export const startGrpcServer = async (server: grpc.Server, bindAddress: string):
 
 export const createIdentityGrpcServer = (handlers: {
   checkInstructorProfile: (userId: string) => Promise<InstructorProfileReply>;
+  listNotificationRecipients: (request: NotificationRecipientRequest) => Promise<NotificationRecipientReply>;
 }): grpc.Server => {
   const server = new grpc.Server();
   const implementation: IdentityInternalServiceServer = {
     checkInstructorProfile: async (call, callback) => {
       try { callback(null, await handlers.checkInstructorProfile(call.request.userId)); }
+      catch (error) { callback(error as grpc.ServiceError, null); }
+    },
+    listNotificationRecipients: async (call, callback) => {
+      try { callback(null, await handlers.listNotificationRecipients(call.request)); }
       catch (error) { callback(error as grpc.ServiceError, null); }
     },
   };
@@ -120,6 +127,7 @@ export const createIdentityGrpcClient = (target: string) => {
   const rpcClient = client as unknown as Record<string, Function>;
   return {
     checkInstructorProfile: (userId: string) => promisifyUnary<InstructorProfileRequest, InstructorProfileReply>(rpcClient, 'checkInstructorProfile', { userId }),
+    listNotificationRecipients: (request: NotificationRecipientRequest) => promisifyUnary<NotificationRecipientRequest, NotificationRecipientReply>(rpcClient, 'listNotificationRecipients', request),
     close: () => client.close(),
   };
 };

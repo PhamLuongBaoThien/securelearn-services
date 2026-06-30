@@ -15,6 +15,7 @@ export enum Exchange {
   MEDIA = 'media.events',
   PAYMENT = 'payment.events',
   PROGRESS = 'progress.events',
+  NOTIFICATION = 'notification.events',
 }
 
 /**
@@ -32,6 +33,7 @@ export enum RoutingKey {
   COURSE_UPDATED = 'course.course.updated',
   COURSE_PUBLISHED = 'course.course.published',
   COURSE_VERSION_PUBLISHED = 'course.version.published',
+  COURSE_REJECTED = 'course.course.rejected',
   ENROLLMENT_CREATED = 'course.enrollment.created',
 
   // --- Media Events ---
@@ -90,6 +92,13 @@ export interface CourseCreatedPayload {
 }
 
 /** Payload khi học viên đăng ký khóa học */
+export interface CoursePublishedPayload {
+  courseId: string; versionId?: string; title: string; slug?: string; instructorId: string; finalCategoryId?: string; publishedAt: string;
+}
+export interface CourseRejectedPayload {
+  courseId: string; versionId: string; title: string; instructorId: string; reason: string; rejectedAt: string;
+}
+
 export interface EnrollmentCreatedPayload {
   enrollmentId: string;
   userId: string;

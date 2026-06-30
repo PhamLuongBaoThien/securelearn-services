@@ -30,6 +30,27 @@ export interface InstructorProfileReply {
   missingFields: string[];
 }
 
+export interface NotificationRecipientRequest {
+  audience: string;
+  email: string;
+  userId: string;
+  page: number;
+  limit: number;
+}
+
+export interface NotificationRecipient {
+  userId: string;
+  email: string;
+  fullName: string;
+  role: string;
+}
+
+export interface NotificationRecipientReply {
+  recipients: NotificationRecipient[];
+  total: number;
+  hasMore: boolean;
+}
+
 export interface AssetByIdRequest {
   assetId: string;
 }
@@ -234,6 +255,332 @@ export const InstructorProfileReply: MessageFns<InstructorProfileReply> = {
     const message = createBaseInstructorProfileReply();
     message.complete = object.complete ?? false;
     message.missingFields = object.missingFields?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseNotificationRecipientRequest(): NotificationRecipientRequest {
+  return { audience: "", email: "", userId: "", page: 0, limit: 0 };
+}
+
+export const NotificationRecipientRequest: MessageFns<NotificationRecipientRequest> = {
+  encode(message: NotificationRecipientRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.audience !== "") {
+      writer.uint32(10).string(message.audience);
+    }
+    if (message.email !== "") {
+      writer.uint32(18).string(message.email);
+    }
+    if (message.userId !== "") {
+      writer.uint32(26).string(message.userId);
+    }
+    if (message.page !== 0) {
+      writer.uint32(32).int32(message.page);
+    }
+    if (message.limit !== 0) {
+      writer.uint32(40).int32(message.limit);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): NotificationRecipientRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseNotificationRecipientRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.audience = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.email = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.userId = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.page = reader.int32();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.limit = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): NotificationRecipientRequest {
+    return {
+      audience: isSet(object.audience) ? globalThis.String(object.audience) : "",
+      email: isSet(object.email) ? globalThis.String(object.email) : "",
+      userId: isSet(object.userId) ? globalThis.String(object.userId) : "",
+      page: isSet(object.page) ? globalThis.Number(object.page) : 0,
+      limit: isSet(object.limit) ? globalThis.Number(object.limit) : 0,
+    };
+  },
+
+  toJSON(message: NotificationRecipientRequest): unknown {
+    const obj: any = {};
+    if (message.audience !== "") {
+      obj.audience = message.audience;
+    }
+    if (message.email !== "") {
+      obj.email = message.email;
+    }
+    if (message.userId !== "") {
+      obj.userId = message.userId;
+    }
+    if (message.page !== 0) {
+      obj.page = Math.round(message.page);
+    }
+    if (message.limit !== 0) {
+      obj.limit = Math.round(message.limit);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<NotificationRecipientRequest>): NotificationRecipientRequest {
+    return NotificationRecipientRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<NotificationRecipientRequest>): NotificationRecipientRequest {
+    const message = createBaseNotificationRecipientRequest();
+    message.audience = object.audience ?? "";
+    message.email = object.email ?? "";
+    message.userId = object.userId ?? "";
+    message.page = object.page ?? 0;
+    message.limit = object.limit ?? 0;
+    return message;
+  },
+};
+
+function createBaseNotificationRecipient(): NotificationRecipient {
+  return { userId: "", email: "", fullName: "", role: "" };
+}
+
+export const NotificationRecipient: MessageFns<NotificationRecipient> = {
+  encode(message: NotificationRecipient, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.userId !== "") {
+      writer.uint32(10).string(message.userId);
+    }
+    if (message.email !== "") {
+      writer.uint32(18).string(message.email);
+    }
+    if (message.fullName !== "") {
+      writer.uint32(26).string(message.fullName);
+    }
+    if (message.role !== "") {
+      writer.uint32(34).string(message.role);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): NotificationRecipient {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseNotificationRecipient();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.userId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.email = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.fullName = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.role = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): NotificationRecipient {
+    return {
+      userId: isSet(object.userId) ? globalThis.String(object.userId) : "",
+      email: isSet(object.email) ? globalThis.String(object.email) : "",
+      fullName: isSet(object.fullName) ? globalThis.String(object.fullName) : "",
+      role: isSet(object.role) ? globalThis.String(object.role) : "",
+    };
+  },
+
+  toJSON(message: NotificationRecipient): unknown {
+    const obj: any = {};
+    if (message.userId !== "") {
+      obj.userId = message.userId;
+    }
+    if (message.email !== "") {
+      obj.email = message.email;
+    }
+    if (message.fullName !== "") {
+      obj.fullName = message.fullName;
+    }
+    if (message.role !== "") {
+      obj.role = message.role;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<NotificationRecipient>): NotificationRecipient {
+    return NotificationRecipient.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<NotificationRecipient>): NotificationRecipient {
+    const message = createBaseNotificationRecipient();
+    message.userId = object.userId ?? "";
+    message.email = object.email ?? "";
+    message.fullName = object.fullName ?? "";
+    message.role = object.role ?? "";
+    return message;
+  },
+};
+
+function createBaseNotificationRecipientReply(): NotificationRecipientReply {
+  return { recipients: [], total: 0, hasMore: false };
+}
+
+export const NotificationRecipientReply: MessageFns<NotificationRecipientReply> = {
+  encode(message: NotificationRecipientReply, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.recipients) {
+      NotificationRecipient.encode(v!, writer.uint32(10).fork()).join();
+    }
+    if (message.total !== 0) {
+      writer.uint32(16).int32(message.total);
+    }
+    if (message.hasMore !== false) {
+      writer.uint32(24).bool(message.hasMore);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): NotificationRecipientReply {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseNotificationRecipientReply();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.recipients.push(NotificationRecipient.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.total = reader.int32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.hasMore = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): NotificationRecipientReply {
+    return {
+      recipients: globalThis.Array.isArray(object?.recipients)
+        ? object.recipients.map((e: any) => NotificationRecipient.fromJSON(e))
+        : [],
+      total: isSet(object.total) ? globalThis.Number(object.total) : 0,
+      hasMore: isSet(object.hasMore) ? globalThis.Boolean(object.hasMore) : false,
+    };
+  },
+
+  toJSON(message: NotificationRecipientReply): unknown {
+    const obj: any = {};
+    if (message.recipients?.length) {
+      obj.recipients = message.recipients.map((e) => NotificationRecipient.toJSON(e));
+    }
+    if (message.total !== 0) {
+      obj.total = Math.round(message.total);
+    }
+    if (message.hasMore !== false) {
+      obj.hasMore = message.hasMore;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<NotificationRecipientReply>): NotificationRecipientReply {
+    return NotificationRecipientReply.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<NotificationRecipientReply>): NotificationRecipientReply {
+    const message = createBaseNotificationRecipientReply();
+    message.recipients = object.recipients?.map((e) => NotificationRecipient.fromPartial(e)) || [];
+    message.total = object.total ?? 0;
+    message.hasMore = object.hasMore ?? false;
     return message;
   },
 };
@@ -1398,10 +1745,22 @@ export const IdentityInternalServiceService = {
       Buffer.from(InstructorProfileReply.encode(value).finish()),
     responseDeserialize: (value: Buffer): InstructorProfileReply => InstructorProfileReply.decode(value),
   },
+  listNotificationRecipients: {
+    path: "/securelearn.IdentityInternalService/ListNotificationRecipients" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: NotificationRecipientRequest): Buffer =>
+      Buffer.from(NotificationRecipientRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): NotificationRecipientRequest => NotificationRecipientRequest.decode(value),
+    responseSerialize: (value: NotificationRecipientReply): Buffer =>
+      Buffer.from(NotificationRecipientReply.encode(value).finish()),
+    responseDeserialize: (value: Buffer): NotificationRecipientReply => NotificationRecipientReply.decode(value),
+  },
 } as const;
 
 export interface IdentityInternalServiceServer extends UntypedServiceImplementation {
   checkInstructorProfile: handleUnaryCall<InstructorProfileRequest, InstructorProfileReply>;
+  listNotificationRecipients: handleUnaryCall<NotificationRecipientRequest, NotificationRecipientReply>;
 }
 
 export interface IdentityInternalServiceClient extends Client {
@@ -1419,6 +1778,21 @@ export interface IdentityInternalServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: InstructorProfileReply) => void,
+  ): ClientUnaryCall;
+  listNotificationRecipients(
+    request: NotificationRecipientRequest,
+    callback: (error: ServiceError | null, response: NotificationRecipientReply) => void,
+  ): ClientUnaryCall;
+  listNotificationRecipients(
+    request: NotificationRecipientRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: NotificationRecipientReply) => void,
+  ): ClientUnaryCall;
+  listNotificationRecipients(
+    request: NotificationRecipientRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: NotificationRecipientReply) => void,
   ): ClientUnaryCall;
 }
 

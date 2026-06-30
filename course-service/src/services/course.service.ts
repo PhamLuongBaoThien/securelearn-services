@@ -21,6 +21,7 @@ import { Section } from "../models/section.model";
 import {
   publishCourseCreated,
   publishCoursePublished,
+  publishCourseRejected,
   publishCourseVersionPublished,
 } from "../events/publishers";
 import categoryService from "./category.service";
@@ -1148,6 +1149,19 @@ class CourseService {
     version.reviewedByEmail = admin.adminEmail;
     version.rejectionReason = normalizedReason;
     await version.save();
+
+    try {
+      await publishCourseRejected({
+        courseId: version.courseId.toString(),
+        versionId: version._id.toString(),
+        title: version.title,
+        instructorId: version.instructorId,
+        reason: normalizedReason,
+        rejectedAt: version.reviewedAt.toISOString(),
+      });
+    } catch (err) {
+      console.error('Failed to publish COURSE_REJECTED event', err);
+    }
 
     const shell = await Course.findById(version.courseId);
     if (shell && shell.status !== CourseStatus.PUBLISHED) {

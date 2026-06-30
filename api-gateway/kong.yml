@@ -335,6 +335,25 @@ services:
           - GET
           - POST
 
+  - name: notification-service
+    url: http://notification-service:5006
+    routes:
+      - name: notification-preflight
+        paths:
+          - /api/notifications
+          - /api/admin/notifications
+        strip_path: false
+        methods: [OPTIONS]
+      - name: notification-protected
+        paths:
+          - /api/notifications
+        strip_path: false
+        methods: [GET, PATCH]
+      - name: notification-admin-protected
+        paths:
+          - /api/admin/notifications
+        strip_path: false
+        methods: [GET, POST, PUT, DELETE, PATCH]
   # ===== MINIO STORAGE PROXY =====
   # FE upload video qua presigned URL sẽ đi qua Kong thay vì gọi trực tiếp MinIO.
   # Mục đích: GIẤU MinIO endpoint thật (minio:9000) khỏi client.
@@ -502,6 +521,20 @@ plugins:
   # JWT cho route upload — đảm bảo chỉ user đã đăng nhập mới xin được presigned URL.
   - name: jwt
     route: media-upload
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  - name: jwt
+    route: notification-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  - name: jwt
+    route: notification-admin-protected
     config:
       key_claim_name: iss
       claims_to_verify:
