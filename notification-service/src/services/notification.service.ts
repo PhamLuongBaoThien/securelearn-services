@@ -3,7 +3,7 @@ import { Exchange, RoutingKey, publishMessage, type NotificationCampaignRequeste
 import { Notification } from '../models/notification.model';
 import { Campaign } from '../models/campaign.model';
 import { DeliveryAttempt } from '../models/deliveryAttempt.model';
-import templateService, { renderTemplate } from './template.service';
+import templateService, { extractVariables, renderTemplate } from './template.service';
 import preferenceService, { type NotificationCategory, type RecipientType } from './preference.service';
 import emailService from './email.service';
 import { identityGrpcClient } from '../config/identityGrpc';
@@ -103,6 +103,10 @@ class NotificationService {
     if (input.audience === 'SPECIFIC_USER' && !input.specificEmail?.trim()) throw new Error('Email người nhận là bắt buộc.');
     if (input.audience === 'COURSE_STUDENTS' && !input.courseId?.trim()) throw new Error('Khóa học là bắt buộc.');
     if (!input.title?.trim() || !input.content?.trim() || !channels.length) throw new Error('Tiêu đề, nội dung và kênh gửi là bắt buộc.');
+    const allowedVariables = new Set(['userName', 'userEmail', ...(input.audience === 'COURSE_STUDENTS' ? ['courseId'] : [])]);
+    const usedVariables = [...extractVariables(String(input.title || '')), ...extractVariables(String(input.content || ''))];
+    const invalidVariables = [...new Set(usedVariables.filter(variable => !allowedVariables.has(variable)))];
+    if (invalidVariables.length) throw new Error('Biến nội dung không hợp lệ: ' + invalidVariables.map(variable => '{{' + variable + '}}').join(', '));
     const campaign = await Campaign.create({ createdBy: adminId, audience: input.audience, specificEmail: input.specificEmail, courseId: input.courseId, title: input.title.trim(), content: input.content.trim(), channels, status: 'PROCESSING' });
     try {
       await publishMessage<NotificationCampaignRequestedPayload>(Exchange.NOTIFICATION, RoutingKey.NOTIFICATION_CAMPAIGN_REQUESTED, { campaignId: campaign.id });
@@ -121,7 +125,7 @@ class NotificationService {
       const stats = { requested: recipients.length, inAppSent: 0, emailSent: 0, emailFailed: 0 };
       for (let offset = 0; offset < recipients.length; offset += 50) {
         for (const recipient of recipients.slice(offset, offset + 50)) {
-          const values = { userName: recipient.fullName, userEmail: recipient.email };
+          const values = { userName: recipient.fullName, userEmail: recipient.email, courseId: campaign.courseId || '' };
           const title = renderTemplate(campaign.title, values); const body = renderTemplate(campaign.content, values);
           if (campaign.channels.includes('IN_APP') && await preferenceService.channelEnabled('USER', recipient.userId, 'CAMPAIGN', 'inApp')) { await this.createInApp(recipient, 'MANUAL', title, body, `campaign:${campaign.id}`, { category: 'CAMPAIGN', data: { campaignId: campaign.id } }); stats.inAppSent += 1; }
           if (campaign.channels.includes('EMAIL') && await preferenceService.channelEnabled('USER', recipient.userId, 'CAMPAIGN', 'email')) { const sent = await emailService.send({ deliveryKey: `campaign:${campaign.id}:EMAIL:${recipient.userId}`, campaignId: campaign.id, userId: recipient.userId, email: recipient.email, subject: title, body }); sent ? stats.emailSent += 1 : stats.emailFailed += 1; }
