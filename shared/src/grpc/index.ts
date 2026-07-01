@@ -9,6 +9,8 @@ import {
   NotificationRecipientRequest,
   NotificationRecipientReply,
   CourseEntitlementReply,
+  CourseNotificationRecipientRequest,
+  CourseNotificationRecipientReply,
   CourseEntitlementRequest,
   CourseInternalServiceClient,
   CourseInternalServiceService,
@@ -157,11 +159,16 @@ export const createMediaGrpcServer = (handlers: {
 };
 
 export const createCourseGrpcServer = (handlers: {
+  listCourseNotificationRecipients: (request: CourseNotificationRecipientRequest) => Promise<CourseNotificationRecipientReply>;
   checkCourseEntitlement: (request: CourseEntitlementRequest) => Promise<CourseEntitlementResult>;
   getCourseProgressContext?: (request: CourseProgressContextRequest) => Promise<CourseProgressContext>;
 }): grpc.Server => {
   const server = new grpc.Server();
   const implementation: CourseInternalServiceServer = {
+    listCourseNotificationRecipients: async (call, callback) => {
+      try { callback(null, await handlers.listCourseNotificationRecipients(call.request)); }
+      catch (error) { callback(error as grpc.ServiceError, null); }
+    },
     checkCourseEntitlement: async (call, callback) => {
       try {
         const response = await handlers.checkCourseEntitlement(call.request);
@@ -234,6 +241,8 @@ export const createCourseGrpcClient = (target: string) => {
   const client = new CourseInternalServiceClient(target, grpc.credentials.createInsecure());
   const rpcClient = client as unknown as Record<string, Function>;
   return {
+    listCourseNotificationRecipients: (request: CourseNotificationRecipientRequest) =>
+      promisifyUnary<CourseNotificationRecipientRequest, CourseNotificationRecipientReply>(rpcClient, 'listCourseNotificationRecipients', request),
     checkCourseEntitlement: async (request: CourseEntitlementRequest) =>
       normalizeCourseEntitlement(
         await promisifyUnary<CourseEntitlementRequest, CourseEntitlementReply>(

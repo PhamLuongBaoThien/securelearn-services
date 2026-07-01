@@ -16,6 +16,8 @@ export {
   type CourseCreatedPayload,
   type CoursePublishedPayload,
   type CourseRejectedPayload,
+  type CourseSubmittedForReviewPayload,
+  type NotificationCampaignRequestedPayload,
   type CourseVersionPublishedLessonMapping,
   type CourseVersionPublishedPayload,
   type EnrollmentCreatedPayload,

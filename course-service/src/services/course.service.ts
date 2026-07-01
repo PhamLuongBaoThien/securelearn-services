@@ -22,6 +22,7 @@ import {
   publishCourseCreated,
   publishCoursePublished,
   publishCourseRejected,
+  publishCourseSubmittedForReview,
   publishCourseVersionPublished,
 } from "../events/publishers";
 import categoryService from "./category.service";
@@ -722,6 +723,19 @@ class CourseService {
     version.reviewedByEmail = "";
     version.rejectionReason = "";
     await version.save();
+
+    try {
+      await publishCourseSubmittedForReview({
+        courseId: shell._id.toString(),
+        versionId: version._id.toString(),
+        title: version.title,
+        instructorId,
+        instructorName: version.instructorName || '',
+        submittedAt: version.submittedAt.toISOString(),
+      });
+    } catch (err) {
+      console.error('Failed to publish COURSE_SUBMITTED_FOR_REVIEW event', err);
+    }
 
     if (shell.status !== CourseStatus.PUBLISHED) {
       shell.status = CourseStatus.PENDING;

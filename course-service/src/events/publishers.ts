@@ -13,6 +13,7 @@ import {
   type AssetAttachedPayload,
   type CoursePublishedPayload,
   type CourseRejectedPayload,
+  type CourseSubmittedForReviewPayload,
 } from "@securelearn/common";
 
 /**
@@ -34,6 +35,10 @@ export const publishCoursePublished = async (payload: CoursePublishedPayload): P
 
 export const publishCourseRejected = async (payload: CourseRejectedPayload): Promise<void> => {
   await publishMessage(Exchange.COURSE, RoutingKey.COURSE_REJECTED, payload);
+};
+
+export const publishCourseSubmittedForReview = async (payload: CourseSubmittedForReviewPayload): Promise<void> => {
+  await publishMessage(Exchange.COURSE, RoutingKey.COURSE_SUBMITTED_FOR_REVIEW, payload);
 };
 
 export const publishCourseVersionPublished = async (

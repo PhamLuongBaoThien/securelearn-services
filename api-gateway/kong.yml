@@ -348,7 +348,7 @@ services:
         paths:
           - /api/notifications
         strip_path: false
-        methods: [GET, PATCH]
+        methods: [GET, PATCH, PUT]
       - name: notification-admin-protected
         paths:
           - /api/admin/notifications

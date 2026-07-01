@@ -36,6 +36,8 @@ export interface NotificationRecipientRequest {
   userId: string;
   page: number;
   limit: number;
+  recipientType: string;
+  permission: string;
 }
 
 export interface NotificationRecipient {
@@ -62,6 +64,25 @@ export interface MediaAssetBindingReply {
   lessonId: string;
   status: string;
   isAttached: boolean;
+}
+
+export interface CourseNotificationRecipientRequest {
+  courseId: string;
+  page: number;
+  limit: number;
+}
+
+export interface CourseNotificationRecipient {
+  userId: string;
+  email: string;
+  fullName: string;
+  role: string;
+}
+
+export interface CourseNotificationRecipientReply {
+  recipients: CourseNotificationRecipient[];
+  total: number;
+  hasMore: boolean;
 }
 
 export interface CourseEntitlementRequest {
@@ -260,7 +281,7 @@ export const InstructorProfileReply: MessageFns<InstructorProfileReply> = {
 };
 
 function createBaseNotificationRecipientRequest(): NotificationRecipientRequest {
-  return { audience: "", email: "", userId: "", page: 0, limit: 0 };
+  return { audience: "", email: "", userId: "", page: 0, limit: 0, recipientType: "", permission: "" };
 }
 
 export const NotificationRecipientRequest: MessageFns<NotificationRecipientRequest> = {
@@ -279,6 +300,12 @@ export const NotificationRecipientRequest: MessageFns<NotificationRecipientReque
     }
     if (message.limit !== 0) {
       writer.uint32(40).int32(message.limit);
+    }
+    if (message.recipientType !== "") {
+      writer.uint32(50).string(message.recipientType);
+    }
+    if (message.permission !== "") {
+      writer.uint32(58).string(message.permission);
     }
     return writer;
   },
@@ -330,6 +357,22 @@ export const NotificationRecipientRequest: MessageFns<NotificationRecipientReque
           message.limit = reader.int32();
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.recipientType = reader.string();
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.permission = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -346,6 +389,8 @@ export const NotificationRecipientRequest: MessageFns<NotificationRecipientReque
       userId: isSet(object.userId) ? globalThis.String(object.userId) : "",
       page: isSet(object.page) ? globalThis.Number(object.page) : 0,
       limit: isSet(object.limit) ? globalThis.Number(object.limit) : 0,
+      recipientType: isSet(object.recipientType) ? globalThis.String(object.recipientType) : "",
+      permission: isSet(object.permission) ? globalThis.String(object.permission) : "",
     };
   },
 
@@ -366,6 +411,12 @@ export const NotificationRecipientRequest: MessageFns<NotificationRecipientReque
     if (message.limit !== 0) {
       obj.limit = Math.round(message.limit);
     }
+    if (message.recipientType !== "") {
+      obj.recipientType = message.recipientType;
+    }
+    if (message.permission !== "") {
+      obj.permission = message.permission;
+    }
     return obj;
   },
 
@@ -379,6 +430,8 @@ export const NotificationRecipientRequest: MessageFns<NotificationRecipientReque
     message.userId = object.userId ?? "";
     message.page = object.page ?? 0;
     message.limit = object.limit ?? 0;
+    message.recipientType = object.recipientType ?? "";
+    message.permission = object.permission ?? "";
     return message;
   },
 };
@@ -779,6 +832,300 @@ export const MediaAssetBindingReply: MessageFns<MediaAssetBindingReply> = {
     message.lessonId = object.lessonId ?? "";
     message.status = object.status ?? "";
     message.isAttached = object.isAttached ?? false;
+    return message;
+  },
+};
+
+function createBaseCourseNotificationRecipientRequest(): CourseNotificationRecipientRequest {
+  return { courseId: "", page: 0, limit: 0 };
+}
+
+export const CourseNotificationRecipientRequest: MessageFns<CourseNotificationRecipientRequest> = {
+  encode(message: CourseNotificationRecipientRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.courseId !== "") {
+      writer.uint32(10).string(message.courseId);
+    }
+    if (message.page !== 0) {
+      writer.uint32(16).int32(message.page);
+    }
+    if (message.limit !== 0) {
+      writer.uint32(24).int32(message.limit);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CourseNotificationRecipientRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCourseNotificationRecipientRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.courseId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.page = reader.int32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.limit = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CourseNotificationRecipientRequest {
+    return {
+      courseId: isSet(object.courseId) ? globalThis.String(object.courseId) : "",
+      page: isSet(object.page) ? globalThis.Number(object.page) : 0,
+      limit: isSet(object.limit) ? globalThis.Number(object.limit) : 0,
+    };
+  },
+
+  toJSON(message: CourseNotificationRecipientRequest): unknown {
+    const obj: any = {};
+    if (message.courseId !== "") {
+      obj.courseId = message.courseId;
+    }
+    if (message.page !== 0) {
+      obj.page = Math.round(message.page);
+    }
+    if (message.limit !== 0) {
+      obj.limit = Math.round(message.limit);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<CourseNotificationRecipientRequest>): CourseNotificationRecipientRequest {
+    return CourseNotificationRecipientRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<CourseNotificationRecipientRequest>): CourseNotificationRecipientRequest {
+    const message = createBaseCourseNotificationRecipientRequest();
+    message.courseId = object.courseId ?? "";
+    message.page = object.page ?? 0;
+    message.limit = object.limit ?? 0;
+    return message;
+  },
+};
+
+function createBaseCourseNotificationRecipient(): CourseNotificationRecipient {
+  return { userId: "", email: "", fullName: "", role: "" };
+}
+
+export const CourseNotificationRecipient: MessageFns<CourseNotificationRecipient> = {
+  encode(message: CourseNotificationRecipient, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.userId !== "") {
+      writer.uint32(10).string(message.userId);
+    }
+    if (message.email !== "") {
+      writer.uint32(18).string(message.email);
+    }
+    if (message.fullName !== "") {
+      writer.uint32(26).string(message.fullName);
+    }
+    if (message.role !== "") {
+      writer.uint32(34).string(message.role);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CourseNotificationRecipient {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCourseNotificationRecipient();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.userId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.email = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.fullName = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.role = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CourseNotificationRecipient {
+    return {
+      userId: isSet(object.userId) ? globalThis.String(object.userId) : "",
+      email: isSet(object.email) ? globalThis.String(object.email) : "",
+      fullName: isSet(object.fullName) ? globalThis.String(object.fullName) : "",
+      role: isSet(object.role) ? globalThis.String(object.role) : "",
+    };
+  },
+
+  toJSON(message: CourseNotificationRecipient): unknown {
+    const obj: any = {};
+    if (message.userId !== "") {
+      obj.userId = message.userId;
+    }
+    if (message.email !== "") {
+      obj.email = message.email;
+    }
+    if (message.fullName !== "") {
+      obj.fullName = message.fullName;
+    }
+    if (message.role !== "") {
+      obj.role = message.role;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<CourseNotificationRecipient>): CourseNotificationRecipient {
+    return CourseNotificationRecipient.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<CourseNotificationRecipient>): CourseNotificationRecipient {
+    const message = createBaseCourseNotificationRecipient();
+    message.userId = object.userId ?? "";
+    message.email = object.email ?? "";
+    message.fullName = object.fullName ?? "";
+    message.role = object.role ?? "";
+    return message;
+  },
+};
+
+function createBaseCourseNotificationRecipientReply(): CourseNotificationRecipientReply {
+  return { recipients: [], total: 0, hasMore: false };
+}
+
+export const CourseNotificationRecipientReply: MessageFns<CourseNotificationRecipientReply> = {
+  encode(message: CourseNotificationRecipientReply, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.recipients) {
+      CourseNotificationRecipient.encode(v!, writer.uint32(10).fork()).join();
+    }
+    if (message.total !== 0) {
+      writer.uint32(16).int32(message.total);
+    }
+    if (message.hasMore !== false) {
+      writer.uint32(24).bool(message.hasMore);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CourseNotificationRecipientReply {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCourseNotificationRecipientReply();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.recipients.push(CourseNotificationRecipient.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.total = reader.int32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.hasMore = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CourseNotificationRecipientReply {
+    return {
+      recipients: globalThis.Array.isArray(object?.recipients)
+        ? object.recipients.map((e: any) => CourseNotificationRecipient.fromJSON(e))
+        : [],
+      total: isSet(object.total) ? globalThis.Number(object.total) : 0,
+      hasMore: isSet(object.hasMore) ? globalThis.Boolean(object.hasMore) : false,
+    };
+  },
+
+  toJSON(message: CourseNotificationRecipientReply): unknown {
+    const obj: any = {};
+    if (message.recipients?.length) {
+      obj.recipients = message.recipients.map((e) => CourseNotificationRecipient.toJSON(e));
+    }
+    if (message.total !== 0) {
+      obj.total = Math.round(message.total);
+    }
+    if (message.hasMore !== false) {
+      obj.hasMore = message.hasMore;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<CourseNotificationRecipientReply>): CourseNotificationRecipientReply {
+    return CourseNotificationRecipientReply.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<CourseNotificationRecipientReply>): CourseNotificationRecipientReply {
+    const message = createBaseCourseNotificationRecipientReply();
+    message.recipients = object.recipients?.map((e) => CourseNotificationRecipient.fromPartial(e)) || [];
+    message.total = object.total ?? 0;
+    message.hasMore = object.hasMore ?? false;
     return message;
   },
 };
@@ -1882,6 +2229,19 @@ export const MediaInternalServiceClient = makeGenericClientConstructor(
 
 export type CourseInternalServiceService = typeof CourseInternalServiceService;
 export const CourseInternalServiceService = {
+  listCourseNotificationRecipients: {
+    path: "/securelearn.CourseInternalService/ListCourseNotificationRecipients" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: CourseNotificationRecipientRequest): Buffer =>
+      Buffer.from(CourseNotificationRecipientRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CourseNotificationRecipientRequest =>
+      CourseNotificationRecipientRequest.decode(value),
+    responseSerialize: (value: CourseNotificationRecipientReply): Buffer =>
+      Buffer.from(CourseNotificationRecipientReply.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CourseNotificationRecipientReply =>
+      CourseNotificationRecipientReply.decode(value),
+  },
   checkCourseEntitlement: {
     path: "/securelearn.CourseInternalService/CheckCourseEntitlement" as const,
     requestStream: false as const,
@@ -1907,11 +2267,30 @@ export const CourseInternalServiceService = {
 } as const;
 
 export interface CourseInternalServiceServer extends UntypedServiceImplementation {
+  listCourseNotificationRecipients: handleUnaryCall<
+    CourseNotificationRecipientRequest,
+    CourseNotificationRecipientReply
+  >;
   checkCourseEntitlement: handleUnaryCall<CourseEntitlementRequest, CourseEntitlementReply>;
   getCourseProgressContext: handleUnaryCall<CourseProgressContextRequest, CourseProgressContextReply>;
 }
 
 export interface CourseInternalServiceClient extends Client {
+  listCourseNotificationRecipients(
+    request: CourseNotificationRecipientRequest,
+    callback: (error: ServiceError | null, response: CourseNotificationRecipientReply) => void,
+  ): ClientUnaryCall;
+  listCourseNotificationRecipients(
+    request: CourseNotificationRecipientRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CourseNotificationRecipientReply) => void,
+  ): ClientUnaryCall;
+  listCourseNotificationRecipients(
+    request: CourseNotificationRecipientRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CourseNotificationRecipientReply) => void,
+  ): ClientUnaryCall;
   checkCourseEntitlement(
     request: CourseEntitlementRequest,
     callback: (error: ServiceError | null, response: CourseEntitlementReply) => void,

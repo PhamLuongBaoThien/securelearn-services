@@ -34,6 +34,7 @@ export enum RoutingKey {
   COURSE_PUBLISHED = 'course.course.published',
   COURSE_VERSION_PUBLISHED = 'course.version.published',
   COURSE_REJECTED = 'course.course.rejected',
+  COURSE_SUBMITTED_FOR_REVIEW = 'course.course.submitted-for-review',
   ENROLLMENT_CREATED = 'course.enrollment.created',
 
   // --- Media Events ---
@@ -55,6 +56,9 @@ export enum RoutingKey {
   // --- Progress Events ---
   PROGRESS_LESSON_COMPLETED = 'progress.lesson.completed',
   PROGRESS_COURSE_COMPLETED = 'progress.course.completed',
+
+  // --- Notification Commands ---
+  NOTIFICATION_CAMPAIGN_REQUESTED = 'notification.campaign.requested',
 }
 // ==============================
 // Event Payloads — Interface cho dữ liệu gửi kèm mỗi event
@@ -103,6 +107,25 @@ export interface EnrollmentCreatedPayload {
   enrollmentId: string;
   userId: string;
   courseId: string;
+  courseTitle: string;
+  instructorId: string;
+  learnerName: string;
+  learnerEmail: string;
+  enrolledAt: string;
+}
+
+
+export interface CourseSubmittedForReviewPayload {
+  courseId: string;
+  versionId: string;
+  title: string;
+  instructorId: string;
+  instructorName: string;
+  submittedAt: string;
+}
+
+export interface NotificationCampaignRequestedPayload {
+  campaignId: string;
 }
 
 export interface CourseVersionPublishedLessonMapping {

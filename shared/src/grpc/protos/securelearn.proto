@@ -10,7 +10,7 @@ service IdentityInternalService {
 message InstructorProfileRequest { string userId = 1; }
 message InstructorProfileReply { bool complete = 1; repeated string missingFields = 2; }
 
-message NotificationRecipientRequest { string audience = 1; string email = 2; string userId = 3; int32 page = 4; int32 limit = 5; }
+message NotificationRecipientRequest { string audience = 1; string email = 2; string userId = 3; int32 page = 4; int32 limit = 5; string recipientType = 6; string permission = 7; }
 message NotificationRecipient { string userId = 1; string email = 2; string fullName = 3; string role = 4; }
 message NotificationRecipientReply { repeated NotificationRecipient recipients = 1; int32 total = 2; bool hasMore = 3; }
 
@@ -20,6 +20,7 @@ service MediaInternalService {
 }
 
 service CourseInternalService {
+  rpc ListCourseNotificationRecipients (CourseNotificationRecipientRequest) returns (CourseNotificationRecipientReply);
   rpc CheckCourseEntitlement (CourseEntitlementRequest) returns (CourseEntitlementReply);
   rpc GetCourseProgressContext (CourseProgressContextRequest) returns (CourseProgressContextReply);
 }
@@ -40,6 +41,10 @@ message MediaAssetBindingReply {
   string status = 5;
   bool isAttached = 6;
 }
+
+message CourseNotificationRecipientRequest { string courseId = 1; int32 page = 2; int32 limit = 3; }
+message CourseNotificationRecipient { string userId = 1; string email = 2; string fullName = 3; string role = 4; }
+message CourseNotificationRecipientReply { repeated CourseNotificationRecipient recipients = 1; int32 total = 2; bool hasMore = 3; }
 
 message CourseEntitlementRequest {
   string userId = 1;

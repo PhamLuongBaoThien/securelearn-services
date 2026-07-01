@@ -119,6 +119,11 @@ class EnrollmentService {
       enrollmentId: enrollment._id.toString(),
       userId,
       courseId,
+      courseTitle: course.title,
+      instructorId: course.instructorId.toString(),
+      learnerName: learner.name || '',
+      learnerEmail: learner.email || '',
+      enrolledAt: enrollment.enrolledAt.toISOString(),
     });
 
     return enrollment;
@@ -177,7 +182,7 @@ class EnrollmentService {
       accessEndsAt,
     );
     await Course.findByIdAndUpdate(courseId, { $inc: { enrollmentCount: 1 } });
-    await publishEnrollmentCreated({ enrollmentId: enrollment._id.toString(), userId, courseId });
+    await publishEnrollmentCreated({ enrollmentId: enrollment._id.toString(), userId, courseId, courseTitle: course.title, instructorId: course.instructorId.toString(), learnerName: learner.name || '', learnerEmail: learner.email || '', enrolledAt: enrollment.enrolledAt.toISOString() });
     return enrollment;
   }
 

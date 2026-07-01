@@ -14,6 +14,8 @@ class EmailService {
         const attempt = await DeliveryAttempt.findOneAndUpdate({ deliveryKey: input.deliveryKey }, { $setOnInsert: { ...input, status: 'PENDING' } }, { new: true, upsert: true });
         if (attempt.status === 'SENT')
             return true;
+        attempt.subject = input.subject;
+        attempt.body = input.body;
         for (let i = attempt.attempts; i < 3; i++) {
             try {
                 attempt.attempts = i + 1;

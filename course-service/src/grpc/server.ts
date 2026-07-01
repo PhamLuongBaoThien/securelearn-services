@@ -3,10 +3,22 @@ import { Course, CourseProgressionMode, CourseStatus } from '../models/course.mo
 import { CourseVersion } from '../models/courseVersion.model';
 import { Lesson } from '../models/lesson.model';
 import { Section } from '../models/section.model';
+import { Enrollment, EnrollmentStatus } from '../models/enrollment.model';
 import subscriptionAccessService from '../services/subscriptionAccess.service';
 
 export const createInternalGrpcServer = () =>
   createCourseGrpcServer({
+    listCourseNotificationRecipients: async ({ courseId, page, limit }) => {
+      if (!courseId) throw createGrpcError(GrpcStatus.INVALID_ARGUMENT, 'Thiếu courseId.');
+      const safePage = Math.max(1, page || 1);
+      const safeLimit = Math.min(200, Math.max(1, limit || 100));
+      const filter = { courseId, status: EnrollmentStatus.ACTIVE };
+      const [rows, total] = await Promise.all([
+        Enrollment.find(filter).select('userId learnerEmail learnerName').sort({ _id: 1 }).skip((safePage - 1) * safeLimit).limit(safeLimit).lean(),
+        Enrollment.countDocuments(filter),
+      ]);
+      return { recipients: rows.map(row => ({ userId: row.userId, email: row.learnerEmail || '', fullName: row.learnerName || 'Học viên', role: 'STUDENT' })), total, hasMore: safePage * safeLimit < total };
+    },
     checkCourseEntitlement: async ({ userId, courseId }) => {
       const result = await subscriptionAccessService.entitlement(userId, courseId);
       return {
