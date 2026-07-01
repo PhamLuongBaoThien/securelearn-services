@@ -338,6 +338,11 @@ services:
   - name: notification-service
     url: http://notification-service:5006
     routes:
+      - name: notification-realtime
+        paths:
+          - /socket.io
+        strip_path: false
+        protocols: [http, https]
       - name: notification-preflight
         paths:
           - /api/notifications

@@ -1,63 +1,93 @@
-// ========================
-// RabbitMQ Subscriber: Nhận message từ Queue
-// ========================
-import { ConsumeMessage } from 'amqplib';
+import { ConsumeMessage, Options } from 'amqplib';
 import RabbitMQConnection from './connection';
 import { Exchange } from './constants';
 
-/**
- * Subscribe nhận event từ RabbitMQ.
- *
- * @param exchange - Tên exchange cần lắng nghe
- * @param routingKey - Routing key pattern (có thể dùng wildcard: `identity.user.*`)
- * @param queueName - Tên queue (ví dụ: 'course-service.user-registered')
- * @param handler - Callback xử lý khi nhận message
- *
- * @example
- * await subscribeMessage(
- *   Exchange.IDENTITY,
- *   RoutingKey.USER_REGISTERED,
- *   'course-service.user-registered',
- *   async (payload, routingKey) => {
- *     console.log('New user registered:', payload);
- *   }
- * );
- */
+export interface SubscribeOptions {
+  retryLimit?: number;
+  retryDelaysMs?: number[];
+  enableDeadLetter?: boolean;
+}
+
+const retryCount = (msg: ConsumeMessage) => Number(msg.properties.headers?.['x-retry-count'] || 0);
+
 export const subscribeMessage = async <T>(
   exchange: Exchange,
   routingKey: string,
   queueName: string,
-  handler: (payload: T, routingKey: string) => Promise<void>
+  handler: (payload: T, routingKey: string) => Promise<void>,
+  options: SubscribeOptions = {},
 ): Promise<void> => {
   const channel = RabbitMQConnection.getInstance().getChannel();
+  const retryLimit = Math.max(0, options.retryLimit ?? 0);
+  const retryDelays = options.retryDelaysMs?.length ? options.retryDelaysMs : [5000, 30000, 300000];
+  const retryExchange = `${exchange}.retry`;
+  const deadLetterExchange = `${exchange}.dlx`;
 
-  // Đảm bảo exchange và queue tồn tại
   await channel.assertExchange(exchange, 'topic', { durable: true });
-  const q = await channel.assertQueue(queueName, { durable: true }); // durable: true tức là queue sẽ không bị mất khi restart rabbitmq
-
-  // Bind queue với exchange theo routing key
+  const q = await channel.assertQueue(queueName, { durable: true });
   await channel.bindQueue(q.queue, exchange, routingKey);
 
-  // Chỉ xử lý 1 message tại một thời điểm (tránh quá tải)
+  if (retryLimit > 0) {
+    await channel.assertExchange(retryExchange, 'direct', { durable: true });
+    for (let attempt = 1; attempt <= retryLimit; attempt += 1) {
+      const retryQueue = `${queueName}.retry.${attempt}`;
+      const retryRoute = `${queueName}.${attempt}`;
+      await channel.assertQueue(retryQueue, {
+        durable: true,
+        arguments: {
+          'x-message-ttl': retryDelays[Math.min(attempt - 1, retryDelays.length - 1)],
+          'x-dead-letter-exchange': exchange,
+          'x-dead-letter-routing-key': routingKey,
+        },
+      });
+      await channel.bindQueue(retryQueue, retryExchange, retryRoute);
+    }
+  }
+
+  if (options.enableDeadLetter) {
+    await channel.assertExchange(deadLetterExchange, 'direct', { durable: true });
+    const dlq = await channel.assertQueue(`${queueName}.dlq`, { durable: true });
+    await channel.bindQueue(dlq.queue, deadLetterExchange, queueName);
+  }
+
   await channel.prefetch(1);
+  console.log(JSON.stringify({ level: 'info', event: 'rabbitmq.subscribed', exchange, routingKey, queueName }));
 
-  console.log(`[RabbitMQ] Subscribed: ${routingKey} -> Queue: ${queueName}`);
-
-  // Consume messages
   await channel.consume(q.queue, async (msg: ConsumeMessage | null) => {
     if (!msg) return;
-
     try {
       const content = JSON.parse(msg.content.toString());
-      await handler(content.payload as T, content.routingKey);
-
-      // Acknowledge — xác nhận đã xử lý xong, RabbitMQ xóa message
+      await handler(content.payload as T, content.routingKey || routingKey);
       channel.ack(msg);
     } catch (error) {
-      console.error(`[RabbitMQ] Lỗi xử lý message ${routingKey}:`, error);
+      const attempt = retryCount(msg);
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt < retryLimit) {
+        const nextAttempt = attempt + 1;
+        const publishOptions: Options.Publish = {
+          persistent: true,
+          contentType: msg.properties.contentType || 'application/json',
+          headers: { ...msg.properties.headers, 'x-retry-count': nextAttempt, 'x-original-routing-key': routingKey },
+        };
+        channel.publish(retryExchange, `${queueName}.${nextAttempt}`, msg.content, publishOptions);
+        channel.ack(msg);
+        console.warn(JSON.stringify({ level: 'warn', event: 'rabbitmq.retry', queueName, routingKey, attempt: nextAttempt, message }));
+        return;
+      }
 
-      // Negative acknowledge — đưa vào Dead Letter Queue (nếu có config)
+      if (options.enableDeadLetter) {
+        channel.publish(deadLetterExchange, queueName, msg.content, {
+          persistent: true,
+          contentType: msg.properties.contentType || 'application/json',
+          headers: { ...msg.properties.headers, 'x-retry-count': attempt, 'x-error-message': message.slice(0, 500) },
+        });
+        channel.ack(msg);
+        console.error(JSON.stringify({ level: 'error', event: 'rabbitmq.dead_letter', queueName, routingKey, attempt, message }));
+        return;
+      }
+
       channel.nack(msg, false, false);
+      console.error(JSON.stringify({ level: 'error', event: 'rabbitmq.discarded', queueName, routingKey, message }));
     }
   });
 };

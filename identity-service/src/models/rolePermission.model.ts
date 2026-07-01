@@ -46,7 +46,7 @@ export const ALL_PERMISSIONS = [
   'course:read', 'course:update', 'course:delete', 'course:approve',
   'user:read', 'user:lock',
   'finance:read', 'finance:manage',
-  'notif:read', 'notif:manage',
+  'notif:read', 'notif:manage', 'inbox:manage',
   'system:config', 'system:rbac',
 ] as const;
 
@@ -85,7 +85,7 @@ const SEED_DATA: SeedEntry[] = [
     roleKey: 'SUPPORT_AGENT',
     label: 'Nhân viên hỗ trợ',
     color: 'blue',
-    permissions: ['user:read'],
+    permissions: ['user:read', 'inbox:manage'],
     isSystem: false,
   },
 ];
@@ -98,8 +98,15 @@ export async function seedRolePermissions(): Promise<void> {
       { label: { $exists: false } },
       [{ $set: { label: '$roleKey', color: 'zinc', isSystem: false } }]
     );
-    // Đảm bảo SUPER_ADMIN có isSystem: true
-    await RolePermission.updateOne({ roleKey: 'SUPER_ADMIN' }, { $set: { isSystem: true } });
+    // Đảm bảo role hệ thống nhận permission mới sau migration.
+    await RolePermission.updateOne(
+      { roleKey: 'SUPER_ADMIN' },
+      { $set: { isSystem: true }, $addToSet: { permissions: 'inbox:manage' } }
+    );
+    await RolePermission.updateOne(
+      { roleKey: 'SUPPORT_AGENT' },
+      { $addToSet: { permissions: 'inbox:manage' } }
+    );
     return;
   }
   await RolePermission.insertMany(SEED_DATA);

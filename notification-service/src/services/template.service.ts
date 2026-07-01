@@ -3,7 +3,9 @@ export const VARIABLE_WHITELIST: Record<string, string[]> = {
   WELCOME: ['userName'], PAYMENT_SUCCESS: ['userName','amount','transactionId','courseName','createdAt'],
   PAYMENT_FAILED: ['userName','amount','transactionId','reason','createdAt'], COURSE_APPROVED: ['instructorName','courseName','courseUrl'],
   COURSE_REJECTED: ['instructorName','courseName','reason'], COURSE_SUBMITTED_FOR_REVIEW: ['courseName','instructorName'],
-  ENROLLMENT_CREATED: ['courseName','learnerName'], MANUAL: ['userName','userEmail'],
+  ENROLLMENT_CREATED: ['courseName','learnerName'], REPORT_CREATED: ['senderName','title','summary','createdAt'],
+  SUPPORT_REQUEST_CREATED: ['senderName','title','summary','createdAt'], FEEDBACK_CREATED: ['senderName','title','summary','createdAt'],
+  MANUAL: ['userName','userEmail'],
 };
 export const extractVariables = (text: string) => Array.from(text.matchAll(/{{\s*([A-Za-z][\w]*)\s*}}/g), match => match[1]);
 export const validateTemplate = (event: string, type: string, subject: string | undefined, body: string) => {

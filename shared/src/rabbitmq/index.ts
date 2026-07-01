@@ -34,4 +34,6 @@ export {
   type ProgressCourseCompletedPayload,
   type SubscriptionTermStatus,
   type SubscriptionTermChangedPayload,
+  type InboxEventType,
+  type InboxItemCreatedPayload,
 } from './constants';

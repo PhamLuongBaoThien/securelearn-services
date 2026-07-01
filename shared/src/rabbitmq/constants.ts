@@ -16,6 +16,7 @@ export enum Exchange {
   PAYMENT = 'payment.events',
   PROGRESS = 'progress.events',
   NOTIFICATION = 'notification.events',
+  INBOX = 'inbox.events',
 }
 
 /**
@@ -59,6 +60,11 @@ export enum RoutingKey {
 
   // --- Notification Commands ---
   NOTIFICATION_CAMPAIGN_REQUESTED = 'notification.campaign.requested',
+
+  // --- Report/Support events ---
+  REPORT_CREATED = 'inbox.report.created',
+  SUPPORT_REQUEST_CREATED = 'inbox.support.created',
+  FEEDBACK_CREATED = 'inbox.feedback.created',
 }
 // ==============================
 // Event Payloads — Interface cho dữ liệu gửi kèm mỗi event
@@ -242,4 +248,19 @@ export interface ProgressCourseCompletedPayload {
   completedLessons: number;
   totalLessons: number;
   completedAt: string;
+}
+
+export type InboxEventType = 'REPORT' | 'SUPPORT' | 'FEEDBACK';
+
+export interface InboxItemCreatedPayload {
+  resourceId: string;
+  type: InboxEventType;
+  title: string;
+  summary?: string;
+  senderId: string;
+  senderName: string;
+  senderEmail: string;
+  senderRole: string;
+  createdAt: string;
+  actionUrl?: string;
 }

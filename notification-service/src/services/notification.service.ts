@@ -8,6 +8,7 @@ import preferenceService, { type NotificationCategory, type RecipientType } from
 import emailService from './email.service';
 import { identityGrpcClient } from '../config/identityGrpc';
 import { courseGrpcClient } from '../config/courseGrpc';
+import { emitToRecipient } from './realtime.service';
 
 export type Recipient = { userId: string; email: string; fullName: string; role: string; recipientType?: RecipientType };
 export type NotificationMetadata = { category: NotificationCategory; priority?: 'NORMAL' | 'HIGH'; actionUrl?: string; actionLabel?: string; data?: Record<string, unknown> };
@@ -47,19 +48,29 @@ class NotificationService {
     if (!Types.ObjectId.isValid(id)) throw new Error('Notification không hợp lệ.');
     const item = await Notification.findOneAndUpdate({ _id: id, ...this.recipientFilter(recipientType, userId) }, { $set: { readAt: new Date() } }, { new: true });
     if (!item) throw new Error('Notification không tồn tại.');
+    emitToRecipient(recipientType, userId, 'notification:read', item.toObject());
+    emitToRecipient(recipientType, userId, 'notification:unread-count', { count: await this.unreadCount(recipientType, userId) });
     return item;
   }
   async markAllRead(recipientType: RecipientType, userId: string) {
-    const result = await Notification.updateMany({ ...this.recipientFilter(recipientType, userId), readAt: null }, { $set: { readAt: new Date() } });
+    const readAt = new Date();
+    const result = await Notification.updateMany({ ...this.recipientFilter(recipientType, userId), readAt: null }, { $set: { readAt } });
+    emitToRecipient(recipientType, userId, 'notification:read-all', { readAt: readAt.toISOString(), updated: result.modifiedCount });
+    emitToRecipient(recipientType, userId, 'notification:unread-count', { count: 0 });
     return { updated: result.modifiedCount };
   }
   async createInApp(recipient: Recipient, event: string, title: string, body: string, sourceKey: string, metadata: NotificationMetadata) {
     const recipientType = recipient.recipientType || 'USER';
-    return Notification.findOneAndUpdate(
-      { recipientType, userId: recipient.userId, sourceKey },
-      { $setOnInsert: { recipientType, userId: recipient.userId, type: event, title, body, sourceKey, category: metadata.category, priority: metadata.priority || 'NORMAL', actionUrl: metadata.actionUrl || '', actionLabel: metadata.actionLabel || '', data: metadata.data || {} } },
-      { new: true, upsert: true },
-    );
+    try {
+      const item = await Notification.create({ recipientType, userId: recipient.userId, type: event, title, body, sourceKey, category: metadata.category, priority: metadata.priority || 'NORMAL', actionUrl: metadata.actionUrl || '', actionLabel: metadata.actionLabel || '', data: metadata.data || {} });
+      emitToRecipient(recipientType, recipient.userId, 'notification:new', item.toObject());
+      emitToRecipient(recipientType, recipient.userId, 'notification:unread-count', { count: await this.unreadCount(recipientType, recipient.userId) });
+      console.log(JSON.stringify({ level: 'info', event: 'notification.created', sourceKey, recipientType, userId: recipient.userId }));
+      return item;
+    } catch (error: any) {
+      if (error?.code === 11000) return Notification.findOne({ recipientType, userId: recipient.userId, sourceKey });
+      throw error;
+    }
   }
   async getRecipients(request: Record<string, unknown>): Promise<Recipient[]> {
     const recipientType = String(request.recipientType || 'USER') as RecipientType;
@@ -93,7 +104,7 @@ class NotificationService {
       const title = renderTemplate(String(template.subject || template.name), values);
       const body = renderTemplate(String(template.body), values);
       if (type === 'IN_APP') await this.createInApp(recipient, event, title, body, sourceKey, metadata);
-      else if (recipient.email) await emailService.send({ deliveryKey: `${sourceKey}:EMAIL:${recipientType}:${recipient.userId}`, userId: recipient.userId, email: recipient.email, subject: title, body });
+      else if (recipient.email) await emailService.enqueue({ deliveryKey: `${sourceKey}:EMAIL:${recipientType}:${recipient.userId}`, userId: recipient.userId, email: recipient.email, subject: title, body });
     }
   }
   async queueCampaign(adminId: string, input: Record<string, any>) {
@@ -128,15 +139,18 @@ class NotificationService {
           const values = { userName: recipient.fullName, userEmail: recipient.email, courseId: campaign.courseId || '' };
           const title = renderTemplate(campaign.title, values); const body = renderTemplate(campaign.content, values);
           if (campaign.channels.includes('IN_APP') && await preferenceService.channelEnabled('USER', recipient.userId, 'CAMPAIGN', 'inApp')) { await this.createInApp(recipient, 'MANUAL', title, body, `campaign:${campaign.id}`, { category: 'CAMPAIGN', data: { campaignId: campaign.id } }); stats.inAppSent += 1; }
-          if (campaign.channels.includes('EMAIL') && await preferenceService.channelEnabled('USER', recipient.userId, 'CAMPAIGN', 'email')) { const sent = await emailService.send({ deliveryKey: `campaign:${campaign.id}:EMAIL:${recipient.userId}`, campaignId: campaign.id, userId: recipient.userId, email: recipient.email, subject: title, body }); sent ? stats.emailSent += 1 : stats.emailFailed += 1; }
+          if (campaign.channels.includes('EMAIL') && await preferenceService.channelEnabled('USER', recipient.userId, 'CAMPAIGN', 'email')) await emailService.enqueue({ deliveryKey: `campaign:${campaign.id}:EMAIL:${recipient.userId}`, campaignId: campaign.id, userId: recipient.userId, email: recipient.email, subject: title, body });
         }
       }
-      campaign.stats = stats; campaign.status = stats.emailFailed ? 'PARTIAL' : 'COMPLETED'; campaign.completedAt = new Date(); await campaign.save();
+      campaign.stats = stats;
+      if (!campaign.channels.includes('EMAIL')) { campaign.status = 'COMPLETED'; campaign.completedAt = new Date(); }
+      await campaign.save();
+      if (campaign.channels.includes('EMAIL')) await emailService.refreshCampaign(campaign.id);
     } catch (error) { campaign.status = 'FAILED'; campaign.completedAt = new Date(); await campaign.save(); throw error; }
   }
   async retryCampaign(id: string) {
     const campaign = await Campaign.findById(id); if (!campaign) throw new Error('Campaign không tồn tại.');
-    await DeliveryAttempt.updateMany({ campaignId: id, status: 'FAILED' }, { $set: { status: 'PENDING', attempts: 0, lastError: '' } });
+    await DeliveryAttempt.updateMany({ campaignId: id, status: 'FAILED' }, { $set: { status: 'PENDING', attempts: 0, lastError: '', nextAttemptAt: new Date() }, $unset: { completedAt: 1 } });
     campaign.status = 'PROCESSING'; campaign.processingStartedAt = null; campaign.completedAt = undefined; await campaign.save();
     await publishMessage<NotificationCampaignRequestedPayload>(Exchange.NOTIFICATION, RoutingKey.NOTIFICATION_CAMPAIGN_REQUESTED, { campaignId: id });
     return campaign;
