@@ -108,7 +108,7 @@ class NotificationService {
     }
   }
   async queueCampaign(adminId: string, input: Record<string, any>) {
-    const audiences = ['ALL_LEARNERS', 'ALL_INSTRUCTORS', 'ALL_USERS', 'SPECIFIC_USER', 'COURSE_STUDENTS'];
+    const audiences = ['ALL_LEARNERS', 'ALL_INSTRUCTORS', 'ALL_ADMINS', 'ALL_USERS', 'SPECIFIC_USER', 'COURSE_STUDENTS'];
     const channels: string[] = (input.channels || []).filter((value: string) => ['EMAIL', 'IN_APP'].includes(value));
     if (!audiences.includes(input.audience)) throw new Error('Đối tượng nhận không hợp lệ.');
     if (input.audience === 'SPECIFIC_USER' && !input.specificEmail?.trim()) throw new Error('Email người nhận là bắt buộc.');
@@ -132,14 +132,27 @@ class NotificationService {
     try {
       const recipients = campaign.audience === 'COURSE_STUDENTS'
         ? await this.getCourseRecipients(campaign.courseId)
-        : await this.getRecipients({ audience: campaign.audience, email: campaign.specificEmail || '', recipientType: 'USER' });
+        : campaign.audience === 'ALL_ADMINS'
+          ? await this.getRecipients({ audience: campaign.audience, recipientType: 'ADMIN' })
+          : campaign.audience === 'ALL_USERS'
+            ? [
+                ...await this.getRecipients({ audience: campaign.audience, recipientType: 'USER' }),
+                ...await this.getRecipients({ audience: campaign.audience, recipientType: 'ADMIN' }),
+              ]
+            : await this.getRecipients({ audience: campaign.audience, email: campaign.specificEmail || '', recipientType: 'USER' });
       const stats = { requested: recipients.length, inAppSent: 0, emailSent: 0, emailFailed: 0 };
       for (let offset = 0; offset < recipients.length; offset += 50) {
         for (const recipient of recipients.slice(offset, offset + 50)) {
           const values = { userName: recipient.fullName, userEmail: recipient.email, courseId: campaign.courseId || '' };
           const title = renderTemplate(campaign.title, values); const body = renderTemplate(campaign.content, values);
-          if (campaign.channels.includes('IN_APP') && await preferenceService.channelEnabled('USER', recipient.userId, 'CAMPAIGN', 'inApp')) { await this.createInApp(recipient, 'MANUAL', title, body, `campaign:${campaign.id}`, { category: 'CAMPAIGN', data: { campaignId: campaign.id } }); stats.inAppSent += 1; }
-          if (campaign.channels.includes('EMAIL') && await preferenceService.channelEnabled('USER', recipient.userId, 'CAMPAIGN', 'email')) await emailService.enqueue({ deliveryKey: `campaign:${campaign.id}:EMAIL:${recipient.userId}`, campaignId: campaign.id, userId: recipient.userId, email: recipient.email, subject: title, body });
+          const recipientType = recipient.recipientType || 'USER';
+          if (campaign.channels.includes('IN_APP') && await preferenceService.channelEnabled(recipientType, recipient.userId, 'CAMPAIGN', 'inApp')) {
+            await this.createInApp(recipient, 'MANUAL', title, body, `campaign:${campaign.id}`, { category: 'CAMPAIGN', data: { campaignId: campaign.id } });
+            stats.inAppSent += 1;
+          }
+          if (campaign.channels.includes('EMAIL') && await preferenceService.channelEnabled(recipientType, recipient.userId, 'CAMPAIGN', 'email')) {
+            await emailService.enqueue({ deliveryKey: `campaign:${campaign.id}:EMAIL:${recipientType}:${recipient.userId}`, campaignId: campaign.id, userId: recipient.userId, email: recipient.email, subject: title, body });
+          }
         }
       }
       campaign.stats = stats;
