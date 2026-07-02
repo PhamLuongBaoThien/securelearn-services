@@ -10,13 +10,13 @@
  * Mỗi domain có 1 exchange riêng. Dùng Topic Exchange.
  */
 export enum Exchange {
-  IDENTITY = 'identity.events',
-  COURSE = 'course.events',
-  MEDIA = 'media.events',
-  PAYMENT = 'payment.events',
-  PROGRESS = 'progress.events',
-  NOTIFICATION = 'notification.events',
-  INBOX = 'inbox.events',
+  IDENTITY = "identity.events",
+  COURSE = "course.events",
+  MEDIA = "media.events",
+  PAYMENT = "payment.events",
+  PROGRESS = "progress.events",
+  NOTIFICATION = "notification.events",
+  INBOX = "inbox.events",
 }
 
 /**
@@ -25,50 +25,49 @@ export enum Exchange {
  */
 export enum RoutingKey {
   // --- Identity Events ---
-  USER_REGISTERED = 'identity.user.registered',
-  USER_UPDATED = 'identity.user.updated',
-  USER_DELETED = 'identity.user.deleted',
+  USER_REGISTERED = "identity.user.registered",
+  USER_UPDATED = "identity.user.updated",
+  USER_DELETED = "identity.user.deleted",
 
   // --- Course Events (chuẩn bị cho course-service) ---
-  COURSE_CREATED = 'course.course.created',
-  COURSE_UPDATED = 'course.course.updated',
-  COURSE_PUBLISHED = 'course.course.published',
-  COURSE_VERSION_PUBLISHED = 'course.version.published',
-  COURSE_REJECTED = 'course.course.rejected',
-  COURSE_SUBMITTED_FOR_REVIEW = 'course.course.submitted-for-review',
-  ENROLLMENT_CREATED = 'course.enrollment.created',
+  COURSE_CREATED = "course.course.created",
+  COURSE_UPDATED = "course.course.updated",
+  COURSE_PUBLISHED = "course.course.published",
+  COURSE_VERSION_PUBLISHED = "course.version.published",
+  COURSE_REJECTED = "course.course.rejected",
+  COURSE_SUBMITTED_FOR_REVIEW = "course.course.submitted-for-review",
+  ENROLLMENT_CREATED = "course.enrollment.created",
 
   // --- Media Events ---
-  VIDEO_ASSET_READY = 'media.video.ready',
-  VIDEO_ASSET_FAILED = 'media.video.failed',
-  VIDEO_ASSET_ATTACHED = 'media.video.attached',
-  DOCUMENT_ASSET_ATTACHED = 'media.document.attached',
+  VIDEO_ASSET_READY = "media.video.ready",
+  VIDEO_ASSET_FAILED = "media.video.failed",
+  VIDEO_ASSET_ATTACHED = "media.video.attached",
+  DOCUMENT_ASSET_ATTACHED = "media.document.attached",
 
   // --- Payment Events ---
-  PAYMENT_COURSE_SUCCEEDED = 'payment.course.succeeded',
-  PAYMENT_COURSE_FAILED = 'payment.course.failed',
+  PAYMENT_COURSE_SUCCEEDED = "payment.course.succeeded",
+  PAYMENT_COURSE_FAILED = "payment.course.failed",
   // Term thuê bao đổi trạng thái sẽ được fan-out sang course/identity để đồng bộ quyền học và projection UI.
-  SUBSCRIPTION_TERM_CHANGED = 'payment.subscription.term-changed',
+  SUBSCRIPTION_TERM_CHANGED = "payment.subscription.term-changed",
 
   // --- Asset Cleanup Events (course-service → media-service) ---
-  VIDEO_ASSET_CLEANUP = 'media.video.cleanup',
-  DOCUMENT_ASSET_CLEANUP = 'media.document.cleanup',
+  VIDEO_ASSET_CLEANUP = "media.video.cleanup",
+  DOCUMENT_ASSET_CLEANUP = "media.document.cleanup",
 
   // --- Progress Events ---
-  PROGRESS_LESSON_COMPLETED = 'progress.lesson.completed',
-  PROGRESS_COURSE_COMPLETED = 'progress.course.completed',
+  PROGRESS_LESSON_COMPLETED = "progress.lesson.completed",
+  PROGRESS_COURSE_COMPLETED = "progress.course.completed",
 
   // --- Notification Commands ---
-  NOTIFICATION_CAMPAIGN_REQUESTED = 'notification.campaign.requested',
+  NOTIFICATION_CAMPAIGN_REQUESTED = "notification.campaign.requested",
 
   // --- Report/Support events ---
-  REPORT_CREATED = 'inbox.report.created',
-  SUPPORT_REQUEST_CREATED = 'inbox.support.created',
-  FEEDBACK_CREATED = 'inbox.feedback.created',
-  INBOX_USER_REPLIED = 'inbox.user.replied',
-  INBOX_ADMIN_REPLIED = 'inbox.admin.replied',
-  INBOX_STATUS_CHANGED = 'inbox.status.changed',
-  INBOX_ASSIGNED = 'inbox.assigned',
+  REPORT_CREATED = "inbox.report.created",
+  SUPPORT_REQUEST_CREATED = "inbox.support.created",
+  FEEDBACK_CREATED = "inbox.feedback.created",
+  INBOX_USER_REPLIED = "inbox.user.replied",
+  INBOX_ADMIN_REPLIED = "inbox.admin.replied",
+  INBOX_STATUS_CHANGED = "inbox.status.changed",
 }
 // ==============================
 // Event Payloads — Interface cho dữ liệu gửi kèm mỗi event
@@ -107,10 +106,21 @@ export interface CourseCreatedPayload {
 
 /** Payload khi học viên đăng ký khóa học */
 export interface CoursePublishedPayload {
-  courseId: string; versionId?: string; title: string; slug?: string; instructorId: string; finalCategoryId?: string; publishedAt: string;
+  courseId: string;
+  versionId?: string;
+  title: string;
+  slug?: string;
+  instructorId: string;
+  finalCategoryId?: string;
+  publishedAt: string;
 }
 export interface CourseRejectedPayload {
-  courseId: string; versionId: string; title: string; instructorId: string; reason: string; rejectedAt: string;
+  courseId: string;
+  versionId: string;
+  title: string;
+  instructorId: string;
+  reason: string;
+  rejectedAt: string;
 }
 
 export interface EnrollmentCreatedPayload {
@@ -123,7 +133,6 @@ export interface EnrollmentCreatedPayload {
   learnerEmail: string;
   enrolledAt: string;
 }
-
 
 export interface CourseSubmittedForReviewPayload {
   courseId: string;
@@ -141,7 +150,7 @@ export interface NotificationCampaignRequestedPayload {
 export interface CourseVersionPublishedLessonMapping {
   oldLessonId: string;
   newLessonId: string;
-  lessonType: 'VIDEO' | 'QUIZ';
+  lessonType: "VIDEO" | "QUIZ";
 }
 
 export interface CourseVersionPublishedPayload {
@@ -156,7 +165,7 @@ export interface CourseVersionPublishedPayload {
 export interface VideoAssetStatusPayload {
   videoAssetId: string;
   lessonId: string;
-  status: 'READY' | 'FAILED';
+  status: "READY" | "FAILED";
   duration?: number;
   manifestKey?: string;
   errorMessage?: string;
@@ -176,9 +185,9 @@ export interface AssetAttachedPayload {
   lessonId: string;
 }
 
-export type PaymentProvider = 'VNPAY' | 'MOMO';
-export type PaymentMethod = 'VNPAY' | 'MOMO';
-export type PaymentStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'REFUNDED';
+export type PaymentProvider = "VNPAY" | "MOMO";
+export type PaymentMethod = "VNPAY" | "MOMO";
+export type PaymentStatus = "PENDING" | "SUCCEEDED" | "FAILED" | "REFUNDED";
 
 export interface PaymentCourseItemPayload {
   courseId: string;
@@ -219,13 +228,18 @@ export interface PaymentCourseFailedPayload {
   failedAt: string;
 }
 
-export type SubscriptionTermStatus = 'SCHEDULED' | 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'REFUNDED';
+export type SubscriptionTermStatus =
+  | "SCHEDULED"
+  | "ACTIVE"
+  | "EXPIRED"
+  | "CANCELLED"
+  | "REFUNDED";
 
 export interface SubscriptionTermChangedPayload {
   termId: string;
   userId: string;
   planId: string;
-  planType: 'MONTHLY' | 'YEARLY';
+  planType: "MONTHLY" | "YEARLY";
   status: SubscriptionTermStatus;
   startsAt: string;
   endsAt: string;
@@ -237,7 +251,7 @@ export interface ProgressLessonCompletedPayload {
   courseId: string;
   courseVersionId: string;
   lessonId: string;
-  lessonType: 'VIDEO' | 'QUIZ';
+  lessonType: "VIDEO" | "QUIZ";
   completedAt: string;
   watchPercent?: number;
   quizAttemptId?: string;
@@ -254,7 +268,7 @@ export interface ProgressCourseCompletedPayload {
   completedAt: string;
 }
 
-export type InboxEventType = 'REPORT' | 'SUPPORT' | 'FEEDBACK';
+export type InboxEventType = "REPORT" | "SUPPORT" | "FEEDBACK";
 
 export interface InboxItemCreatedPayload {
   resourceId: string;
@@ -269,7 +283,18 @@ export interface InboxItemCreatedPayload {
   actionUrl?: string;
 }
 export interface InboxTicketEventPayload {
-  eventId: string; ticketId: string; type: InboxEventType; title: string; summary?: string;
-  senderId: string; senderName: string; senderEmail: string; senderRole: string; assignedAdminId?: string;
-  actorId: string; actorType: 'USER' | 'ADMIN'; status?: string; occurredAt: string; actionUrl: string;
+  eventId: string;
+  ticketId: string;
+  type: InboxEventType;
+  title: string;
+  summary?: string;
+  senderId: string;
+  senderName: string;
+  senderEmail: string;
+  senderRole: string;
+  actorId: string;
+  actorType: "USER" | "ADMIN";
+  status?: string;
+  occurredAt: string;
+  actionUrl: string;
 }
