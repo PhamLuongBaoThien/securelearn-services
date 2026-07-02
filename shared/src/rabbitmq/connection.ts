@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // RabbitMQ Connection: Singleton quản lý kết nối
 // Tất cả publisher/subscriber đều dùng chung connection này
 // ========================
@@ -13,6 +13,8 @@ class RabbitMQConnection {
   private channel: Channel | null = null;
   private isConnecting = false;
   private url: string = '';
+  private closing = false;
+  private connectedListeners = new Set<() => void | Promise<void>>();
 
   private constructor() {}
 
@@ -33,6 +35,7 @@ class RabbitMQConnection {
     if (this.isConnecting) return;
 
     this.isConnecting = true;
+    this.closing = false;
     this.url = url;
 
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -49,14 +52,18 @@ class RabbitMQConnection {
         });
 
         this.connection.on('close', () => {
-          console.warn('[RabbitMQ] Connection closed. Sẽ reconnect...');
+          console.warn('[RabbitMQ] Connection closed.');
           this.connection = null;
           this.channel = null;
-          setTimeout(() => this.connect(this.url), 5000);
+          if (!this.closing) {
+            console.warn('[RabbitMQ] Sẽ reconnect...');
+            setTimeout(() => void this.connect(this.url), 5000);
+          }
         });
 
         console.log('[RabbitMQ] Kết nối thành công!');
         this.isConnecting = false;
+        for (const listener of this.connectedListeners) await listener();
         return;
       } catch (error: any) {
         console.error(`[RabbitMQ] Kết nối thất bại (lần ${attempt}): ${error.message}`);
@@ -85,8 +92,15 @@ class RabbitMQConnection {
   }
 
   /** Đóng kết nối sạch sẽ (dùng khi shutdown gracefully) */
+  /** Đăng ký bootstrap cần chạy lại sau mỗi lần tạo channel mới (ví dụ consumer). */
+  onConnected(listener: () => void | Promise<void>): () => void {
+    this.connectedListeners.add(listener);
+    return () => this.connectedListeners.delete(listener);
+  }
+
   async close(): Promise<void> {
     try {
+      this.closing = true;
       await this.channel?.close();
       await this.connection?.close();
       this.channel = null;
@@ -103,3 +117,4 @@ class RabbitMQConnection {
 }
 
 export default RabbitMQConnection;
+

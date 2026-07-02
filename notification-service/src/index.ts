@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+﻿import dotenv from "dotenv";
 dotenv.config();
 import { createServer } from "http";
 import app from "./app";
@@ -19,6 +19,29 @@ import {
 
 const PORT = process.env.PORT || 5006;
 const server = createServer(app);
+const rabbit = RabbitMQConnection.getInstance();
+let shuttingDown = false;
+let rabbitRetryTimer: NodeJS.Timeout | null = null;
+let removeRabbitConnectedListener: (() => void) | null = null;
+
+const connectRabbit = async () => {
+  try {
+    await rabbit.connect(
+      process.env.RABBITMQ_URL || "amqp://guest:guest@localhost:5672",
+    );
+  } catch (error) {
+    console.error(
+      "[NotificationEvent] RabbitMQ chưa sẵn sàng, sẽ thử lại:",
+      error,
+    );
+    if (!shuttingDown && !rabbitRetryTimer) {
+      rabbitRetryTimer = setTimeout(() => {
+        rabbitRetryTimer = null;
+        void connectRabbit();
+      }, 5000);
+    }
+  }
+};
 
 const boot = async () => {
   await connectDB();
@@ -66,14 +89,11 @@ const boot = async () => {
   ).NotificationTemplate.deleteMany({ event: "INBOX_ASSIGNED" });
 
   if (redisClient.status === "wait") await redisClient.connect();
-  try {
-    await RabbitMQConnection.getInstance().connect(
-      process.env.RABBITMQ_URL || "amqp://guest:guest@localhost:5672",
-    );
+  removeRabbitConnectedListener = rabbit.onConnected(async () => {
     await registerEventHandlers();
-  } catch (error) {
-    console.error("[NotificationEvent] RabbitMQ chưa sẵn sàng:", error);
-  }
+    console.log("[NotificationEvent] Đã đăng ký lại các consumer.");
+  });
+  await connectRabbit();
 
   try {
     await initializeRealtime(server);
@@ -90,17 +110,20 @@ const boot = async () => {
   );
 };
 
-let shuttingDown = false;
 const shutdown = async () => {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (rabbitRetryTimer) clearTimeout(rabbitRetryTimer);
+  rabbitRetryTimer = null;
+  removeRabbitConnectedListener?.();
+  removeRabbitConnectedListener = null;
   emailService.stopWorker();
   await shutdownRealtime();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   if (redisClient.status === "ready") await redisClient.quit();
   identityGrpcClient.close();
   courseGrpcClient.close();
-  await RabbitMQConnection.getInstance().close();
+  await rabbit.close();
   process.exit(0);
 };
 process.on("SIGINT", () => void shutdown());
@@ -109,3 +132,4 @@ boot().catch((error) => {
   console.error("Khởi động notification service thất bại:", error);
   process.exit(1);
 });
+

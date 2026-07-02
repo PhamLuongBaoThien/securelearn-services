@@ -66,6 +66,20 @@ export const controller = {
       fail(res, e);
     }
   },
+  unreadCount: async (req: AuthRequest, res: Response) => {
+    try {
+      ok(res, { count: await ticketService.unreadCount(actor(req)) });
+    } catch (e) {
+      fail(res, e);
+    }
+  },
+  read: async (req: AuthRequest, res: Response) => {
+    try {
+      ok(res, await ticketService.markRead(actor(req), String(req.params.id)));
+    } catch (e) {
+      fail(res, e);
+    }
+  },
   status: async (req: AuthRequest, res: Response) => {
     try {
       ok(

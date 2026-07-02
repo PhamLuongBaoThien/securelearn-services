@@ -5,6 +5,8 @@ import { Ticket, TICKET_TYPES, TICKET_STATUSES } from "../models/ticket.model";
 import { TicketMessage } from "../models/ticketMessage.model";
 import { TicketActivity } from "../models/ticketActivity.model";
 import { TicketAttachment } from "../models/ticketAttachment.model";
+import { TicketReadState } from "../models/ticketReadState.model";
+import { emitMessageNew, emitRead, emitTicketNew, emitTicketUpdated, emitUnreadInvalidated } from "./realtime.service";
 import { identityGrpcClient, courseGrpcClient } from "../config/grpc";
 import { enqueueEvent } from "./outbox.service";
 import { storeFile, getFile } from "./storage.service";
@@ -21,6 +23,29 @@ const eventKey: Record<string, RoutingKey> = {
   FEEDBACK: RoutingKey.FEEDBACK_CREATED,
 };
 class TicketService {
+  private async shouldSuppressInitialAttachmentReplyNotification(
+    actor: Actor,
+    ticket: any,
+    id: string,
+    attachmentIds: string[],
+    silentNotification: boolean,
+  ) {
+    if (actor.type !== "USER" || !attachmentIds.length || !silentNotification)
+      return false;
+    const publicMessages = await TicketMessage.find({
+      ticketId: id,
+      internal: false,
+    })
+      .sort({ createdAt: 1 })
+      .limit(2)
+      .select("author content")
+      .lean();
+    return (
+      publicMessages.length === 1 &&
+      publicMessages[0]?.author?.type === "USER" &&
+      publicMessages[0]?.content === ticket.description
+    );
+  }
   private async snapshot(actor: Actor) {
     const row = await identityGrpcClient.getIdentitySnapshot({
       identityId: actor.id,
@@ -111,7 +136,7 @@ class TicketService {
       target,
       status: "OPEN",
     });
-    await TicketMessage.create({
+    const message = await TicketMessage.create({
       ticketId: ticket._id,
       author: {
         id: sender.id,
@@ -127,6 +152,9 @@ class TicketService {
       action: "CREATED",
     });
     await enqueueEvent(eventKey[ticket.type], this.eventPayload(ticket, actor));
+    await TicketReadState.create({ ticketId: ticket._id, identityType: "USER", identityId: actor.id, lastReadMessageId: message._id, lastReadAt: new Date() });
+    emitTicketNew(ticket.toObject());
+    emitUnreadInvalidated("ADMIN");
     return ticket;
   }
   async list(actor: Actor, q: any) {
@@ -154,7 +182,10 @@ class TicketService {
         .lean(),
       Ticket.countDocuments(f),
     ]);
-    return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
+    const states = await TicketReadState.find({ ticketId: { $in: items.map((item: any) => item._id) }, identityType: actor.type, identityId: actor.id }).lean();
+    const readByTicket = new Map(states.map((state: any) => [String(state.ticketId), state.lastReadAt]));
+    const mapped = items.map((item: any) => ({ ...item, unread: new Date(actor.type === "ADMIN" ? item.lastMessageAt : item.lastPublicMessageAt).getTime() > new Date(readByTicket.get(String(item._id)) || 0).getTime() }));
+    return { items: mapped, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
   async detail(actor: Actor, id: string, query: any = {}) {
     if (!Types.ObjectId.isValid(id)) throw new Error("Ticket không hợp lệ.");
@@ -205,12 +236,6 @@ class TicketService {
           .select("-objectKey")
           .lean()
       : [];
-    await Ticket.updateOne(
-      { _id: id },
-      {
-        $set: { [actor.type === "USER" ? "userUnread" : "adminUnread"]: false },
-      },
-    );
     return {
       ...ticket,
       messages: {
@@ -238,8 +263,8 @@ class TicketService {
     if (!ticket) throw new Error("Ticket không tồn tại.");
     if (ticket.status === "CLOSED") throw new Error("Ticket đã đóng.");
     const content = String(input.content || "").trim();
-    const attachmentIds = Array.isArray(input.attachmentIds)
-      ? [...new Set(input.attachmentIds.map(String))]
+    const attachmentIds: string[] = Array.isArray(input.attachmentIds)
+      ? Array.from(new Set((input.attachmentIds as unknown[]).map((value) => String(value))))
       : [];
     if (attachmentIds.length > 5)
       throw new Error("Mỗi phản hồi chỉ được tối đa 5 tệp.");
@@ -257,6 +282,14 @@ class TicketService {
     }
     if (!content && !attachmentIds.length)
       throw new Error("Nội dung hoặc tệp đính kèm là bắt buộc.");
+    const suppressInitialAttachmentReplyNotification =
+      await this.shouldSuppressInitialAttachmentReplyNotification(
+        actor,
+        ticket,
+        id,
+        attachmentIds,
+        Boolean(input.silentNotification),
+      );
     const identity = await this.snapshot(actor);
     const internal = actor.type === "ADMIN" && Boolean(input.internal);
     const message = await TicketMessage.create({
@@ -284,8 +317,8 @@ class TicketService {
     const old = ticket.status;
     if (actor.type === "USER" && old === "RESOLVED") ticket.status = "OPEN";
     ticket.lastActivityAt = new Date();
-    if (!internal)
-      ticket[actor.type === "USER" ? "adminUnread" : "userUnread"] = true;
+    ticket.lastMessageAt = ticket.lastActivityAt;
+    if (!internal) ticket.lastPublicMessageAt = ticket.lastActivityAt;
     await ticket.save();
     await TicketActivity.create({
       ticketId: id,
@@ -294,13 +327,17 @@ class TicketService {
       fromValue: old,
       toValue: ticket.status,
     });
-    if (!internal)
+    if (!internal && !suppressInitialAttachmentReplyNotification)
       await enqueueEvent(
         actor.type === "USER"
           ? RoutingKey.INBOX_USER_REPLIED
           : RoutingKey.INBOX_ADMIN_REPLIED,
         this.eventPayload(ticket, actor, { summary: content.slice(0, 240) }),
       );
+    const safeAttachments = attachmentIds.length ? await TicketAttachment.find({ _id: { $in: attachmentIds } }).select("-objectKey").lean() : [];
+    emitMessageNew(id, { ticketId: id, message: message.toObject(), attachments: safeAttachments }, ticket.sender.id, !internal);
+    if (!internal && !suppressInitialAttachmentReplyNotification) emitUnreadInvalidated(actor.type === "USER" ? "ADMIN" : "USER", ticket.sender.id);
+    emitRead(id, actor.type, actor.id, await this.unreadCount(actor));
     return message;
   }
   async status(actor: Actor, id: string, status: string) {
@@ -311,7 +348,7 @@ class TicketService {
     const old = ticket.status;
     ticket.status = status;
     ticket.lastActivityAt = new Date();
-    ticket.userUnread = true;
+    ticket.lastPublicMessageAt = ticket.lastActivityAt;
     await ticket.save();
     await TicketActivity.create({
       ticketId: id,
@@ -320,13 +357,27 @@ class TicketService {
       fromValue: old,
       toValue: status,
     });
-    await enqueueEvent(
-      RoutingKey.INBOX_STATUS_CHANGED,
-      this.eventPayload(ticket, actor),
-    );
+    await enqueueEvent(RoutingKey.INBOX_STATUS_CHANGED, this.eventPayload(ticket, actor));
+    emitTicketUpdated(id, ticket.toObject(), ticket.sender.id);
+    emitUnreadInvalidated("USER", ticket.sender.id);
     return ticket;
   }
-  async upload(actor: Actor, id: string, files: Express.Multer.File[]) {
+  async unreadCount(actor: Actor) {
+    const filter: any = actor.type === "USER" ? { "sender.id": actor.id } : {};
+    const tickets: any[] = await Ticket.find(filter).select("_id lastMessageAt lastPublicMessageAt").lean();
+    const states: any[] = await TicketReadState.find({ ticketId: { $in: tickets.map(t => t._id) }, identityType: actor.type, identityId: actor.id }).lean();
+    const read = new Map(states.map(s => [String(s.ticketId), new Date(s.lastReadAt).getTime()]));
+    return tickets.filter(t => new Date(actor.type === "ADMIN" ? t.lastMessageAt : t.lastPublicMessageAt).getTime() > (read.get(String(t._id)) || 0)).length;
+  }
+  async markRead(actor: Actor, id: string) {
+    const ticket: any = await Ticket.findOne({ _id: id, ...(actor.type === "USER" ? { "sender.id": actor.id } : {}) });
+    if (!ticket) throw new Error("Ticket không tồn tại.");
+    const message: any = await TicketMessage.findOne({ ticketId: id, ...(actor.type === "USER" ? { internal: false } : {}) }).sort({ createdAt: -1 }).select("_id").lean();
+    await TicketReadState.updateOne({ ticketId: id, identityType: actor.type, identityId: actor.id }, { $set: { lastReadMessageId: message?._id || null, lastReadAt: new Date() } }, { upsert: true });
+    const count = await this.unreadCount(actor);
+    emitRead(id, actor.type, actor.id, count);
+    return { unreadCount: count };
+  }  async upload(actor: Actor, id: string, files: Express.Multer.File[]) {
     const ticket = await Ticket.findOne({
       _id: id,
       ...(actor.type === "USER" ? { "sender.id": actor.id } : {}),
@@ -366,3 +417,9 @@ class TicketService {
   }
 }
 export default new TicketService();
+
+
+
+
+
+

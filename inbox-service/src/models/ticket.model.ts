@@ -36,8 +36,8 @@ const ticketSchema = new Schema(
       index: true,
     },
     lastActivityAt: { type: Date, default: Date.now, index: true },
-    userUnread: { type: Boolean, default: false },
-    adminUnread: { type: Boolean, default: true },
+    lastMessageAt: { type: Date, default: Date.now, index: true },
+    lastPublicMessageAt: { type: Date, default: Date.now, index: true },
   },
   { timestamps: true },
 );
