@@ -8,6 +8,7 @@ const schema = new Schema({
     PAYMENT: { type: channelSchema, default: () => ({}) },
     COURSE: { type: channelSchema, default: () => ({}) },
     LEARNING: { type: channelSchema, default: () => ({}) },
+    INBOX: { type: channelSchema, default: () => ({}) },
     CAMPAIGN: { type: channelSchema, default: () => ({}) },
   },
 }, { timestamps: true });

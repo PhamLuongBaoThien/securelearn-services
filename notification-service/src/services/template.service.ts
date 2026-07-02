@@ -28,7 +28,7 @@ class TemplateService {
   async channelCapabilities() {
     const rows = await NotificationTemplate.find({ isActive: true }).select('event type').lean();
     const active = new Set(rows.map(row => String(row.event) + ':' + String(row.type)));
-    const groups: Record<string, string[]> = { SYSTEM: ['WELCOME'], PAYMENT: ['PAYMENT_SUCCESS','PAYMENT_FAILED'], COURSE: ['COURSE_APPROVED','COURSE_REJECTED','COURSE_SUBMITTED_FOR_REVIEW'], LEARNING: ['ENROLLMENT_CREATED'] };
+    const groups: Record<string, string[]> = { SYSTEM: ['WELCOME'], PAYMENT: ['PAYMENT_SUCCESS','PAYMENT_FAILED'], COURSE: ['COURSE_APPROVED','COURSE_REJECTED','COURSE_SUBMITTED_FOR_REVIEW'], LEARNING: ['ENROLLMENT_CREATED'], INBOX: ['REPORT_CREATED','SUPPORT_REQUEST_CREATED','FEEDBACK_CREATED','INBOX_USER_REPLIED','INBOX_ADMIN_REPLIED','INBOX_STATUS_CHANGED'] };
     const result: Record<string, unknown> = {};
     for (const [category, events] of Object.entries(groups)) result[category] = { email: events.every(event => active.has(event + ':EMAIL')), emailAvailable: events.some(event => active.has(event + ':EMAIL')), inApp: events.every(event => active.has(event + ':IN_APP')), inAppAvailable: events.some(event => active.has(event + ':IN_APP')), missingEmailEvents: events.filter(event => !active.has(event + ':EMAIL')), missingInAppEvents: events.filter(event => !active.has(event + ':IN_APP')) };
     result.CAMPAIGN = { email: true, emailAvailable: true, inApp: true, inAppAvailable: true, missingEmailEvents: [], missingInAppEvents: [] };

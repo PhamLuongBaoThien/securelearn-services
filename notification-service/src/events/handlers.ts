@@ -30,7 +30,7 @@ const handleInboxEvent = async (event: 'REPORT_CREATED' | 'SUPPORT_REQUEST_CREAT
     admin,
     { senderName: payload.senderName, title: payload.title, summary: payload.summary || '', createdAt: payload.createdAt },
     `event:${event}:${payload.resourceId}`,
-    { category: 'SYSTEM', priority: 'HIGH', actionUrl, actionLabel: 'Xem chi tiết', data: { resourceId: payload.resourceId, inboxType: payload.type }, channels: ['IN_APP'] },
+    { category: 'INBOX', priority: 'HIGH', actionUrl, actionLabel: 'Xem chi tiết', data: { resourceId: payload.resourceId, inboxType: payload.type }, channels: ['IN_APP'] },
   )));
 };
 
@@ -43,7 +43,7 @@ const handleTicketEvent = async (event: 'INBOX_USER_REPLIED' | 'INBOX_ADMIN_REPL
       recipient,
       values,
       `event:${event}:${payload.eventId}`,
-      { category: 'SYSTEM', priority: 'HIGH', actionUrl: `/admin/notifications/inbox?id=${payload.ticketId}`, actionLabel: 'Mở ticket', channels: ['IN_APP', 'EMAIL'] },
+      { category: 'INBOX', priority: 'HIGH', actionUrl: `/admin/notifications/inbox?id=${payload.ticketId}`, actionLabel: 'Mở ticket', channels: ['IN_APP', 'EMAIL'] },
     )));
     return;
   }
@@ -60,7 +60,7 @@ const handleTicketEvent = async (event: 'INBOX_USER_REPLIED' | 'INBOX_ADMIN_REPL
     recipient,
     values,
     `event:${event}:${payload.eventId}`,
-    { category: 'SYSTEM', priority: 'HIGH', actionUrl: `/support/tickets/${payload.ticketId}`, actionLabel: 'Xem phản hồi', channels },
+    { category: 'INBOX', priority: 'HIGH', actionUrl: `/support/tickets/${payload.ticketId}`, actionLabel: 'Xem phản hồi', channels },
   );
 };
 export const registerEventHandlers = async () => {

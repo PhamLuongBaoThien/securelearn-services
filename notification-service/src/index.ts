@@ -20,6 +20,7 @@ const server = createServer(app);
 const boot = async () => {
   await connectDB();
   await Notification.updateMany({ recipientType: { $exists: false } }, { $set: { recipientType: 'USER', category: 'SYSTEM', priority: 'NORMAL', actionUrl: '', actionLabel: '' } });
+  await Notification.updateMany({ type: { $in: ['REPORT_CREATED','SUPPORT_REQUEST_CREATED','FEEDBACK_CREATED','INBOX_USER_REPLIED','INBOX_ADMIN_REPLIED','INBOX_STATUS_CHANGED','INBOX_ASSIGNED'] } }, { $set: { category: 'INBOX' } });
   try { await Notification.collection.dropIndex('userId_1_sourceKey_1'); } catch (error: any) { if (error?.codeName !== 'IndexNotFound') console.warn('[NotificationMigration] drop legacy index:', error.message); }
   await Notification.syncIndexes();
   await Campaign.updateMany({ audience: 'ALL_STUDENTS' }, { $set: { audience: 'ALL_LEARNERS' } });
