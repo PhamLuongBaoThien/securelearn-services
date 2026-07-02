@@ -132,6 +132,10 @@ class TicketService {
       type: input.type,
       title: String(input.title).trim(),
       description: String(input.description).trim(),
+      lastMessageContent: String(input.description).trim(),
+      lastMessageAuthorType: "USER",
+      lastMessageSenderId: sender.id,
+      lastMessageSenderName: sender.name,
       sender,
       target,
       status: "OPEN",
@@ -318,7 +322,13 @@ class TicketService {
     if (actor.type === "USER" && old === "RESOLVED") ticket.status = "OPEN";
     ticket.lastActivityAt = new Date();
     ticket.lastMessageAt = ticket.lastActivityAt;
-    if (!internal) ticket.lastPublicMessageAt = ticket.lastActivityAt;
+    if (!internal) {
+      ticket.lastPublicMessageAt = ticket.lastActivityAt;
+      ticket.lastMessageContent = content || 'Gửi tệp đính kèm';
+      ticket.lastMessageAuthorType = actor.type;
+      ticket.lastMessageSenderId = identity.id;
+      ticket.lastMessageSenderName = identity.name;
+    }
     await ticket.save();
     await TicketActivity.create({
       ticketId: id,

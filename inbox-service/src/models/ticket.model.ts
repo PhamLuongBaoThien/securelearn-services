@@ -38,6 +38,10 @@ const ticketSchema = new Schema(
     lastActivityAt: { type: Date, default: Date.now, index: true },
     lastMessageAt: { type: Date, default: Date.now, index: true },
     lastPublicMessageAt: { type: Date, default: Date.now, index: true },
+    lastMessageContent: { type: String, default: "" },
+    lastMessageAuthorType: { type: String, default: "" },
+    lastMessageSenderId: { type: String, default: "" },
+    lastMessageSenderName: { type: String, default: "" },
   },
   { timestamps: true },
 );
