@@ -1,0 +1,3 @@
+import mongoose, { Schema } from 'mongoose';
+const outboxSchema = new Schema({ eventId: { type: String, unique: true, required: true }, exchange: { type: String, required: true }, routingKey: { type: String, required: true }, payload: { type: Schema.Types.Mixed, required: true }, status: { type: String, enum: ['PENDING','SENT','DEAD'], default: 'PENDING', index: true }, attempts: { type: Number, default: 0 }, nextAttemptAt: { type: Date, default: Date.now, index: true }, lastError: String, sentAt: Date }, { timestamps: true });
+export const OutboxEvent = mongoose.model('InboxOutboxEvent', outboxSchema);

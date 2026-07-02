@@ -11,7 +11,7 @@ import { courseGrpcClient } from '../config/courseGrpc';
 import { emitToRecipient } from './realtime.service';
 
 export type Recipient = { userId: string; email: string; fullName: string; role: string; recipientType?: RecipientType };
-export type NotificationMetadata = { category: NotificationCategory; priority?: 'NORMAL' | 'HIGH'; actionUrl?: string; actionLabel?: string; data?: Record<string, unknown> };
+export type NotificationMetadata = { category: NotificationCategory; priority?: 'NORMAL' | 'HIGH'; actionUrl?: string; actionLabel?: string; data?: Record<string, unknown>; channels?: Array<'IN_APP' | 'EMAIL'> };
 
 class NotificationService {
   private recipientFilter(recipientType: RecipientType, userId: string) { return { recipientType, userId }; }
@@ -97,6 +97,7 @@ class NotificationService {
   async sendEvent(event: string, recipient: Recipient, values: Record<string, unknown>, sourceKey: string, metadata: NotificationMetadata) {
     const recipientType = recipient.recipientType || 'USER';
     for (const type of ['IN_APP', 'EMAIL'] as const) {
+      if (metadata.channels && !metadata.channels.includes(type)) continue;
       const enabled = await preferenceService.channelEnabled(recipientType, recipient.userId, metadata.category, type === 'EMAIL' ? 'email' : 'inApp');
       if (!enabled) continue;
       const template = await templateService.findActive(event, type);

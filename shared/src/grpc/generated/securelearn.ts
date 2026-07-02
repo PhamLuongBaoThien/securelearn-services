@@ -21,6 +21,22 @@ import {
 
 export const protobufPackage = "securelearn";
 
+export interface IdentitySnapshotRequest {
+  identityId: string;
+  identityType: string;
+}
+
+export interface IdentitySnapshotReply {
+  found: boolean;
+  identityId: string;
+  identityType: string;
+  email: string;
+  fullName: string;
+  role: string;
+  active: boolean;
+  permissions: string[];
+}
+
 export interface InstructorProfileRequest {
   userId: string;
 }
@@ -64,6 +80,22 @@ export interface MediaAssetBindingReply {
   lessonId: string;
   status: string;
   isAttached: boolean;
+}
+
+export interface ReportTargetRequest {
+  targetType: string;
+  targetId: string;
+  parentCourseId: string;
+}
+
+export interface ReportTargetReply {
+  found: boolean;
+  targetType: string;
+  targetId: string;
+  title: string;
+  courseId: string;
+  ownerUserId: string;
+  actionUrl: string;
 }
 
 export interface CourseNotificationRecipientRequest {
@@ -143,6 +175,265 @@ export interface SubscriptionUsageReply {
   usageId: string;
   duplicate: boolean;
 }
+
+function createBaseIdentitySnapshotRequest(): IdentitySnapshotRequest {
+  return { identityId: "", identityType: "" };
+}
+
+export const IdentitySnapshotRequest: MessageFns<IdentitySnapshotRequest> = {
+  encode(message: IdentitySnapshotRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.identityId !== "") {
+      writer.uint32(10).string(message.identityId);
+    }
+    if (message.identityType !== "") {
+      writer.uint32(18).string(message.identityType);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): IdentitySnapshotRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseIdentitySnapshotRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.identityId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.identityType = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): IdentitySnapshotRequest {
+    return {
+      identityId: isSet(object.identityId) ? globalThis.String(object.identityId) : "",
+      identityType: isSet(object.identityType) ? globalThis.String(object.identityType) : "",
+    };
+  },
+
+  toJSON(message: IdentitySnapshotRequest): unknown {
+    const obj: any = {};
+    if (message.identityId !== "") {
+      obj.identityId = message.identityId;
+    }
+    if (message.identityType !== "") {
+      obj.identityType = message.identityType;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<IdentitySnapshotRequest>): IdentitySnapshotRequest {
+    return IdentitySnapshotRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<IdentitySnapshotRequest>): IdentitySnapshotRequest {
+    const message = createBaseIdentitySnapshotRequest();
+    message.identityId = object.identityId ?? "";
+    message.identityType = object.identityType ?? "";
+    return message;
+  },
+};
+
+function createBaseIdentitySnapshotReply(): IdentitySnapshotReply {
+  return {
+    found: false,
+    identityId: "",
+    identityType: "",
+    email: "",
+    fullName: "",
+    role: "",
+    active: false,
+    permissions: [],
+  };
+}
+
+export const IdentitySnapshotReply: MessageFns<IdentitySnapshotReply> = {
+  encode(message: IdentitySnapshotReply, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.found !== false) {
+      writer.uint32(8).bool(message.found);
+    }
+    if (message.identityId !== "") {
+      writer.uint32(18).string(message.identityId);
+    }
+    if (message.identityType !== "") {
+      writer.uint32(26).string(message.identityType);
+    }
+    if (message.email !== "") {
+      writer.uint32(34).string(message.email);
+    }
+    if (message.fullName !== "") {
+      writer.uint32(42).string(message.fullName);
+    }
+    if (message.role !== "") {
+      writer.uint32(50).string(message.role);
+    }
+    if (message.active !== false) {
+      writer.uint32(56).bool(message.active);
+    }
+    for (const v of message.permissions) {
+      writer.uint32(66).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): IdentitySnapshotReply {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseIdentitySnapshotReply();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.found = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.identityId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.identityType = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.email = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.fullName = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.role = reader.string();
+          continue;
+        }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.active = reader.bool();
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.permissions.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): IdentitySnapshotReply {
+    return {
+      found: isSet(object.found) ? globalThis.Boolean(object.found) : false,
+      identityId: isSet(object.identityId) ? globalThis.String(object.identityId) : "",
+      identityType: isSet(object.identityType) ? globalThis.String(object.identityType) : "",
+      email: isSet(object.email) ? globalThis.String(object.email) : "",
+      fullName: isSet(object.fullName) ? globalThis.String(object.fullName) : "",
+      role: isSet(object.role) ? globalThis.String(object.role) : "",
+      active: isSet(object.active) ? globalThis.Boolean(object.active) : false,
+      permissions: globalThis.Array.isArray(object?.permissions)
+        ? object.permissions.map((e: any) => globalThis.String(e))
+        : [],
+    };
+  },
+
+  toJSON(message: IdentitySnapshotReply): unknown {
+    const obj: any = {};
+    if (message.found !== false) {
+      obj.found = message.found;
+    }
+    if (message.identityId !== "") {
+      obj.identityId = message.identityId;
+    }
+    if (message.identityType !== "") {
+      obj.identityType = message.identityType;
+    }
+    if (message.email !== "") {
+      obj.email = message.email;
+    }
+    if (message.fullName !== "") {
+      obj.fullName = message.fullName;
+    }
+    if (message.role !== "") {
+      obj.role = message.role;
+    }
+    if (message.active !== false) {
+      obj.active = message.active;
+    }
+    if (message.permissions?.length) {
+      obj.permissions = message.permissions;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<IdentitySnapshotReply>): IdentitySnapshotReply {
+    return IdentitySnapshotReply.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<IdentitySnapshotReply>): IdentitySnapshotReply {
+    const message = createBaseIdentitySnapshotReply();
+    message.found = object.found ?? false;
+    message.identityId = object.identityId ?? "";
+    message.identityType = object.identityType ?? "";
+    message.email = object.email ?? "";
+    message.fullName = object.fullName ?? "";
+    message.role = object.role ?? "";
+    message.active = object.active ?? false;
+    message.permissions = object.permissions?.map((e) => e) || [];
+    return message;
+  },
+};
 
 function createBaseInstructorProfileRequest(): InstructorProfileRequest {
   return { userId: "" };
@@ -832,6 +1123,254 @@ export const MediaAssetBindingReply: MessageFns<MediaAssetBindingReply> = {
     message.lessonId = object.lessonId ?? "";
     message.status = object.status ?? "";
     message.isAttached = object.isAttached ?? false;
+    return message;
+  },
+};
+
+function createBaseReportTargetRequest(): ReportTargetRequest {
+  return { targetType: "", targetId: "", parentCourseId: "" };
+}
+
+export const ReportTargetRequest: MessageFns<ReportTargetRequest> = {
+  encode(message: ReportTargetRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.targetType !== "") {
+      writer.uint32(10).string(message.targetType);
+    }
+    if (message.targetId !== "") {
+      writer.uint32(18).string(message.targetId);
+    }
+    if (message.parentCourseId !== "") {
+      writer.uint32(26).string(message.parentCourseId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ReportTargetRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseReportTargetRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.targetType = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.targetId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.parentCourseId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ReportTargetRequest {
+    return {
+      targetType: isSet(object.targetType) ? globalThis.String(object.targetType) : "",
+      targetId: isSet(object.targetId) ? globalThis.String(object.targetId) : "",
+      parentCourseId: isSet(object.parentCourseId) ? globalThis.String(object.parentCourseId) : "",
+    };
+  },
+
+  toJSON(message: ReportTargetRequest): unknown {
+    const obj: any = {};
+    if (message.targetType !== "") {
+      obj.targetType = message.targetType;
+    }
+    if (message.targetId !== "") {
+      obj.targetId = message.targetId;
+    }
+    if (message.parentCourseId !== "") {
+      obj.parentCourseId = message.parentCourseId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ReportTargetRequest>): ReportTargetRequest {
+    return ReportTargetRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ReportTargetRequest>): ReportTargetRequest {
+    const message = createBaseReportTargetRequest();
+    message.targetType = object.targetType ?? "";
+    message.targetId = object.targetId ?? "";
+    message.parentCourseId = object.parentCourseId ?? "";
+    return message;
+  },
+};
+
+function createBaseReportTargetReply(): ReportTargetReply {
+  return { found: false, targetType: "", targetId: "", title: "", courseId: "", ownerUserId: "", actionUrl: "" };
+}
+
+export const ReportTargetReply: MessageFns<ReportTargetReply> = {
+  encode(message: ReportTargetReply, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.found !== false) {
+      writer.uint32(8).bool(message.found);
+    }
+    if (message.targetType !== "") {
+      writer.uint32(18).string(message.targetType);
+    }
+    if (message.targetId !== "") {
+      writer.uint32(26).string(message.targetId);
+    }
+    if (message.title !== "") {
+      writer.uint32(34).string(message.title);
+    }
+    if (message.courseId !== "") {
+      writer.uint32(42).string(message.courseId);
+    }
+    if (message.ownerUserId !== "") {
+      writer.uint32(50).string(message.ownerUserId);
+    }
+    if (message.actionUrl !== "") {
+      writer.uint32(58).string(message.actionUrl);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ReportTargetReply {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseReportTargetReply();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.found = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.targetType = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.targetId = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.title = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.courseId = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.ownerUserId = reader.string();
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.actionUrl = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ReportTargetReply {
+    return {
+      found: isSet(object.found) ? globalThis.Boolean(object.found) : false,
+      targetType: isSet(object.targetType) ? globalThis.String(object.targetType) : "",
+      targetId: isSet(object.targetId) ? globalThis.String(object.targetId) : "",
+      title: isSet(object.title) ? globalThis.String(object.title) : "",
+      courseId: isSet(object.courseId) ? globalThis.String(object.courseId) : "",
+      ownerUserId: isSet(object.ownerUserId) ? globalThis.String(object.ownerUserId) : "",
+      actionUrl: isSet(object.actionUrl) ? globalThis.String(object.actionUrl) : "",
+    };
+  },
+
+  toJSON(message: ReportTargetReply): unknown {
+    const obj: any = {};
+    if (message.found !== false) {
+      obj.found = message.found;
+    }
+    if (message.targetType !== "") {
+      obj.targetType = message.targetType;
+    }
+    if (message.targetId !== "") {
+      obj.targetId = message.targetId;
+    }
+    if (message.title !== "") {
+      obj.title = message.title;
+    }
+    if (message.courseId !== "") {
+      obj.courseId = message.courseId;
+    }
+    if (message.ownerUserId !== "") {
+      obj.ownerUserId = message.ownerUserId;
+    }
+    if (message.actionUrl !== "") {
+      obj.actionUrl = message.actionUrl;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ReportTargetReply>): ReportTargetReply {
+    return ReportTargetReply.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ReportTargetReply>): ReportTargetReply {
+    const message = createBaseReportTargetReply();
+    message.found = object.found ?? false;
+    message.targetType = object.targetType ?? "";
+    message.targetId = object.targetId ?? "";
+    message.title = object.title ?? "";
+    message.courseId = object.courseId ?? "";
+    message.ownerUserId = object.ownerUserId ?? "";
+    message.actionUrl = object.actionUrl ?? "";
     return message;
   },
 };
@@ -2103,11 +2642,23 @@ export const IdentityInternalServiceService = {
       Buffer.from(NotificationRecipientReply.encode(value).finish()),
     responseDeserialize: (value: Buffer): NotificationRecipientReply => NotificationRecipientReply.decode(value),
   },
+  getIdentitySnapshot: {
+    path: "/securelearn.IdentityInternalService/GetIdentitySnapshot" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: IdentitySnapshotRequest): Buffer =>
+      Buffer.from(IdentitySnapshotRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): IdentitySnapshotRequest => IdentitySnapshotRequest.decode(value),
+    responseSerialize: (value: IdentitySnapshotReply): Buffer =>
+      Buffer.from(IdentitySnapshotReply.encode(value).finish()),
+    responseDeserialize: (value: Buffer): IdentitySnapshotReply => IdentitySnapshotReply.decode(value),
+  },
 } as const;
 
 export interface IdentityInternalServiceServer extends UntypedServiceImplementation {
   checkInstructorProfile: handleUnaryCall<InstructorProfileRequest, InstructorProfileReply>;
   listNotificationRecipients: handleUnaryCall<NotificationRecipientRequest, NotificationRecipientReply>;
+  getIdentitySnapshot: handleUnaryCall<IdentitySnapshotRequest, IdentitySnapshotReply>;
 }
 
 export interface IdentityInternalServiceClient extends Client {
@@ -2140,6 +2691,21 @@ export interface IdentityInternalServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: NotificationRecipientReply) => void,
+  ): ClientUnaryCall;
+  getIdentitySnapshot(
+    request: IdentitySnapshotRequest,
+    callback: (error: ServiceError | null, response: IdentitySnapshotReply) => void,
+  ): ClientUnaryCall;
+  getIdentitySnapshot(
+    request: IdentitySnapshotRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: IdentitySnapshotReply) => void,
+  ): ClientUnaryCall;
+  getIdentitySnapshot(
+    request: IdentitySnapshotRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: IdentitySnapshotReply) => void,
   ): ClientUnaryCall;
 }
 
@@ -2264,6 +2830,15 @@ export const CourseInternalServiceService = {
       Buffer.from(CourseProgressContextReply.encode(value).finish()),
     responseDeserialize: (value: Buffer): CourseProgressContextReply => CourseProgressContextReply.decode(value),
   },
+  getReportTargetSnapshot: {
+    path: "/securelearn.CourseInternalService/GetReportTargetSnapshot" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ReportTargetRequest): Buffer => Buffer.from(ReportTargetRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ReportTargetRequest => ReportTargetRequest.decode(value),
+    responseSerialize: (value: ReportTargetReply): Buffer => Buffer.from(ReportTargetReply.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ReportTargetReply => ReportTargetReply.decode(value),
+  },
 } as const;
 
 export interface CourseInternalServiceServer extends UntypedServiceImplementation {
@@ -2273,6 +2848,7 @@ export interface CourseInternalServiceServer extends UntypedServiceImplementatio
   >;
   checkCourseEntitlement: handleUnaryCall<CourseEntitlementRequest, CourseEntitlementReply>;
   getCourseProgressContext: handleUnaryCall<CourseProgressContextRequest, CourseProgressContextReply>;
+  getReportTargetSnapshot: handleUnaryCall<ReportTargetRequest, ReportTargetReply>;
 }
 
 export interface CourseInternalServiceClient extends Client {
@@ -2320,6 +2896,21 @@ export interface CourseInternalServiceClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: CourseProgressContextReply) => void,
+  ): ClientUnaryCall;
+  getReportTargetSnapshot(
+    request: ReportTargetRequest,
+    callback: (error: ServiceError | null, response: ReportTargetReply) => void,
+  ): ClientUnaryCall;
+  getReportTargetSnapshot(
+    request: ReportTargetRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ReportTargetReply) => void,
+  ): ClientUnaryCall;
+  getReportTargetSnapshot(
+    request: ReportTargetRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ReportTargetReply) => void,
   ): ClientUnaryCall;
 }
 

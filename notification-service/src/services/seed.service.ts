@@ -5,7 +5,15 @@ const seeds = [['WELCOME', 'IN_APP', 'Chào mừng bạn đến SecureLearn', 'C
 ['SUPPORT_REQUEST_CREATED', 'IN_APP', 'Yêu cầu hỗ trợ mới', '{{senderName}} cần hỗ trợ: {{title}}. {{summary}}'],
 ['SUPPORT_REQUEST_CREATED', 'EMAIL', 'Yêu cầu hỗ trợ mới', '{{senderName}} cần hỗ trợ: {{title}}. {{summary}}'],
 ['FEEDBACK_CREATED', 'IN_APP', 'Góp ý mới', '{{senderName}} đã gửi góp ý: {{title}}. {{summary}}'],
-['FEEDBACK_CREATED', 'EMAIL', 'Góp ý mới', '{{senderName}} đã gửi góp ý: {{title}}. {{summary}}']];
+['FEEDBACK_CREATED', 'EMAIL', 'Góp ý mới', '{{senderName}} đã gửi góp ý: {{title}}. {{summary}}'],
+['INBOX_USER_REPLIED','IN_APP','Ticket có phản hồi mới','{{senderName}} đã phản hồi ticket {{title}}: {{summary}}'],
+['INBOX_ADMIN_REPLIED','IN_APP','Hỗ trợ đã phản hồi','Ticket {{title}} có phản hồi mới: {{summary}}'],
+['INBOX_STATUS_CHANGED','IN_APP','Trạng thái ticket thay đổi','Ticket {{title}} hiện ở trạng thái {{status}}.'],
+['INBOX_ASSIGNED','IN_APP','Ticket được phân công','Bạn được phân công xử lý ticket {{title}}.'],
+['INBOX_USER_REPLIED','EMAIL','Ticket có phản hồi mới','{{senderName}} đã phản hồi ticket {{title}}: {{summary}}'],
+['INBOX_ADMIN_REPLIED','EMAIL','Hỗ trợ đã phản hồi','Ticket {{title}} có phản hồi mới: {{summary}}'],
+['INBOX_STATUS_CHANGED','EMAIL','Trạng thái ticket thay đổi','Ticket {{title}} hiện ở trạng thái {{status}}.'],
+['INBOX_ASSIGNED','EMAIL','Ticket được phân công','Bạn được phân công xử lý ticket {{title}}.']];
 export const seedTemplates = async () => { for (const [event, type, name, body] of seeds)
     await NotificationTemplate.updateOne({ event, type }, { $setOnInsert: { event, type, name, subject: name, body, isActive: true } }, { upsert: true }); };
 

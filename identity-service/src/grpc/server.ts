@@ -9,6 +9,18 @@ export const createInternalGrpcServer = () => createIdentityGrpcServer({
     if (!userId) throw createGrpcError(GrpcStatus.INVALID_ARGUMENT, 'Thiếu userId.');
     return authService.checkInstructorProfile(userId);
   },
+  getIdentitySnapshot: async (request) => {
+    const identityType = request.identityType === 'ADMIN' ? 'ADMIN' : 'USER';
+    if (identityType === 'ADMIN') {
+      const admin = await Admin.findById(request.identityId).select('_id email fullName adminRole status').lean();
+      if (!admin) return { found: false, identityId: '', identityType, email: '', fullName: '', role: '', active: false, permissions: [] };
+      const permissionRow = await RolePermission.findOne({ roleKey: admin.adminRole }).select('permissions').lean();
+      return { found: true, identityId: admin._id.toString(), identityType, email: admin.email, fullName: admin.fullName, role: admin.adminRole, active: admin.status === 'ACTIVE', permissions: permissionRow?.permissions || [] };
+    }
+    const user = await User.findById(request.identityId).select('_id email fullName role isLocked').lean();
+    if (!user) return { found: false, identityId: '', identityType, email: '', fullName: '', role: '', active: false, permissions: [] };
+    return { found: true, identityId: user._id.toString(), identityType, email: user.email, fullName: user.fullName, role: user.role, active: !user.isLocked, permissions: [] };
+  },
   listNotificationRecipients: async (request) => {
     const page = Math.max(1, request.page || 1);
     const limit = Math.min(200, Math.max(1, request.limit || 100));

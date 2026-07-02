@@ -6,6 +6,8 @@ import {
   IdentityInternalServiceServer,
   InstructorProfileRequest,
   InstructorProfileReply,
+  IdentitySnapshotRequest,
+  IdentitySnapshotReply,
   NotificationRecipientRequest,
   NotificationRecipientReply,
   CourseEntitlementReply,
@@ -17,6 +19,8 @@ import {
   CourseInternalServiceServer,
   CourseProgressContextReply,
   CourseProgressContextRequest,
+  ReportTargetRequest,
+  ReportTargetReply,
   MediaAssetBindingReply,
   MediaInternalServiceClient,
   MediaInternalServiceService,
@@ -108,6 +112,7 @@ export const startGrpcServer = async (server: grpc.Server, bindAddress: string):
 export const createIdentityGrpcServer = (handlers: {
   checkInstructorProfile: (userId: string) => Promise<InstructorProfileReply>;
   listNotificationRecipients: (request: NotificationRecipientRequest) => Promise<NotificationRecipientReply>;
+  getIdentitySnapshot: (request: IdentitySnapshotRequest) => Promise<IdentitySnapshotReply>;
 }): grpc.Server => {
   const server = new grpc.Server();
   const implementation: IdentityInternalServiceServer = {
@@ -117,6 +122,10 @@ export const createIdentityGrpcServer = (handlers: {
     },
     listNotificationRecipients: async (call, callback) => {
       try { callback(null, await handlers.listNotificationRecipients(call.request)); }
+      catch (error) { callback(error as grpc.ServiceError, null); }
+    },
+    getIdentitySnapshot: async (call, callback) => {
+      try { callback(null, await handlers.getIdentitySnapshot(call.request)); }
       catch (error) { callback(error as grpc.ServiceError, null); }
     },
   };
@@ -130,6 +139,7 @@ export const createIdentityGrpcClient = (target: string) => {
   return {
     checkInstructorProfile: (userId: string) => promisifyUnary<InstructorProfileRequest, InstructorProfileReply>(rpcClient, 'checkInstructorProfile', { userId }),
     listNotificationRecipients: (request: NotificationRecipientRequest) => promisifyUnary<NotificationRecipientRequest, NotificationRecipientReply>(rpcClient, 'listNotificationRecipients', request),
+    getIdentitySnapshot: (request: IdentitySnapshotRequest) => promisifyUnary<IdentitySnapshotRequest, IdentitySnapshotReply>(rpcClient, 'getIdentitySnapshot', request),
     close: () => client.close(),
   };
 };
@@ -162,11 +172,16 @@ export const createCourseGrpcServer = (handlers: {
   listCourseNotificationRecipients: (request: CourseNotificationRecipientRequest) => Promise<CourseNotificationRecipientReply>;
   checkCourseEntitlement: (request: CourseEntitlementRequest) => Promise<CourseEntitlementResult>;
   getCourseProgressContext?: (request: CourseProgressContextRequest) => Promise<CourseProgressContext>;
+  getReportTargetSnapshot: (request: ReportTargetRequest) => Promise<ReportTargetReply>;
 }): grpc.Server => {
   const server = new grpc.Server();
   const implementation: CourseInternalServiceServer = {
     listCourseNotificationRecipients: async (call, callback) => {
       try { callback(null, await handlers.listCourseNotificationRecipients(call.request)); }
+      catch (error) { callback(error as grpc.ServiceError, null); }
+    },
+    getReportTargetSnapshot: async (call, callback) => {
+      try { callback(null, await handlers.getReportTargetSnapshot(call.request)); }
       catch (error) { callback(error as grpc.ServiceError, null); }
     },
     checkCourseEntitlement: async (call, callback) => {
@@ -251,6 +266,8 @@ export const createCourseGrpcClient = (target: string) => {
           request,
         ),
       ),
+    getReportTargetSnapshot: (request: ReportTargetRequest) =>
+      promisifyUnary<ReportTargetRequest, ReportTargetReply>(rpcClient, 'getReportTargetSnapshot', request),
     getCourseProgressContext: async (request: CourseProgressContextRequest) =>
       normalizeCourseProgressContext(
         await promisifyUnary<CourseProgressContextRequest, CourseProgressContextReply>(

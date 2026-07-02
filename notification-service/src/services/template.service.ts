@@ -5,6 +5,8 @@ export const VARIABLE_WHITELIST: Record<string, string[]> = {
   COURSE_REJECTED: ['instructorName','courseName','reason'], COURSE_SUBMITTED_FOR_REVIEW: ['courseName','instructorName'],
   ENROLLMENT_CREATED: ['courseName','learnerName'], REPORT_CREATED: ['senderName','title','summary','createdAt'],
   SUPPORT_REQUEST_CREATED: ['senderName','title','summary','createdAt'], FEEDBACK_CREATED: ['senderName','title','summary','createdAt'],
+  INBOX_USER_REPLIED: ['senderName','title','summary','status'], INBOX_ADMIN_REPLIED: ['senderName','title','summary','status'],
+  INBOX_STATUS_CHANGED: ['senderName','title','summary','status'], INBOX_ASSIGNED: ['senderName','title','summary','status'],
   MANUAL: ['userName','userEmail'],
 };
 export const extractVariables = (text: string) => Array.from(text.matchAll(/{{\s*([A-Za-z][\w]*)\s*}}/g), match => match[1]);

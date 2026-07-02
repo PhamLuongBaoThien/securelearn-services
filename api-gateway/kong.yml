@@ -359,6 +359,22 @@ services:
           - /api/admin/notifications
         strip_path: false
         methods: [GET, POST, PUT, DELETE, PATCH]
+
+  - name: inbox-service
+    url: http://inbox-service:5007
+    routes:
+      - name: inbox-preflight
+        paths: [/api/inbox, /api/admin/inbox]
+        strip_path: false
+        methods: [OPTIONS]
+      - name: inbox-protected
+        paths: [/api/inbox]
+        strip_path: false
+        methods: [GET, POST, PATCH]
+      - name: inbox-admin-protected
+        paths: [/api/admin/inbox]
+        strip_path: false
+        methods: [GET, POST, PATCH]
   # ===== MINIO STORAGE PROXY =====
   # FE upload video qua presigned URL sẽ đi qua Kong thay vì gọi trực tiếp MinIO.
   # Mục đích: GIẤU MinIO endpoint thật (minio:9000) khỏi client.
@@ -556,3 +572,14 @@ plugins:
 
 
 
+
+  - name: jwt
+    route: inbox-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify: [exp]
+  - name: jwt
+    route: inbox-admin-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify: [exp]

@@ -11,6 +11,7 @@ import {
   type EnrollmentCreatedPayload,
   type NotificationCampaignRequestedPayload,
   type InboxItemCreatedPayload,
+  type InboxTicketEventPayload,
 } from '@securelearn/common';
 import notificationService, { type Recipient } from '../services/notification.service';
 
@@ -29,10 +30,39 @@ const handleInboxEvent = async (event: 'REPORT_CREATED' | 'SUPPORT_REQUEST_CREAT
     admin,
     { senderName: payload.senderName, title: payload.title, summary: payload.summary || '', createdAt: payload.createdAt },
     `event:${event}:${payload.resourceId}`,
-    { category: 'SYSTEM', priority: 'HIGH', actionUrl, actionLabel: 'Xem chi tiết', data: { resourceId: payload.resourceId, inboxType: payload.type } },
+    { category: 'SYSTEM', priority: 'HIGH', actionUrl, actionLabel: 'Xem chi tiết', data: { resourceId: payload.resourceId, inboxType: payload.type }, channels: ['IN_APP'] },
   )));
 };
 
+const handleTicketEvent = async (event: 'INBOX_USER_REPLIED' | 'INBOX_ADMIN_REPLIED' | 'INBOX_STATUS_CHANGED', payload: InboxTicketEventPayload) => {
+  const values = { senderName: payload.senderName, title: payload.title, summary: payload.summary || '', status: payload.status || '' };
+  if (event === 'INBOX_USER_REPLIED') {
+    const recipients = await notificationService.getRecipients({ recipientType: 'ADMIN', permission: 'inbox:manage' });
+    await Promise.all(recipients.map(recipient => notificationService.sendEvent(
+      event,
+      recipient,
+      values,
+      `event:${event}:${payload.eventId}`,
+      { category: 'SYSTEM', priority: 'HIGH', actionUrl: `/admin/notifications/inbox?id=${payload.ticketId}`, actionLabel: 'Mở ticket', channels: ['IN_APP', 'EMAIL'] },
+    )));
+    return;
+  }
+
+  const [recipient] = await notificationService.getRecipients({ recipientType: 'USER', userId: payload.senderId });
+  if (!recipient) return;
+  const emailStatuses = new Set(['WAITING_USER', 'RESOLVED', 'CLOSED']);
+  const channels: Array<'IN_APP' | 'EMAIL'> = event === 'INBOX_ADMIN_REPLIED'
+    || (event === 'INBOX_STATUS_CHANGED' && emailStatuses.has(payload.status || ''))
+    ? ['IN_APP', 'EMAIL']
+    : ['IN_APP'];
+  await notificationService.sendEvent(
+    event,
+    recipient,
+    values,
+    `event:${event}:${payload.eventId}`,
+    { category: 'SYSTEM', priority: 'HIGH', actionUrl: `/support/tickets/${payload.ticketId}`, actionLabel: 'Xem phản hồi', channels },
+  );
+};
 export const registerEventHandlers = async () => {
   await subscribeMessage<UserRegisteredPayload>(Exchange.IDENTITY, RoutingKey.USER_REGISTERED, 'notification-service.user-registered', async p =>
     notificationService.sendEvent('WELCOME', user(p.userId, p.email, p.fullName, p.role), { userName: p.fullName }, `event:${RoutingKey.USER_REGISTERED}:${p.userId}`, { category: 'SYSTEM', actionUrl: '/student/dashboard', actionLabel: 'Bắt đầu học' }), reliable);
@@ -69,4 +99,7 @@ export const registerEventHandlers = async () => {
   await subscribeMessage<InboxItemCreatedPayload>(Exchange.INBOX, RoutingKey.REPORT_CREATED, 'notification-service.report-created', p => handleInboxEvent('REPORT_CREATED', p), reliable);
   await subscribeMessage<InboxItemCreatedPayload>(Exchange.INBOX, RoutingKey.SUPPORT_REQUEST_CREATED, 'notification-service.support-created', p => handleInboxEvent('SUPPORT_REQUEST_CREATED', p), reliable);
   await subscribeMessage<InboxItemCreatedPayload>(Exchange.INBOX, RoutingKey.FEEDBACK_CREATED, 'notification-service.feedback-created', p => handleInboxEvent('FEEDBACK_CREATED', p), reliable);
+  await subscribeMessage<InboxTicketEventPayload>(Exchange.INBOX, RoutingKey.INBOX_USER_REPLIED, 'notification-service.inbox-user-replied', p => handleTicketEvent('INBOX_USER_REPLIED', p), reliable);
+  await subscribeMessage<InboxTicketEventPayload>(Exchange.INBOX, RoutingKey.INBOX_ADMIN_REPLIED, 'notification-service.inbox-admin-replied', p => handleTicketEvent('INBOX_ADMIN_REPLIED', p), reliable);
+  await subscribeMessage<InboxTicketEventPayload>(Exchange.INBOX, RoutingKey.INBOX_STATUS_CHANGED, 'notification-service.inbox-status-changed', p => handleTicketEvent('INBOX_STATUS_CHANGED', p), reliable);
 };

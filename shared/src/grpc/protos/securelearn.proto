@@ -5,7 +5,11 @@ package securelearn;
 service IdentityInternalService {
   rpc CheckInstructorProfile (InstructorProfileRequest) returns (InstructorProfileReply);
   rpc ListNotificationRecipients (NotificationRecipientRequest) returns (NotificationRecipientReply);
+  rpc GetIdentitySnapshot (IdentitySnapshotRequest) returns (IdentitySnapshotReply);
 }
+
+message IdentitySnapshotRequest { string identityId = 1; string identityType = 2; }
+message IdentitySnapshotReply { bool found = 1; string identityId = 2; string identityType = 3; string email = 4; string fullName = 5; string role = 6; bool active = 7; repeated string permissions = 8; }
 
 message InstructorProfileRequest { string userId = 1; }
 message InstructorProfileReply { bool complete = 1; repeated string missingFields = 2; }
@@ -23,6 +27,7 @@ service CourseInternalService {
   rpc ListCourseNotificationRecipients (CourseNotificationRecipientRequest) returns (CourseNotificationRecipientReply);
   rpc CheckCourseEntitlement (CourseEntitlementRequest) returns (CourseEntitlementReply);
   rpc GetCourseProgressContext (CourseProgressContextRequest) returns (CourseProgressContextReply);
+  rpc GetReportTargetSnapshot (ReportTargetRequest) returns (ReportTargetReply);
 }
 
 service PaymentInternalService {
@@ -41,6 +46,9 @@ message MediaAssetBindingReply {
   string status = 5;
   bool isAttached = 6;
 }
+
+message ReportTargetRequest { string targetType = 1; string targetId = 2; string parentCourseId = 3; }
+message ReportTargetReply { bool found = 1; string targetType = 2; string targetId = 3; string title = 4; string courseId = 5; string ownerUserId = 6; string actionUrl = 7; }
 
 message CourseNotificationRecipientRequest { string courseId = 1; int32 page = 2; int32 limit = 3; }
 message CourseNotificationRecipient { string userId = 1; string email = 2; string fullName = 3; string role = 4; }

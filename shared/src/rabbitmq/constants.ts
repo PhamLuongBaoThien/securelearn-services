@@ -65,6 +65,10 @@ export enum RoutingKey {
   REPORT_CREATED = 'inbox.report.created',
   SUPPORT_REQUEST_CREATED = 'inbox.support.created',
   FEEDBACK_CREATED = 'inbox.feedback.created',
+  INBOX_USER_REPLIED = 'inbox.user.replied',
+  INBOX_ADMIN_REPLIED = 'inbox.admin.replied',
+  INBOX_STATUS_CHANGED = 'inbox.status.changed',
+  INBOX_ASSIGNED = 'inbox.assigned',
 }
 // ==============================
 // Event Payloads — Interface cho dữ liệu gửi kèm mỗi event
@@ -263,4 +267,9 @@ export interface InboxItemCreatedPayload {
   senderRole: string;
   createdAt: string;
   actionUrl?: string;
+}
+export interface InboxTicketEventPayload {
+  eventId: string; ticketId: string; type: InboxEventType; title: string; summary?: string;
+  senderId: string; senderName: string; senderEmail: string; senderRole: string; assignedAdminId?: string;
+  actorId: string; actorType: 'USER' | 'ADMIN'; status?: string; occurredAt: string; actionUrl: string;
 }

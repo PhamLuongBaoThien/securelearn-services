@@ -50,6 +50,7 @@ export {
   type SubscriptionTermChangedPayload,
   type InboxEventType,
   type InboxItemCreatedPayload,
+  type InboxTicketEventPayload,
 } from './rabbitmq';
 
 // --- gRPC ---

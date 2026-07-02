@@ -4,10 +4,30 @@ import { CourseVersion } from '../models/courseVersion.model';
 import { Lesson } from '../models/lesson.model';
 import { Section } from '../models/section.model';
 import { Enrollment, EnrollmentStatus } from '../models/enrollment.model';
+import { CourseReview } from '../models/courseReview.model';
 import subscriptionAccessService from '../services/subscriptionAccess.service';
 
 export const createInternalGrpcServer = () =>
   createCourseGrpcServer({
+    getReportTargetSnapshot: async ({ targetType, targetId, parentCourseId }) => {
+      if (!targetId || !['COURSE', 'LESSON', 'REVIEW'].includes(targetType)) return { found: false, targetType, targetId, title: '', courseId: '', ownerUserId: '', actionUrl: '' };
+      if (targetType === 'COURSE') {
+        const row = await Course.findById(targetId).select('_id title slug instructorId').lean();
+        return row ? { found: true, targetType, targetId: row._id.toString(), title: row.title, courseId: row._id.toString(), ownerUserId: row.instructorId, actionUrl: `/course/${row.slug}` } : { found: false, targetType, targetId, title: '', courseId: '', ownerUserId: '', actionUrl: '' };
+      }
+      if (targetType === 'REVIEW') {
+        const row = await CourseReview.findById(targetId).select('_id courseId userId comment').lean();
+        if (!row || (parentCourseId && row.courseId.toString() !== parentCourseId)) return { found: false, targetType, targetId, title: '', courseId: '', ownerUserId: '', actionUrl: '' };
+        return { found: true, targetType, targetId: row._id.toString(), title: row.comment.slice(0, 120) || 'Đánh giá khóa học', courseId: row.courseId.toString(), ownerUserId: row.userId, actionUrl: `/course/${row.courseId}` };
+      }
+      const lesson = await Lesson.findById(targetId).select('_id courseId title').lean();
+      if (!lesson) return { found: false, targetType, targetId, title: '', courseId: '', ownerUserId: '', actionUrl: '' };
+      const version = await CourseVersion.findById(lesson.courseId).select('courseId').lean();
+      const courseId = version?.courseId?.toString() || '';
+      if (!courseId || (parentCourseId && courseId !== parentCourseId)) return { found: false, targetType, targetId, title: '', courseId: '', ownerUserId: '', actionUrl: '' };
+      const course = await Course.findById(courseId).select('instructorId').lean();
+      return { found: true, targetType, targetId: lesson._id.toString(), title: lesson.title, courseId, ownerUserId: course?.instructorId || '', actionUrl: `/student/courses/${courseId}/learn?lessonId=${lesson._id}` };
+    },
     listCourseNotificationRecipients: async ({ courseId, page, limit }) => {
       if (!courseId) throw createGrpcError(GrpcStatus.INVALID_ARGUMENT, 'Thiếu courseId.');
       const safePage = Math.max(1, page || 1);
