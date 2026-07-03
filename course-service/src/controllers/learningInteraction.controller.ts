@@ -102,6 +102,16 @@ class LearningInteractionController {
     } catch (error: any) { res.status(statusFor(error)).json({ status: 'ERR', message: error.message }); }
   };
 
+  public pinDiscussion = async (req: AuthRequest, res: Response) => {
+    try {
+      const data = await learningInteractionService.pinDiscussion(
+        req.userId!, req.userRole!, String(req.params.id), String(req.params.lessonId),
+        String(req.params.discussionId), Boolean(req.body.pinned),
+      );
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) { res.status(statusFor(error)).json({ status: 'ERR', message: error.message }); }
+  };
+
   public listCourseDiscussions = async (req: AuthRequest, res: Response) => {
     try {
       const data = await learningInteractionService.listCourseDiscussions(req.userId!, req.userRole!, String(req.params.id), req.query);

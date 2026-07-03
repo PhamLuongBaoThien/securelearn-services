@@ -235,11 +235,15 @@ class LearningInteractionService {
   public async listDiscussions(userId: string, userRole: string, courseId: string, lessonId: string, query: { cursor?: string; limit?: number; focusId?: string } = {}) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
     const limit = Math.min(50, Math.max(1, Number(query.limit) || 20));
+    const pinnedRows = query.cursor ? [] : await LessonDiscussion.find({
+      courseId: access.courseId, lessonId: access.lessonId, parentId: null, pinnedAt: { $ne: null },
+    }).sort({ pinnedAt: -1 }).limit(3).lean();
     const rows = await LessonDiscussion.find({
-      courseId: access.courseId, lessonId: access.lessonId, parentId: null, ...this.discussionCursor(query.cursor),
+      courseId: access.courseId, lessonId: access.lessonId, parentId: null, pinnedAt: null,
+      ...this.discussionCursor(query.cursor),
     }).sort({ _id: -1 }).limit(limit + 1).lean();
     const hasMore = rows.length > limit;
-    const pageRows: any[] = rows.slice(0, limit);
+    const pageRows: any[] = [...pinnedRows, ...rows.slice(0, limit)];
     const nextCursor = hasMore ? String(pageRows[pageRows.length - 1]?._id || '') : null;
     if (!query.cursor && query.focusId && Types.ObjectId.isValid(query.focusId)) {
       const focused: any = await LessonDiscussion.findOne({
@@ -257,7 +261,7 @@ class LearningInteractionService {
             lessonId: access.lessonId,
             parentId: null,
           }).lean();
-          if (root) pageRows.unshift(root);
+          if (root) pageRows.splice(pinnedRows.length, 0, root);
         }
         if (root && focused?.parentId) root.focusReplyId = String(focused._id);
       }
@@ -377,9 +381,42 @@ class LearningInteractionService {
     if (!item) throw new Error('Bình luận không tồn tại.');
     item.hiddenAt = hidden ? new Date() : undefined;
     item.hiddenBy = hidden ? userId : undefined;
+    if (hidden) {
+      item.pinnedAt = undefined;
+      item.pinnedBy = undefined;
+    }
     await item.save();
     const serialized = this.serializeDiscussion(item.toObject(), userId, true);
     emitDiscussionHidden(courseId, lessonId, serialized);
+    return serialized;
+  }
+
+  public async pinDiscussion(userId: string, userRole: string, courseId: string, lessonId: string, discussionId: string, pinned: boolean) {
+    const access = await this.assertAccess(userId, userRole, courseId, lessonId);
+    if (!access.isOwner) throw new Error('Chỉ chủ khóa học được ghim thảo luận.');
+    if (!Types.ObjectId.isValid(discussionId)) throw new Error('Thảo luận không hợp lệ.');
+
+    const item: any = await LessonDiscussion.findOne({
+      _id: discussionId, courseId: access.courseId, lessonId: access.lessonId,
+      parentId: null, deletedAt: null, hiddenAt: null,
+    });
+    if (!item) throw new Error('Chỉ có thể ghim thảo luận gốc đang hiển thị.');
+
+    if (pinned && !item.pinnedAt) {
+      const pinnedCount = await LessonDiscussion.countDocuments({
+        courseId: access.courseId, lessonId: access.lessonId, parentId: null, pinnedAt: { $ne: null },
+      });
+      if (pinnedCount >= 3) throw new Error('Mỗi bài học chỉ được ghim tối đa 3 thảo luận.');
+      item.pinnedAt = new Date();
+      item.pinnedBy = userId;
+    } else if (!pinned && item.pinnedAt) {
+      item.pinnedAt = undefined;
+      item.pinnedBy = undefined;
+    }
+
+    await item.save();
+    const serialized = this.serializeDiscussion(item.toObject(), userId, true);
+    emitDiscussionUpdated(courseId, lessonId, serialized);
     return serialized;
   }
 
