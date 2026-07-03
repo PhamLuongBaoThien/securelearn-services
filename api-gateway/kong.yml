@@ -379,35 +379,6 @@ services:
         paths: [/api/admin/inbox]
         strip_path: false
         methods: [GET, POST, PATCH, DELETE]
-  # ===== MINIO STORAGE PROXY =====
-  # FE upload video qua presigned URL sẽ đi qua Kong thay vì gọi trực tiếp MinIO.
-  # Mục đích: GIẤU MinIO endpoint thật (minio:9000) khỏi client.
-  #
-  # ⚠️ QUAN TRỌNG — Tại sao dùng /securelearn-media thay vì /storage?
-  # Presigned URL S3v4 ký cả host + path vào chữ ký (X-Amz-Signature).
-  # Nếu dùng /storage rồi strip_path → path thay đổi → signature mismatch → MinIO reject 403.
-  # Dùng /securelearn-media (chính là tên bucket) + strip_path: false → Kong forward nguyên path
-  # → MinIO nhận đúng path đã ký → signature khớp → OK.
-  #
-  # preserve_host: true → Kong giữ nguyên Host header (localhost:8000) khi forward về MinIO.
-  # S3 signature bao gồm Host header — nếu Kong đổi thành minio:9000 → signature sai.
-  #
-  # Route này KHÔNG gắn JWT plugin vì:
-  # - Presigned URL đã chứa chữ ký S3 (X-Amz-Signature) bên trong query string.
-  # - Browser PUT chunk không gửi header Authorization → nếu bật JWT sẽ bị reject.
-  - name: minio-storage
-    url: http://minio:9000
-    routes:
-      - name: minio-proxy
-        paths:
-          - /securelearn-media
-        preserve_host: true
-        strip_path: false
-        methods:
-          - PUT
-          - GET
-          - HEAD
-          - OPTIONS
 
 plugins:
   - name: cors
@@ -426,9 +397,6 @@ plugins:
         - Content-Type
         - X-Learning-Session-Id
         - X-Learning-Session-Token
-      # exposed_headers cho phép browser JS đọc các header này từ response.
-      # FE cần đọc ETag sau mỗi PUT chunk để gửi về backend khi confirm upload.
-      # Nếu không expose, xhr.getResponseHeader('etag') trả về null → upload fail.
       exposed_headers:
         - ETag
         - etag
