@@ -1,4 +1,4 @@
-// ========================
+﻿// ========================
 // @securelearn/common — Entry Point
 // Tập trung export tất cả shared modules
 // ========================
@@ -31,6 +31,7 @@ export {
   type CoursePublishedPayload,
   type CourseRejectedPayload,
   type CourseSubmittedForReviewPayload,
+  type CourseDiscussionEventPayload,
   type NotificationCampaignRequestedPayload,
   type CourseVersionPublishedLessonMapping,
   type CourseVersionPublishedPayload,
@@ -71,3 +72,4 @@ export {
   type SubscriptionUsageRequest,
   type SubscriptionUsageResult,
 } from './grpc';
+

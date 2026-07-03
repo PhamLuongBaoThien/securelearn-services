@@ -1,4 +1,4 @@
-import {
+﻿import {
   Exchange,
   RoutingKey,
   subscribeMessage,
@@ -12,6 +12,7 @@ import {
   type NotificationCampaignRequestedPayload,
   type InboxItemCreatedPayload,
   type InboxTicketEventPayload,
+  type CourseDiscussionEventPayload,
 } from '@securelearn/common';
 import notificationService, { type Recipient } from '../services/notification.service';
 
@@ -63,6 +64,37 @@ const handleTicketEvent = async (event: 'INBOX_USER_REPLIED' | 'INBOX_ADMIN_REPL
     { category: 'INBOX', priority: 'HIGH', actionUrl: `/support/tickets/${payload.ticketId}`, actionLabel: 'Xem phản hồi', data: { ticketId: payload.ticketId }, channels },
   );
 };
+
+const handleDiscussionEvent = async (
+  event: 'DISCUSSION_CREATED' | 'DISCUSSION_REPLIED',
+  payload: CourseDiscussionEventPayload,
+) => {
+  const [recipient] = await notificationService.getRecipients({ recipientType: 'USER', userId: payload.recipientId });
+  if (!recipient || payload.recipientId === payload.actorId) return;
+  await notificationService.sendEvent(
+    event,
+    recipient,
+    {
+      actorName: payload.actorName,
+      courseName: payload.courseTitle,
+      lessonName: payload.lessonTitle,
+      contentPreview: payload.contentPreview,
+    },
+    'event:' + event + ':' + payload.eventId,
+    {
+      category: 'LEARNING',
+      actionUrl: payload.actionUrl,
+      actionLabel: 'Xem thảo luận',
+      data: {
+        discussionId: payload.discussionId,
+        parentId: payload.parentId,
+        courseId: payload.courseId,
+        lessonId: payload.lessonId,
+      },
+      channels: ['IN_APP'],
+    },
+  );
+};
 export const registerEventHandlers = async () => {
   await subscribeMessage<UserRegisteredPayload>(Exchange.IDENTITY, RoutingKey.USER_REGISTERED, 'notification-service.user-registered', async p =>
     notificationService.sendEvent('WELCOME', user(p.userId, p.email, p.fullName, p.role), { userName: p.fullName }, `event:${RoutingKey.USER_REGISTERED}:${p.userId}`, { category: 'SYSTEM', actionUrl: '/student/dashboard', actionLabel: 'Bắt đầu học' }), reliable);
@@ -95,6 +127,8 @@ export const registerEventHandlers = async () => {
     if (recipient) await notificationService.sendEvent('ENROLLMENT_CREATED', recipient, { courseName: p.courseTitle, learnerName: p.learnerName || 'Một học viên' }, `event:${RoutingKey.ENROLLMENT_CREATED}:${p.enrollmentId}`, { category: 'LEARNING', actionUrl: '/instructor/students', actionLabel: 'Xem học viên' });
   }, reliable);
 
+  await subscribeMessage<CourseDiscussionEventPayload>(Exchange.COURSE, RoutingKey.DISCUSSION_CREATED, 'notification-service.discussion-created', p => handleDiscussionEvent('DISCUSSION_CREATED', p), reliable);
+  await subscribeMessage<CourseDiscussionEventPayload>(Exchange.COURSE, RoutingKey.DISCUSSION_REPLIED, 'notification-service.discussion-replied', p => handleDiscussionEvent('DISCUSSION_REPLIED', p), reliable);
   await subscribeMessage<NotificationCampaignRequestedPayload>(Exchange.NOTIFICATION, RoutingKey.NOTIFICATION_CAMPAIGN_REQUESTED, 'notification-service.campaign-requested', async p => notificationService.processCampaign(p.campaignId), reliable);
   await subscribeMessage<InboxItemCreatedPayload>(Exchange.INBOX, RoutingKey.REPORT_CREATED, 'notification-service.report-created', p => handleInboxEvent('REPORT_CREATED', p), reliable);
   await subscribeMessage<InboxItemCreatedPayload>(Exchange.INBOX, RoutingKey.SUPPORT_REQUEST_CREATED, 'notification-service.support-created', p => handleInboxEvent('SUPPORT_REQUEST_CREATED', p), reliable);
@@ -103,3 +137,4 @@ export const registerEventHandlers = async () => {
   await subscribeMessage<InboxTicketEventPayload>(Exchange.INBOX, RoutingKey.INBOX_ADMIN_REPLIED, 'notification-service.inbox-admin-replied', p => handleTicketEvent('INBOX_ADMIN_REPLIED', p), reliable);
   await subscribeMessage<InboxTicketEventPayload>(Exchange.INBOX, RoutingKey.INBOX_STATUS_CHANGED, 'notification-service.inbox-status-changed', p => handleTicketEvent('INBOX_STATUS_CHANGED', p), reliable);
 };
+

@@ -1,10 +1,14 @@
-// ========================
+﻿// ========================
 // Express App Configuration — Course Service
 // ========================
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import multer from 'multer';
+import mongoose from 'mongoose';
+import { RabbitMQConnection } from '@securelearn/common';
+import redisClient from './config/redis';
+import { discussionRealtimeReady } from './services/discussionRealtime.service';
 
 import routes from './routes/index.routes';
 
@@ -24,9 +28,19 @@ routes(app);
 
 // ===== Health Check =====
 app.get('/health', (_req: Request, res: Response) => {
-  res.status(200).json({ status: 'OK', service: 'course-service' });
+  const dependencies = {
+    mongo: mongoose.connection.readyState === 1,
+    rabbitmq: RabbitMQConnection.getInstance().isConnected(),
+    redis: redisClient.status === 'ready',
+    realtime: discussionRealtimeReady(),
+  };
+  const healthy = dependencies.mongo && dependencies.rabbitmq && dependencies.redis;
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'OK' : 'DEGRADED',
+    service: 'course-service',
+    dependencies,
+  });
 });
-
 // ===== Error Handler =====
 app.use((err: Error & { status?: number; code?: string }, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Server Error:', {
@@ -50,3 +64,4 @@ app.use((err: Error & { status?: number; code?: string }, _req: Request, res: Re
 });
 
 export default app;
+

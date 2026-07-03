@@ -1,4 +1,4 @@
-# ========================
+﻿# ========================
 # Kong Declarative Configuration
 # API Gateway cho SecureLearn Microservices
 #
@@ -132,6 +132,12 @@ services:
   - name: course-service
     url: http://course-service:5002
     routes:
+      - name: course-discussion-realtime
+        paths:
+          - /course.socket.io
+        strip_path: false
+        protocols: [http, https]
+
       - name: course-preflight
         paths:
           - /api/courses
@@ -555,5 +561,6 @@ plugins:
     config:
       key_claim_name: iss
       claims_to_verify: [exp]
+
 
 

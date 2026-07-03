@@ -36,6 +36,11 @@ router.put('/:id/lessons/:lessonId/notes/:noteId', extractUser, requireStudentOr
 router.delete('/:id/lessons/:lessonId/notes/:noteId', extractUser, requireStudentOrInstructor, learningInteractionController.deleteNote);
 router.get('/:id/lessons/:lessonId/discussions', extractUser, requireStudentOrInstructor, learningInteractionController.listDiscussions);
 router.post('/:id/lessons/:lessonId/discussions', extractUser, requireStudentOrInstructor, learningInteractionController.createDiscussion);
+router.get('/:id/lessons/:lessonId/discussions/:discussionId/replies', extractUser, requireStudentOrInstructor, learningInteractionController.listDiscussionReplies);
+router.patch('/:id/lessons/:lessonId/discussions/:discussionId', extractUser, requireStudentOrInstructor, learningInteractionController.updateDiscussion);
+router.delete('/:id/lessons/:lessonId/discussions/:discussionId', extractUser, requireStudentOrInstructor, learningInteractionController.deleteDiscussion);
+router.patch('/:id/lessons/:lessonId/discussions/:discussionId/moderation', extractUser, requireInstructor, learningInteractionController.moderateDiscussion);
+router.get('/:id/discussions/manage', extractUser, requireInstructor, learningInteractionController.listCourseDiscussions);
 router.get('/:id/reviews/me', extractUser, requireStudentOrInstructor, courseReviewController.getMyReview);
 router.post('/:id/reviews', extractUser, requireStudentOrInstructor, courseReviewController.upsertReview);
 
@@ -86,4 +91,5 @@ router.use('/:courseId', extractUser, requireInstructor, lessonRoutes);
 router.use('/:courseId', extractUser, requireInstructor, quizRoutes);
 
 export default router;
+
 

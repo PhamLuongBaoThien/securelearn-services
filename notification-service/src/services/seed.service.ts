@@ -1,4 +1,4 @@
-import { NotificationTemplate } from "../models/notificationTemplate.model";
+﻿import { NotificationTemplate } from "../models/notificationTemplate.model";
 const seeds = [
   [
     "WELCOME",
@@ -156,7 +156,18 @@ const seeds = [
     "Trạng thái yêu cầu thay đổi",
     "Yêu cầu {{title}} hiện ở trạng thái {{status}}.",
   ],
-];
+  [
+    "DISCUSSION_CREATED",
+    "IN_APP",
+    "Bình luận mới trong khóa học",
+    "{{actorName}} đã bình luận tại bài {{lessonName}}: {{contentPreview}}",
+  ],
+  [
+    "DISCUSSION_REPLIED",
+    "IN_APP",
+    "Có người trả lời bình luận",
+    "{{actorName}} đã trả lời bạn tại bài {{lessonName}}: {{contentPreview}}",
+  ],];
 export const seedTemplates = async () => {
   for (const [event, type, name, body] of seeds)
     await NotificationTemplate.updateOne(
@@ -174,3 +185,4 @@ export const seedTemplates = async () => {
       { upsert: true },
     );
 };
+

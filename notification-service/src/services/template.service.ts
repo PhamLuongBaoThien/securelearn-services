@@ -1,4 +1,4 @@
-import {
+﻿import {
   NotificationTemplate,
   TEMPLATE_EVENTS,
 } from "../models/notificationTemplate.model";
@@ -22,6 +22,8 @@ export const VARIABLE_WHITELIST: Record<string, string[]> = {
   COURSE_REJECTED: ["instructorName", "courseName", "reason"],
   COURSE_SUBMITTED_FOR_REVIEW: ["courseName", "instructorName"],
   ENROLLMENT_CREATED: ["courseName", "learnerName"],
+  DISCUSSION_CREATED: ["actorName", "courseName", "lessonName", "contentPreview"],
+  DISCUSSION_REPLIED: ["actorName", "courseName", "lessonName", "contentPreview"],
   REPORT_CREATED: ["senderName", "title", "summary", "createdAt"],
   SUPPORT_REQUEST_CREATED: ["senderName", "title", "summary", "createdAt"],
   FEEDBACK_CREATED: ["senderName", "title", "summary", "createdAt"],
@@ -112,7 +114,7 @@ class TemplateService {
         "COURSE_REJECTED",
         "COURSE_SUBMITTED_FOR_REVIEW",
       ],
-      LEARNING: ["ENROLLMENT_CREATED"],
+      LEARNING: ["ENROLLMENT_CREATED", "DISCUSSION_CREATED", "DISCUSSION_REPLIED"],
       INBOX: [
         "REPORT_CREATED",
         "SUPPORT_REQUEST_CREATED",
@@ -148,3 +150,4 @@ class TemplateService {
   }
 }
 export default new TemplateService();
+

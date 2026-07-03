@@ -1,4 +1,4 @@
-import mongoose, { Schema } from "mongoose";
+﻿import mongoose, { Schema } from "mongoose";
 export const TEMPLATE_EVENTS = [
   "WELCOME",
   "PAYMENT_SUCCESS",
@@ -7,6 +7,8 @@ export const TEMPLATE_EVENTS = [
   "COURSE_REJECTED",
   "COURSE_SUBMITTED_FOR_REVIEW",
   "ENROLLMENT_CREATED",
+  "DISCUSSION_CREATED",
+  "DISCUSSION_REPLIED",
   "REPORT_CREATED",
   "SUPPORT_REQUEST_CREATED",
   "FEEDBACK_CREATED",
@@ -33,3 +35,4 @@ export const NotificationTemplate = mongoose.model(
   "NotificationTemplate",
   schema,
 );
+
