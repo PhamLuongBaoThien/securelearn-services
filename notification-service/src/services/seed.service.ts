@@ -1,4 +1,4 @@
-﻿import { NotificationTemplate } from "../models/notificationTemplate.model";
+import { NotificationTemplate } from "../models/notificationTemplate.model";
 const seeds = [
   [
     "WELCOME",
@@ -159,14 +159,14 @@ const seeds = [
   [
     "DISCUSSION_CREATED",
     "IN_APP",
-    "Bình luận mới trong khóa học",
-    "{{actorName}} đã bình luận tại bài {{lessonName}}: {{contentPreview}}",
+    "Thảo luận mới trong khóa học",
+    "{{actorName}} đã đăng thảo luận tại bài {{lessonName}}: {{contentPreview}}",
   ],
   [
     "DISCUSSION_REPLIED",
     "IN_APP",
-    "Có người trả lời bình luận",
-    "{{actorName}} đã trả lời bạn tại bài {{lessonName}}: {{contentPreview}}",
+    "Có người phản hồi thảo luận",
+    "{{actorName}} đã phản hồi thảo luận của bạn tại bài {{lessonName}}: {{contentPreview}}",
   ],];
 export const seedTemplates = async () => {
   for (const [event, type, name, body] of seeds)
@@ -184,5 +184,30 @@ export const seedTemplates = async () => {
       },
       { upsert: true },
     );
+
+  // Chỉ đổi template legacy còn nguyên nội dung mặc định; không ghi đè mẫu admin đã tùy chỉnh.
+  await NotificationTemplate.updateOne(
+    {
+      event: "DISCUSSION_CREATED", type: "IN_APP",
+      name: "Bình luận mới trong khóa học", subject: "Bình luận mới trong khóa học",
+      body: "{{actorName}} đã bình luận tại bài {{lessonName}}: {{contentPreview}}",
+    },
+    { $set: {
+      name: "Thảo luận mới trong khóa học", subject: "Thảo luận mới trong khóa học",
+      body: "{{actorName}} đã đăng thảo luận tại bài {{lessonName}}: {{contentPreview}}",
+    } },
+  );
+  await NotificationTemplate.updateOne(
+    {
+      event: "DISCUSSION_REPLIED", type: "IN_APP",
+      name: "Có người trả lời bình luận", subject: "Có người trả lời bình luận",
+      body: "{{actorName}} đã trả lời bạn tại bài {{lessonName}}: {{contentPreview}}",
+    },
+    { $set: {
+      name: "Có người phản hồi thảo luận", subject: "Có người phản hồi thảo luận",
+      body: "{{actorName}} đã phản hồi thảo luận của bạn tại bài {{lessonName}}: {{contentPreview}}",
+    } },
+  );
+
 };
 
