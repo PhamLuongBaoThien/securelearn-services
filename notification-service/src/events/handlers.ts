@@ -43,7 +43,7 @@ const handleTicketEvent = async (event: 'INBOX_USER_REPLIED' | 'INBOX_ADMIN_REPL
       recipient,
       values,
       `event:${event}:${payload.eventId}`,
-      { category: 'INBOX', priority: 'HIGH', actionUrl: `/admin/notifications/inbox?id=${payload.ticketId}`, actionLabel: 'Mở ticket', data: { ticketId: payload.ticketId }, channels: ['IN_APP', 'EMAIL'] },
+      { category: 'INBOX', priority: 'HIGH', actionUrl: `/admin/notifications/inbox?id=${payload.ticketId}`, actionLabel: 'Mở yêu cầu', data: { ticketId: payload.ticketId }, channels: ['IN_APP', 'EMAIL'] },
     )));
     return;
   }

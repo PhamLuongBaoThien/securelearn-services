@@ -6,7 +6,7 @@ export default (app: Application) => {
   const user = Router(); user.use(extractUser);
   user.get('/', notificationController.list); user.get('/recent', notificationController.recent); user.get('/unread-count', notificationController.unreadCount);
   user.get('/preferences', notificationController.getPreferences); user.get('/channel-capabilities', notificationController.getCapabilities); user.put('/preferences', notificationController.updatePreferences);
-  user.patch('/read-all', notificationController.markAllRead); user.patch('/:id/read', notificationController.markRead);
+  user.patch('/read-all', notificationController.markAllRead); user.patch('/read-by-url', notificationController.markReadByUrl); user.patch('/:id/read', notificationController.markRead);
   app.use('/api/notifications', user);
   const admin = Router(); admin.use(extractUser, requireAdmin);
   admin.get('/templates', adminController.listTemplates); admin.post('/templates', adminController.createTemplate); admin.put('/templates/:id', adminController.updateTemplate); admin.delete('/templates/:id', adminController.deleteTemplate);

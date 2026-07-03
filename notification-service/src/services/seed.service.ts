@@ -123,38 +123,38 @@ const seeds = [
   [
     "INBOX_USER_REPLIED",
     "IN_APP",
-    "Ticket có phản hồi mới",
-    "{{senderName}} đã phản hồi ticket {{title}}: {{summary}}",
+    "Yêu cầu có phản hồi mới",
+    "{{senderName}} đã phản hồi yêu cầu {{title}}: {{summary}}",
   ],
   [
     "INBOX_ADMIN_REPLIED",
     "IN_APP",
     "Hỗ trợ đã phản hồi",
-    "Ticket {{title}} có phản hồi mới: {{summary}}",
+    "Yêu cầu {{title}} có phản hồi mới: {{summary}}",
   ],
   [
     "INBOX_STATUS_CHANGED",
     "IN_APP",
-    "Trạng thái ticket thay đổi",
-    "Ticket {{title}} hiện ở trạng thái {{status}}.",
+    "Trạng thái yêu cầu thay đổi",
+    "Yêu cầu {{title}} hiện ở trạng thái {{status}}.",
   ],
   [
     "INBOX_USER_REPLIED",
     "EMAIL",
-    "Ticket có phản hồi mới",
-    "{{senderName}} đã phản hồi ticket {{title}}: {{summary}}",
+    "Yêu cầu có phản hồi mới",
+    "{{senderName}} đã phản hồi yêu cầu {{title}}: {{summary}}",
   ],
   [
     "INBOX_ADMIN_REPLIED",
     "EMAIL",
     "Hỗ trợ đã phản hồi",
-    "Ticket {{title}} có phản hồi mới: {{summary}}",
+    "Yêu cầu {{title}} có phản hồi mới: {{summary}}",
   ],
   [
     "INBOX_STATUS_CHANGED",
     "EMAIL",
-    "Trạng thái ticket thay đổi",
-    "Ticket {{title}} hiện ở trạng thái {{status}}.",
+    "Trạng thái yêu cầu thay đổi",
+    "Yêu cầu {{title}} hiện ở trạng thái {{status}}.",
   ],
 ];
 export const seedTemplates = async () => {

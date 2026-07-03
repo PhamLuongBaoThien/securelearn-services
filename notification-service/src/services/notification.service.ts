@@ -171,5 +171,17 @@ class NotificationService {
   }
   async listCampaigns(query: Record<string, unknown>) { const page = Math.max(1, Number(query.page) || 1); const limit = Math.min(50, Math.max(1, Number(query.limit) || 20)); const [items, total] = await Promise.all([Campaign.find().sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(), Campaign.countDocuments()]); return { items, total, page, limit }; }
   async getCampaign(id: string) { const item = await Campaign.findById(id).lean(); if (!item) throw new Error('Campaign không tồn tại.'); const failures = await DeliveryAttempt.find({ campaignId: id, status: 'FAILED' }).select('email attempts lastError').lean(); return { ...item, failures }; }
+  async markReadByUrl(recipientType: RecipientType, userId: string, actionUrl: string) {
+    if (!actionUrl) throw new Error('actionUrl là bắt buộc.');
+    const result = await Notification.updateMany(
+      { recipientType, userId, actionUrl, readAt: null },
+      { $set: { readAt: new Date() } }
+    );
+    if (result.modifiedCount > 0) {
+      emitToRecipient(recipientType, userId, 'notification:reconcile', { actionUrl });
+      emitToRecipient(recipientType, userId, 'notification:unread-count', { count: await this.unreadCount(recipientType, userId) });
+    }
+    return { updated: result.modifiedCount };
+  }
 }
 export default new NotificationService();

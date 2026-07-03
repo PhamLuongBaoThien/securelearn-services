@@ -10,6 +10,7 @@ export default {
   recent: run(req => notificationService.recent(recipientType(req), req.userId!)),
   unreadCount: run(async req => ({ count: await notificationService.unreadCount(recipientType(req), req.userId!) })),
   markRead: run(req => notificationService.markRead(recipientType(req), req.userId!, String(req.params.id))),
+  markReadByUrl: run(req => notificationService.markReadByUrl(recipientType(req), req.userId!, String(req.body.actionUrl))),
   markAllRead: run(req => notificationService.markAllRead(recipientType(req), req.userId!)),
   getPreferences: run(req => preferenceService.get(recipientType(req), req.userId!)),
   getCapabilities: run(() => templateService.channelCapabilities()),
