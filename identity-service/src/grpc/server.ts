@@ -12,14 +12,14 @@ export const createInternalGrpcServer = () => createIdentityGrpcServer({
   getIdentitySnapshot: async (request) => {
     const identityType = request.identityType === 'ADMIN' ? 'ADMIN' : 'USER';
     if (identityType === 'ADMIN') {
-      const admin = await Admin.findById(request.identityId).select('_id email fullName adminRole status').lean();
-      if (!admin) return { found: false, identityId: '', identityType, email: '', fullName: '', role: '', active: false, permissions: [] };
+      const admin = await Admin.findById(request.identityId).select('_id email fullName adminRole status avatarUrl').lean();
+      if (!admin) return { found: false, identityId: '', identityType, email: '', fullName: '', role: '', active: false, permissions: [], avatarUrl: '' };
       const permissionRow = await RolePermission.findOne({ roleKey: admin.adminRole }).select('permissions').lean();
-      return { found: true, identityId: admin._id.toString(), identityType, email: admin.email, fullName: admin.fullName, role: admin.adminRole, active: admin.status === 'ACTIVE', permissions: permissionRow?.permissions || [] };
+      return { found: true, identityId: admin._id.toString(), identityType, email: admin.email, fullName: admin.fullName, role: admin.adminRole, active: admin.status === 'ACTIVE', permissions: permissionRow?.permissions || [], avatarUrl: admin.avatarUrl || '' };
     }
-    const user = await User.findById(request.identityId).select('_id email fullName role isLocked').lean();
-    if (!user) return { found: false, identityId: '', identityType, email: '', fullName: '', role: '', active: false, permissions: [] };
-    return { found: true, identityId: user._id.toString(), identityType, email: user.email, fullName: user.fullName, role: user.role, active: !user.isLocked, permissions: [] };
+    const user = await User.findById(request.identityId).select('_id email fullName role isLocked profile.avatarUrl').lean();
+    if (!user) return { found: false, identityId: '', identityType, email: '', fullName: '', role: '', active: false, permissions: [], avatarUrl: '' };
+    return { found: true, identityId: user._id.toString(), identityType, email: user.email, fullName: user.fullName, role: user.role, active: !user.isLocked, permissions: [], avatarUrl: user.profile?.avatarUrl || '' };
   },
   listNotificationRecipients: async (request) => {
     const page = Math.max(1, request.page || 1);

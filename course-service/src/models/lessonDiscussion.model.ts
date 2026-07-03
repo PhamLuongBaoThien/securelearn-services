@@ -9,6 +9,7 @@ export interface ILessonDiscussion extends Document {
   replyToAuthorName?: string;
   authorId: string;
   authorName: string;
+  authorAvatarUrl: string;
   authorRole: 'STUDENT' | 'INSTRUCTOR';
   content: string;
   replyCount: number;
@@ -31,6 +32,7 @@ const lessonDiscussionSchema = new Schema<ILessonDiscussion>(
     replyToAuthorName: String,
     authorId: { type: String, required: true, index: true },
     authorName: { type: String, default: '' },
+    authorAvatarUrl: { type: String, default: '' },
     authorRole: { type: String, enum: ['STUDENT', 'INSTRUCTOR'], required: true },
     content: { type: String, required: true, trim: true, maxlength: 2_000 },
     replyCount: { type: Number, default: 0, min: 0 },

@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Course Event Handlers
 // Mục đích:
 // - consume event từ identity, media và payment
@@ -18,6 +18,7 @@ import { CourseVersion } from '../models/courseVersion.model';
 import { LessonStatus } from '../models/lesson.model';
 import { Enrollment, EnrollmentSource, EnrollmentStatus } from '../models/enrollment.model';
 import { Lesson } from '../models/lesson.model';
+import { LessonDiscussion } from '../models/lessonDiscussion.model';
 import { Section } from '../models/section.model';
 import { Quiz } from '../models/quiz.model';
 import { QuizAttempt } from '../models/quizAttempt.model';
@@ -50,6 +51,20 @@ export const registerEventHandlers = async (): Promise<void> => {
     'course-service.user-updated',
     async (payload) => {
       console.log('[CourseEvent] User updated:', payload.userId, '| fields:', payload.updatedFields);
+
+      const discussionAuthorUpdate: Record<string, string> = {};
+      if (payload.updatedFields.includes('fullName') && payload.fullName) {
+        discussionAuthorUpdate.authorName = payload.fullName;
+      }
+      if (payload.updatedFields.includes('avatarUrl')) {
+        discussionAuthorUpdate.authorAvatarUrl = payload.avatarUrl || '';
+      }
+      if (Object.keys(discussionAuthorUpdate).length > 0) {
+        await LessonDiscussion.updateMany(
+          { authorId: payload.userId },
+          { $set: discussionAuthorUpdate },
+        );
+      }
 
       const instructorProfileUpdate: Record<string, string> = {};
       if (payload.updatedFields.includes('fullName') && payload.fullName) {

@@ -12,6 +12,7 @@ import { LessonDiscussion } from '../models/lessonDiscussion.model';
 import { Exchange, RoutingKey, publishMessage, type CourseDiscussionEventPayload } from '@securelearn/common';
 import { emitDiscussionCreated, emitDiscussionDeleted, emitDiscussionHidden, emitDiscussionUpdated } from './discussionRealtime.service';
 import subscriptionAccessService from './subscriptionAccess.service';
+import { identityGrpcClient } from '../grpc/identity.client';
 
 class LearningInteractionService {
   private stripHtml(html: string) {
@@ -32,6 +33,55 @@ class LearningInteractionService {
       throw new Error('Vui lòng nhập nội dung ghi chú.');
     }
     return normalizedContent;
+  }
+
+  private async getDiscussionAuthor(user: { id: string; name?: string }) {
+    try {
+      const snapshot = await identityGrpcClient.getIdentitySnapshot({
+        identityId: user.id,
+        identityType: 'USER',
+      });
+      if (snapshot.found) {
+        return {
+          name: snapshot.fullName || user.name || '',
+          avatarUrl: snapshot.avatarUrl || '',
+        };
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: 'discussion_author_snapshot_failed',
+        userId: user.id,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+    return { name: user.name || '', avatarUrl: '' };
+  }
+
+  private async hydrateDiscussionAuthors(items: any[]) {
+    const authorIds = Array.from(new Set(
+      items.filter(item => !item.authorAvatarUrl).map(item => String(item.authorId || '')).filter(Boolean),
+    ));
+    if (!authorIds.length) return;
+
+    const snapshots = await Promise.all(authorIds.map(async authorId => {
+      try {
+        const snapshot = await identityGrpcClient.getIdentitySnapshot({ identityId: authorId, identityType: 'USER' });
+        return snapshot.found ? snapshot : null;
+      } catch {
+        return null;
+      }
+    }));
+    const byId = new Map(snapshots.filter(Boolean).map(snapshot => [snapshot!.identityId, snapshot!]));
+    for (const item of items) {
+      const snapshot = byId.get(String(item.authorId));
+      if (!snapshot) continue;
+      item.authorName = snapshot.fullName || item.authorName;
+      item.authorAvatarUrl = snapshot.avatarUrl || '';
+    }
+    await Promise.all(Array.from(byId.values()).map(snapshot => LessonDiscussion.updateMany(
+      { authorId: snapshot.identityId, authorAvatarUrl: { $in: ['', null] } },
+      { $set: { authorName: snapshot.fullName, authorAvatarUrl: snapshot.avatarUrl || '' } },
+    )));
   }
 
   private async assertAccess(userId: string, userRole: string, courseId: string, lessonId: string) {
@@ -266,6 +316,7 @@ class LearningInteractionService {
         if (root && focused?.parentId) root.focusReplyId = String(focused._id);
       }
     }
+    await this.hydrateDiscussionAuthors(pageRows);
     const items = pageRows.map(item => this.serializeDiscussion(item, userId, access.isOwner));
     return { items, nextCursor, hasMore };
   }
@@ -282,7 +333,9 @@ class LearningInteractionService {
       courseId: access.courseId, lessonId: access.lessonId, parentId: root._id, ...this.discussionCursor(query.cursor, 'after'),
     }).sort({ _id: 1 }).limit(limit + 1).lean();
     const hasMore = rows.length > limit;
-    const items = rows.slice(0, limit).map(item => this.serializeDiscussion(item, userId, access.isOwner));
+    const pageRows = rows.slice(0, limit);
+    await this.hydrateDiscussionAuthors(pageRows);
+    const items = pageRows.map(item => this.serializeDiscussion(item, userId, access.isOwner));
     return { items, nextCursor: hasMore ? String(items[items.length - 1]?._id || '') : null, hasMore };
   }
 
@@ -291,6 +344,7 @@ class LearningInteractionService {
     content: string, parentId?: string, replyToId?: string,
   ) {
     const access = await this.assertAccess(user.id, user.role, courseId, lessonId);
+    const author = await this.getDiscussionAuthor(user);
     const normalizedContent = content.trim();
     if (!normalizedContent) throw new Error('Vui lòng nhập nội dung thảo luận.');
     if (normalizedContent.length > 2_000) throw new Error('Nội dung thảo luận tối đa 2.000 ký tự.');
@@ -321,7 +375,8 @@ class LearningInteractionService {
 
     const discussion = await LessonDiscussion.create({
       courseId: access.courseId, lessonId: access.lessonId, parentId: parent?._id || null,
-      authorId: user.id, authorName: user.name || (access.isOwner ? 'Giảng viên' : 'Học viên'),
+      authorId: user.id, authorName: author.name || (access.isOwner ? 'Giảng viên' : 'Học viên'),
+      authorAvatarUrl: author.avatarUrl,
       authorRole: access.isOwner ? 'INSTRUCTOR' : 'STUDENT',
       content: normalizedContent,
       replyToId: replyTarget?._id,
@@ -443,7 +498,9 @@ class LearningInteractionService {
     const limit = Math.min(50, Math.max(1, Number(query.limit) || 20));
     const rows = await LessonDiscussion.find(filter).sort({ _id: -1 }).limit(limit + 1).lean();
     const hasMore = rows.length > limit;
-    const items = rows.slice(0, limit).map(item => this.serializeDiscussion(item, userId, true));
+    const pageRows = rows.slice(0, limit);
+    await this.hydrateDiscussionAuthors(pageRows);
+    const items = pageRows.map(item => this.serializeDiscussion(item, userId, true));
     return { items, nextCursor: hasMore ? String(items[items.length - 1]?._id || '') : null, hasMore };
   }
 }

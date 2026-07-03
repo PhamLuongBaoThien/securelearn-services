@@ -9,7 +9,7 @@ service IdentityInternalService {
 }
 
 message IdentitySnapshotRequest { string identityId = 1; string identityType = 2; }
-message IdentitySnapshotReply { bool found = 1; string identityId = 2; string identityType = 3; string email = 4; string fullName = 5; string role = 6; bool active = 7; repeated string permissions = 8; }
+message IdentitySnapshotReply { bool found = 1; string identityId = 2; string identityType = 3; string email = 4; string fullName = 5; string role = 6; bool active = 7; repeated string permissions = 8; string avatarUrl = 9; }
 
 message InstructorProfileRequest { string userId = 1; }
 message InstructorProfileReply { bool complete = 1; repeated string missingFields = 2; }

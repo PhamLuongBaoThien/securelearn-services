@@ -35,6 +35,7 @@ export interface IdentitySnapshotReply {
   role: string;
   active: boolean;
   permissions: string[];
+  avatarUrl: string;
 }
 
 export interface InstructorProfileRequest {
@@ -262,6 +263,7 @@ function createBaseIdentitySnapshotReply(): IdentitySnapshotReply {
     role: "",
     active: false,
     permissions: [],
+    avatarUrl: "",
   };
 }
 
@@ -290,6 +292,9 @@ export const IdentitySnapshotReply: MessageFns<IdentitySnapshotReply> = {
     }
     for (const v of message.permissions) {
       writer.uint32(66).string(v!);
+    }
+    if (message.avatarUrl !== "") {
+      writer.uint32(74).string(message.avatarUrl);
     }
     return writer;
   },
@@ -365,6 +370,14 @@ export const IdentitySnapshotReply: MessageFns<IdentitySnapshotReply> = {
           message.permissions.push(reader.string());
           continue;
         }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.avatarUrl = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -386,6 +399,7 @@ export const IdentitySnapshotReply: MessageFns<IdentitySnapshotReply> = {
       permissions: globalThis.Array.isArray(object?.permissions)
         ? object.permissions.map((e: any) => globalThis.String(e))
         : [],
+      avatarUrl: isSet(object.avatarUrl) ? globalThis.String(object.avatarUrl) : "",
     };
   },
 
@@ -415,6 +429,9 @@ export const IdentitySnapshotReply: MessageFns<IdentitySnapshotReply> = {
     if (message.permissions?.length) {
       obj.permissions = message.permissions;
     }
+    if (message.avatarUrl !== "") {
+      obj.avatarUrl = message.avatarUrl;
+    }
     return obj;
   },
 
@@ -431,6 +448,7 @@ export const IdentitySnapshotReply: MessageFns<IdentitySnapshotReply> = {
     message.role = object.role ?? "";
     message.active = object.active ?? false;
     message.permissions = object.permissions?.map((e) => e) || [];
+    message.avatarUrl = object.avatarUrl ?? "";
     return message;
   },
 };
