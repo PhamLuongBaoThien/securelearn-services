@@ -73,6 +73,15 @@ class LearningInteractionController {
     } catch (error: any) { res.status(statusFor(error)).json({ status: 'ERR', message: error.message }); }
   };
 
+  public setDiscussionReaction = async (req: AuthRequest, res: Response) => {
+    try {
+      const data = await learningInteractionService.setDiscussionReaction(
+        req.userId!, req.userRole!, String(req.params.id), String(req.params.lessonId),
+        String(req.params.discussionId), Boolean(req.body.liked),
+      );
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) { res.status(statusFor(error)).json({ status: 'ERR', message: error.message }); }
+  };
   public updateDiscussion = async (req: AuthRequest, res: Response) => {
     try {
       const data = await learningInteractionService.updateDiscussion(

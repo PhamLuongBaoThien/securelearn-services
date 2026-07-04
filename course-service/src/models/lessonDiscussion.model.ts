@@ -13,6 +13,7 @@ export interface ILessonDiscussion extends Document {
   authorRole: 'STUDENT' | 'INSTRUCTOR';
   content: string;
   replyCount: number;
+  likeCount: number;
   pinnedAt?: Date;
   pinnedBy?: string;
   editedAt?: Date;
@@ -36,6 +37,7 @@ const lessonDiscussionSchema = new Schema<ILessonDiscussion>(
     authorRole: { type: String, enum: ['STUDENT', 'INSTRUCTOR'], required: true },
     content: { type: String, required: true, trim: true, maxlength: 2_000 },
     replyCount: { type: Number, default: 0, min: 0 },
+    likeCount: { type: Number, default: 0, min: 0 },
     pinnedAt: Date,
     pinnedBy: String,
     editedAt: Date,
@@ -48,6 +50,7 @@ const lessonDiscussionSchema = new Schema<ILessonDiscussion>(
 
 lessonDiscussionSchema.index({ courseId: 1, lessonId: 1, parentId: 1, _id: -1 });
 lessonDiscussionSchema.index({ courseId: 1, lessonId: 1, parentId: 1, pinnedAt: -1 });
+lessonDiscussionSchema.index({ courseId: 1, lessonId: 1, parentId: 1, likeCount: -1, _id: -1 });
 lessonDiscussionSchema.index({ courseId: 1, parentId: 1, _id: -1 });
 
 export const LessonDiscussion = mongoose.model<ILessonDiscussion>(

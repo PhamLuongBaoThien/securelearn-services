@@ -9,6 +9,7 @@ import { Course } from '../models/course.model';
 import { Lesson } from '../models/lesson.model';
 import { ILearningNote, LearningNote } from '../models/learningNote.model';
 import { LessonDiscussion } from '../models/lessonDiscussion.model';
+import { LessonDiscussionReaction } from '../models/lessonDiscussionReaction.model';
 import { Exchange, RoutingKey, publishMessage, type CourseDiscussionEventPayload } from '@securelearn/common';
 import { emitDiscussionCreated, emitDiscussionDeleted, emitDiscussionHidden, emitDiscussionUpdated } from './discussionRealtime.service';
 import subscriptionAccessService from './subscriptionAccess.service';
@@ -247,6 +248,29 @@ class LearningInteractionService {
     return { _id: { [direction === 'before' ? '$lt' : '$gt']: new Types.ObjectId(cursor) } };
   }
 
+  private async hydrateDiscussionReactions(items: any[], viewerId: string) {
+    const ids = items.map(item => item._id).filter(Boolean);
+    if (!ids.length) return;
+    const reactions = await LessonDiscussionReaction.find({ discussionId: { $in: ids }, userId: viewerId })
+      .select('discussionId').lean();
+    const likedIds = new Set(reactions.map(item => String(item.discussionId)));
+    items.forEach(item => { item.likedByViewer = likedIds.has(String(item._id)); });
+  }
+
+  private popularDiscussionCursor(cursor?: string) {
+    if (!cursor) return {};
+    const separator = cursor.indexOf('_');
+    const likeCount = Number(cursor.slice(0, separator));
+    const id = cursor.slice(separator + 1);
+    if (separator < 1 || !Number.isFinite(likeCount) || !Types.ObjectId.isValid(id)) {
+      throw new Error('Cursor thảo luận không hợp lệ.');
+    }
+    return { $or: [
+      { likeCount: { $lt: likeCount } },
+      { likeCount, _id: { $lt: new Types.ObjectId(id) } },
+    ] };
+  }
+
   private serializeDiscussion(item: any, viewerId: string, isOwner: boolean) {
     const hiddenForViewer = Boolean(item.hiddenAt) && !isOwner;
     const deleted = Boolean(item.deletedAt);
@@ -282,45 +306,47 @@ class LearningInteractionService {
     }
   }
 
-  public async listDiscussions(userId: string, userRole: string, courseId: string, lessonId: string, query: { cursor?: string; limit?: number; focusId?: string } = {}) {
+  public async listDiscussions(userId: string, userRole: string, courseId: string, lessonId: string, query: { cursor?: string; limit?: number; focusId?: string; sort?: string } = {}) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
     const limit = Math.min(50, Math.max(1, Number(query.limit) || 20));
+    const sort = query.sort === 'popular' ? 'popular' : 'latest';
     const pinnedRows = query.cursor ? [] : await LessonDiscussion.find({
       courseId: access.courseId, lessonId: access.lessonId, parentId: null, pinnedAt: { $ne: null },
     }).sort({ pinnedAt: -1 }).limit(3).lean();
+    const cursorFilter = sort === 'popular'
+      ? this.popularDiscussionCursor(query.cursor)
+      : this.discussionCursor(query.cursor);
     const rows = await LessonDiscussion.find({
       courseId: access.courseId, lessonId: access.lessonId, parentId: null, pinnedAt: null,
-      ...this.discussionCursor(query.cursor),
-    }).sort({ _id: -1 }).limit(limit + 1).lean();
+      ...cursorFilter,
+    }).sort(sort === 'popular' ? { likeCount: -1, _id: -1 } : { _id: -1 }).limit(limit + 1).lean();
     const hasMore = rows.length > limit;
-    const pageRows: any[] = [...pinnedRows, ...rows.slice(0, limit)];
-    const nextCursor = hasMore ? String(pageRows[pageRows.length - 1]?._id || '') : null;
+    const unpinnedRows = rows.slice(0, limit);
+    const pageRows: any[] = [...pinnedRows, ...unpinnedRows];
+    const lastUnpinned = unpinnedRows[unpinnedRows.length - 1];
+    const nextCursor = hasMore && lastUnpinned
+      ? sort === 'popular' ? `${Number(lastUnpinned.likeCount) || 0}_${lastUnpinned._id}` : String(lastUnpinned._id)
+      : null;
     if (!query.cursor && query.focusId && Types.ObjectId.isValid(query.focusId)) {
       const focused: any = await LessonDiscussion.findOne({
-        _id: query.focusId,
-        courseId: access.courseId,
-        lessonId: access.lessonId,
+        _id: query.focusId, courseId: access.courseId, lessonId: access.lessonId,
       }).lean();
       const rootId = focused?.parentId || focused?._id;
       if (rootId) {
         let root: any = pageRows.find(item => String(item._id) === String(rootId));
         if (!root) {
           root = await LessonDiscussion.findOne({
-            _id: rootId,
-            courseId: access.courseId,
-            lessonId: access.lessonId,
-            parentId: null,
+            _id: rootId, courseId: access.courseId, lessonId: access.lessonId, parentId: null,
           }).lean();
           if (root) pageRows.splice(pinnedRows.length, 0, root);
         }
         if (root && focused?.parentId) root.focusReplyId = String(focused._id);
       }
     }
-    await this.hydrateDiscussionAuthors(pageRows);
+    await Promise.all([this.hydrateDiscussionAuthors(pageRows), this.hydrateDiscussionReactions(pageRows, userId)]);
     const items = pageRows.map(item => this.serializeDiscussion(item, userId, access.isOwner));
     return { items, nextCursor, hasMore };
   }
-
   public async listDiscussionReplies(userId: string, userRole: string, courseId: string, lessonId: string, discussionId: string, query: { cursor?: string; limit?: number; focusId?: string } = {}) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
     if (!Types.ObjectId.isValid(discussionId)) throw new Error('Bình luận không hợp lệ.');
@@ -399,6 +425,37 @@ class LearningInteractionService {
     return serialized;
   }
 
+  public async setDiscussionReaction(userId: string, userRole: string, courseId: string, lessonId: string, discussionId: string, liked: boolean) {
+    const access = await this.assertAccess(userId, userRole, courseId, lessonId);
+    if (!Types.ObjectId.isValid(discussionId)) throw new Error('Thảo luận không hợp lệ.');
+    const item: any = await LessonDiscussion.findOne({
+      _id: discussionId, courseId: access.courseId, lessonId: access.lessonId, deletedAt: null, hiddenAt: null,
+    });
+    if (!item) throw new Error('Thảo luận không tồn tại hoặc đã bị ẩn.');
+
+    if (liked) {
+      try {
+        await LessonDiscussionReaction.create({
+          discussionId: item._id, courseId: access.courseId, lessonId: access.lessonId, userId,
+        });
+        item.likeCount = (Number(item.likeCount) || 0) + 1;
+        await item.save();
+      } catch (error: any) {
+        if (error?.code !== 11000) throw error;
+      }
+    } else {
+      const removed = await LessonDiscussionReaction.findOneAndDelete({ discussionId: item._id, userId });
+      if (removed) {
+        item.likeCount = Math.max(0, (Number(item.likeCount) || 0) - 1);
+        await item.save();
+      }
+    }
+
+    const updated = await LessonDiscussion.findById(item._id).lean();
+    const serialized = this.serializeDiscussion({ ...updated, likedByViewer: liked }, userId, access.isOwner);
+    emitDiscussionUpdated(courseId, lessonId, serialized, access.instructorId);
+    return serialized;
+  }
   public async updateDiscussion(userId: string, userRole: string, courseId: string, lessonId: string, discussionId: string, content: string) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
     if (!Types.ObjectId.isValid(discussionId)) throw new Error('Bình luận không hợp lệ.');

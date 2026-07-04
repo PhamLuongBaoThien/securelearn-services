@@ -11,6 +11,7 @@ import app from './app';
 import { createInternalGrpcServer } from './grpc/server';
 import { createServer } from 'http';
 import { LessonDiscussion } from './models/lessonDiscussion.model';
+import { LessonDiscussionReaction } from './models/lessonDiscussionReaction.model';
 import { initializeDiscussionRealtime, shutdownDiscussionRealtime } from './services/discussionRealtime.service';
 import { startCourseOutboxWorker, stopCourseOutboxWorker } from './services/courseOutbox.service';
 import { CourseAnnouncement } from './models/courseAnnouncement.model';
@@ -31,6 +32,7 @@ const bootServer = async () => {
 
 
     await LessonDiscussion.syncIndexes();
+    await LessonDiscussionReaction.syncIndexes();
     await CourseAnnouncement.syncIndexes();
     await CourseAnnouncementReadState.syncIndexes();
     await CourseOutboxEvent.syncIndexes();

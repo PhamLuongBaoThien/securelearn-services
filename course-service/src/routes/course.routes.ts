@@ -47,6 +47,7 @@ router.delete('/:id/lessons/:lessonId/notes/:noteId', extractUser, requireStuden
 router.get('/:id/lessons/:lessonId/discussions', extractUser, requireStudentOrInstructor, learningInteractionController.listDiscussions);
 router.post('/:id/lessons/:lessonId/discussions', extractUser, requireStudentOrInstructor, learningInteractionController.createDiscussion);
 router.get('/:id/lessons/:lessonId/discussions/:discussionId/replies', extractUser, requireStudentOrInstructor, learningInteractionController.listDiscussionReplies);
+router.patch('/:id/lessons/:lessonId/discussions/:discussionId/reaction', extractUser, requireStudentOrInstructor, learningInteractionController.setDiscussionReaction);
 router.patch('/:id/lessons/:lessonId/discussions/:discussionId', extractUser, requireStudentOrInstructor, learningInteractionController.updateDiscussion);
 router.delete('/:id/lessons/:lessonId/discussions/:discussionId', extractUser, requireStudentOrInstructor, learningInteractionController.deleteDiscussion);
 router.patch('/:id/lessons/:lessonId/discussions/:discussionId/moderation', extractUser, requireInstructor, learningInteractionController.moderateDiscussion);
