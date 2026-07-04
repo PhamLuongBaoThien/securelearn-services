@@ -15,6 +15,7 @@ import upload from '../middlewares/upload.middleware';
 import subscriptionAccessController from '../controllers/subscriptionAccess.controller';
 import learningInteractionController from '../controllers/learningInteraction.controller';
 import courseReviewController from '../controllers/courseReview.controller';
+import courseAnnouncementController from '../controllers/courseAnnouncement.controller';
 
 const router = Router();
 
@@ -29,6 +30,15 @@ router.get('/instructors/:instructorId/rating', courseReviewController.getInstru
 
 // [GET] /api/courses/enrolled — Danh sách khóa học đã ghi danh
 router.get('/enrolled', extractUser, requireStudentOrInstructor, enrollmentController.getEnrolledCourses);
+router.get('/instructor/announcements', extractUser, requireInstructor, courseAnnouncementController.instructorList);
+router.get('/instructor/discussions', extractUser, requireInstructor, learningInteractionController.listInstructorDiscussions);
+router.get('/:id/announcements/unread-count', extractUser, requireStudentOrInstructor, courseAnnouncementController.unread);
+router.get('/:id/announcements', extractUser, requireStudentOrInstructor, courseAnnouncementController.list);
+router.patch('/:id/announcements/:announcementId/read', extractUser, requireStudentOrInstructor, courseAnnouncementController.read);
+router.post('/:id/announcements', extractUser, requireInstructor, courseAnnouncementController.create);
+router.patch('/:id/announcements/:announcementId', extractUser, requireInstructor, courseAnnouncementController.update);
+router.patch('/:id/announcements/:announcementId/visibility', extractUser, requireInstructor, courseAnnouncementController.visibility);
+router.patch('/:id/announcements/:announcementId/pin', extractUser, requireInstructor, courseAnnouncementController.pin);
 router.get('/:id/learning', extractUser, requireStudentOrInstructor, courseController.getCourseForLearning);
 router.get('/:id/lessons/:lessonId/notes', extractUser, requireStudentOrInstructor, learningInteractionController.listNotes);
 router.post('/:id/lessons/:lessonId/notes', extractUser, requireStudentOrInstructor, learningInteractionController.createNote);

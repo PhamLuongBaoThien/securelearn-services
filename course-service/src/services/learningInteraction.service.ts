@@ -385,7 +385,7 @@ class LearningInteractionService {
     if (parent) await LessonDiscussion.updateOne({ _id: parent._id }, { $inc: { replyCount: 1 } });
 
     const serialized = this.serializeDiscussion(discussion.toObject(), user.id, access.isOwner);
-    emitDiscussionCreated(courseId, lessonId, serialized);
+    emitDiscussionCreated(courseId, lessonId, serialized, access.instructorId);
     const payload: CourseDiscussionEventPayload = {
       eventId: new Types.ObjectId().toString(), discussionId: discussion.id,
       parentId: parent ? String(parent._id) : undefined,
@@ -411,7 +411,7 @@ class LearningInteractionService {
     if (!item) throw new Error('Bạn không có quyền sửa bình luận này.');
     item.content = normalized; item.editedAt = new Date(); await item.save();
     const serialized = this.serializeDiscussion(item.toObject(), userId, access.isOwner);
-    emitDiscussionUpdated(courseId, lessonId, serialized);
+    emitDiscussionUpdated(courseId, lessonId, serialized, access.instructorId);
     return serialized;
   }
 
@@ -424,7 +424,7 @@ class LearningInteractionService {
     if (!item) throw new Error('Bạn không có quyền xóa bình luận này.');
     item.deletedAt = new Date(); await item.save();
     const serialized = this.serializeDiscussion(item.toObject(), userId, access.isOwner);
-    emitDiscussionDeleted(courseId, lessonId, serialized);
+    emitDiscussionDeleted(courseId, lessonId, serialized, access.instructorId);
     return serialized;
   }
 
@@ -442,7 +442,7 @@ class LearningInteractionService {
     }
     await item.save();
     const serialized = this.serializeDiscussion(item.toObject(), userId, true);
-    emitDiscussionHidden(courseId, lessonId, serialized);
+    emitDiscussionHidden(courseId, lessonId, serialized, access.instructorId);
     return serialized;
   }
 
@@ -471,8 +471,31 @@ class LearningInteractionService {
 
     await item.save();
     const serialized = this.serializeDiscussion(item.toObject(), userId, true);
-    emitDiscussionUpdated(courseId, lessonId, serialized);
+    emitDiscussionUpdated(courseId, lessonId, serialized, access.instructorId);
     return serialized;
+  }
+
+  public async listInstructorDiscussions(
+    userId: string,
+    query: { cursor?: string; limit?: number; courseId?: string; lessonId?: string; search?: string; hidden?: string } = {},
+  ) {
+    const courses = await Course.find({ instructorId: userId }).select('_id title').lean();
+    const courseIds = courses.map(course => course._id);
+    const courseNames = new Map(courses.map(course => [String(course._id), course.title]));
+    const filter: any = { courseId: { $in: courseIds }, ...this.discussionCursor(query.cursor) };
+    if (query.courseId) {
+      if (!courseNames.has(String(query.courseId))) throw new Error('Khóa học không thuộc giảng viên.');
+      filter.courseId = new Types.ObjectId(String(query.courseId));
+    }
+    if (query.lessonId) filter.lessonId = new Types.ObjectId(String(query.lessonId));
+    if (query.search?.trim()) filter.content = { $regex: query.search.trim().replace(/[.*+?^$()|[\]\\]/g, '\\$&'), $options: 'i' };
+    if (query.hidden === 'true') filter.hiddenAt = { $ne: null };
+    if (query.hidden === 'false') filter.hiddenAt = null;
+    const limit = Math.min(50, Math.max(1, Number(query.limit) || 20));
+    const rows = await LessonDiscussion.find(filter).sort({ _id: -1 }).limit(limit + 1).lean();
+    const pageRows = rows.slice(0, limit); await this.hydrateDiscussionAuthors(pageRows);
+    const items = pageRows.map(item => ({ ...this.serializeDiscussion(item, userId, true), courseTitle: courseNames.get(String(item.courseId)) || '' }));
+    return { items, nextCursor: rows.length > limit ? String(items[items.length - 1]?._id || '') : null, hasMore: rows.length > limit };
   }
 
   public async listCourseDiscussions(

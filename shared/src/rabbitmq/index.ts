@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // RabbitMQ Barrel Export
 // Mục đích:
 // - gom export của connection, publisher, subscriber và constants dùng chung
@@ -18,6 +18,7 @@ export {
   type CourseRejectedPayload,
   type CourseSubmittedForReviewPayload,
   type CourseDiscussionEventPayload,
+  type CourseAnnouncementPublishedPayload,
   type NotificationCampaignRequestedPayload,
   type CourseVersionPublishedLessonMapping,
   type CourseVersionPublishedPayload,

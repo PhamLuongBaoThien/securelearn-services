@@ -167,6 +167,12 @@ const seeds = [
     "IN_APP",
     "Có người phản hồi thảo luận",
     "{{actorName}} đã phản hồi thảo luận của bạn tại bài {{lessonName}}: {{contentPreview}}",
+  ],
+  [
+    "COURSE_ANNOUNCEMENT_PUBLISHED",
+    "IN_APP",
+    "Thông báo mới từ {{courseName}}",
+    "{{instructorName}}: {{title}} — {{contentPreview}}",
   ],];
 export const seedTemplates = async () => {
   for (const [event, type, name, body] of seeds)

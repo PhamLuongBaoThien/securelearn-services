@@ -1,4 +1,4 @@
-﻿import mongoose, { Schema } from "mongoose";
+import mongoose, { Schema } from "mongoose";
 export const TEMPLATE_EVENTS = [
   "WELCOME",
   "PAYMENT_SUCCESS",
@@ -9,6 +9,7 @@ export const TEMPLATE_EVENTS = [
   "ENROLLMENT_CREATED",
   "DISCUSSION_CREATED",
   "DISCUSSION_REPLIED",
+  "COURSE_ANNOUNCEMENT_PUBLISHED",
   "REPORT_CREATED",
   "SUPPORT_REQUEST_CREATED",
   "FEEDBACK_CREATED",

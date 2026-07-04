@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // RabbitMQ Constants
 // Mục đích:
 // - định nghĩa exchange, routing key và payload dùng chung giữa các service
@@ -39,6 +39,7 @@ export enum RoutingKey {
   ENROLLMENT_CREATED = "course.enrollment.created",
   DISCUSSION_CREATED = "course.discussion.created",
   DISCUSSION_REPLIED = "course.discussion.replied",
+  COURSE_ANNOUNCEMENT_PUBLISHED = "course.announcement.published",
 
   // --- Media Events ---
   VIDEO_ASSET_READY = "media.video.ready",
@@ -158,6 +159,21 @@ export interface CourseDiscussionEventPayload {
   contentPreview: string;
   occurredAt: string;
   actionUrl: string;
+}
+
+export interface CourseAnnouncementPublishedPayload {
+  eventId: string;
+  announcementId: string;
+  revision: number;
+  courseId: string;
+  courseTitle: string;
+  instructorId: string;
+  instructorName: string;
+  title: string;
+  contentPreview: string;
+
+  actionUrl: string;
+  occurredAt: string;
 }
 
 export interface NotificationCampaignRequestedPayload {

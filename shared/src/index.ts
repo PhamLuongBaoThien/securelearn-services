@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // @securelearn/common — Entry Point
 // Tập trung export tất cả shared modules
 // ========================
@@ -32,6 +32,7 @@ export {
   type CourseRejectedPayload,
   type CourseSubmittedForReviewPayload,
   type CourseDiscussionEventPayload,
+  type CourseAnnouncementPublishedPayload,
   type NotificationCampaignRequestedPayload,
   type CourseVersionPublishedLessonMapping,
   type CourseVersionPublishedPayload,

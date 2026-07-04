@@ -1,4 +1,4 @@
-﻿import http from 'http';
+import http from 'http';
 import { Server } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import redisClient from '../config/redis';
@@ -15,6 +15,8 @@ let ready = false;
 const courseRoom = (courseId: string) => `COURSE:DISCUSSION:${courseId}`;
 const lessonRoom = (courseId: string, lessonId: string) =>
   `COURSE:DISCUSSION:${courseId}:${lessonId}`;
+const instructorRoom = (instructorId: string) => `COURSE:COMMUNICATION:INSTRUCTOR:${instructorId}`;
+const userRoom = (userId: string) => `COURSE:COMMUNICATION:USER:${userId}`;
 
 async function canAccess(identity: CourseSocketIdentity, courseId: string, lessonId: string) {
   const course = await Course.findById(courseId).select('instructorId currentVersionId').lean();
@@ -46,6 +48,8 @@ export async function initializeDiscussionRealtime(server: http.Server) {
 
   io.on('connection', socket => {
     const identity = socket.data.identity as CourseSocketIdentity;
+    void socket.join(userRoom(identity.id));
+    if (identity.role === 'INSTRUCTOR') void socket.join(instructorRoom(identity.id));
     socket.on('discussion:subscribe', async ({ courseId, lessonId } = {}, ack?: (result: unknown) => void) => {
       try {
         if (!courseId || !lessonId || !(await canAccess(identity, String(courseId), String(lessonId)))) {
@@ -93,16 +97,26 @@ export async function initializeDiscussionRealtime(server: http.Server) {
 }
 
 export const discussionRealtimeReady = () => ready;
-export const emitDiscussionCreated = (courseId: string, lessonId: string, payload: unknown) =>
-  io?.to(lessonRoom(courseId, lessonId)).to(courseRoom(courseId)).emit('discussion:created', payload);
-export const emitDiscussionUpdated = (courseId: string, lessonId: string, payload: unknown) =>
-  io?.to(lessonRoom(courseId, lessonId)).to(courseRoom(courseId)).emit('discussion:updated', payload);
-export const emitDiscussionDeleted = (courseId: string, lessonId: string, payload: unknown) =>
-  io?.to(lessonRoom(courseId, lessonId)).to(courseRoom(courseId)).emit('discussion:deleted', payload);
-export const emitDiscussionHidden = (courseId: string, lessonId: string, payload: unknown) => {
-  io?.to(lessonRoom(courseId, lessonId)).to(courseRoom(courseId)).emit('discussion:hidden', payload);
+export const emitDiscussionCreated = (courseId: string, lessonId: string, payload: unknown, instructorId = '') =>
+  io?.to(lessonRoom(courseId, lessonId)).to(courseRoom(courseId)).to(instructorId ? instructorRoom(instructorId) : courseRoom(courseId)).emit('discussion:created', payload);
+export const emitDiscussionUpdated = (courseId: string, lessonId: string, payload: unknown, instructorId = '') =>
+  io?.to(lessonRoom(courseId, lessonId)).to(courseRoom(courseId)).to(instructorId ? instructorRoom(instructorId) : courseRoom(courseId)).emit('discussion:updated', payload);
+export const emitDiscussionDeleted = (courseId: string, lessonId: string, payload: unknown, instructorId = '') =>
+  io?.to(lessonRoom(courseId, lessonId)).to(courseRoom(courseId)).to(instructorId ? instructorRoom(instructorId) : courseRoom(courseId)).emit('discussion:deleted', payload);
+export const emitDiscussionHidden = (courseId: string, lessonId: string, payload: unknown, instructorId = '') =>
+  io?.to(lessonRoom(courseId, lessonId)).to(courseRoom(courseId)).to(instructorId ? instructorRoom(instructorId) : courseRoom(courseId)).emit('discussion:hidden', payload);
+export const emitAnnouncementEvent = (type: 'published' | 'updated' | 'hidden' | 'pinned' | 'read', courseId: string, instructorId: string, payload: any) => {
+  const event = `announcement:${type}`;
+  if (type === 'read' && payload?.userId) {
+    const room = io?.to(userRoom(String(payload.userId)));
+    room?.emit(event, payload);
+    room?.emit('announcement:unread-count', { courseId, count: payload.unreadCount });
+    return;
+  }
+  const room = io?.to(courseRoom(courseId)).to(instructorId ? instructorRoom(instructorId) : courseRoom(courseId));
+  room?.emit(event, payload);
+  if (type === 'published') room?.emit('announcement:unread-count', { courseId, refresh: true });
 };
-
 export async function shutdownDiscussionRealtime() {
   ready = false;
   await new Promise<void>(resolve => io ? io.close(() => resolve()) : resolve());

@@ -1,4 +1,4 @@
-﻿import {
+import {
   Exchange,
   RoutingKey,
   subscribeMessage,
@@ -13,6 +13,7 @@
   type InboxItemCreatedPayload,
   type InboxTicketEventPayload,
   type CourseDiscussionEventPayload,
+  type CourseAnnouncementPublishedPayload,
 } from '@securelearn/common';
 import notificationService, { type Recipient } from '../services/notification.service';
 
@@ -95,6 +96,28 @@ const handleDiscussionEvent = async (
     },
   );
 };
+const handleCourseAnnouncement = async (payload: CourseAnnouncementPublishedPayload) => {
+  const recipients = await notificationService.getCourseRecipients(payload.courseId);
+  await Promise.all(recipients.map(recipient => notificationService.sendEvent(
+    'COURSE_ANNOUNCEMENT_PUBLISHED',
+    recipient,
+    {
+      instructorName: payload.instructorName,
+      courseName: payload.courseTitle,
+      title: payload.title,
+      contentPreview: payload.contentPreview,
+    },
+    `announcement:${payload.announcementId}:revision:${payload.revision}`,
+    {
+      category: 'LEARNING',
+      actionUrl: payload.actionUrl,
+      actionLabel: 'Xem thông báo',
+      data: { announcementId: payload.announcementId, courseId: payload.courseId },
+      channels: ['IN_APP'],
+    },
+  )));
+};
+
 export const registerEventHandlers = async () => {
   await subscribeMessage<UserRegisteredPayload>(Exchange.IDENTITY, RoutingKey.USER_REGISTERED, 'notification-service.user-registered', async p =>
     notificationService.sendEvent('WELCOME', user(p.userId, p.email, p.fullName, p.role), { userName: p.fullName }, `event:${RoutingKey.USER_REGISTERED}:${p.userId}`, { category: 'SYSTEM', actionUrl: '/student/dashboard', actionLabel: 'Bắt đầu học' }), reliable);
@@ -129,6 +152,7 @@ export const registerEventHandlers = async () => {
 
   await subscribeMessage<CourseDiscussionEventPayload>(Exchange.COURSE, RoutingKey.DISCUSSION_CREATED, 'notification-service.discussion-created', p => handleDiscussionEvent('DISCUSSION_CREATED', p), reliable);
   await subscribeMessage<CourseDiscussionEventPayload>(Exchange.COURSE, RoutingKey.DISCUSSION_REPLIED, 'notification-service.discussion-replied', p => handleDiscussionEvent('DISCUSSION_REPLIED', p), reliable);
+  await subscribeMessage<CourseAnnouncementPublishedPayload>(Exchange.COURSE, RoutingKey.COURSE_ANNOUNCEMENT_PUBLISHED, 'notification-service.course-announcement-published', handleCourseAnnouncement, reliable);
   await subscribeMessage<NotificationCampaignRequestedPayload>(Exchange.NOTIFICATION, RoutingKey.NOTIFICATION_CAMPAIGN_REQUESTED, 'notification-service.campaign-requested', async p => notificationService.processCampaign(p.campaignId), reliable);
   await subscribeMessage<InboxItemCreatedPayload>(Exchange.INBOX, RoutingKey.REPORT_CREATED, 'notification-service.report-created', p => handleInboxEvent('REPORT_CREATED', p), reliable);
   await subscribeMessage<InboxItemCreatedPayload>(Exchange.INBOX, RoutingKey.SUPPORT_REQUEST_CREATED, 'notification-service.support-created', p => handleInboxEvent('SUPPORT_REQUEST_CREATED', p), reliable);

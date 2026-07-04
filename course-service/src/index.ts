@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Entry Point: Khởi động Course Service
 // ========================
 import dotenv from 'dotenv';
@@ -12,6 +12,10 @@ import { createInternalGrpcServer } from './grpc/server';
 import { createServer } from 'http';
 import { LessonDiscussion } from './models/lessonDiscussion.model';
 import { initializeDiscussionRealtime, shutdownDiscussionRealtime } from './services/discussionRealtime.service';
+import { startCourseOutboxWorker, stopCourseOutboxWorker } from './services/courseOutbox.service';
+import { CourseAnnouncement } from './models/courseAnnouncement.model';
+import { CourseAnnouncementReadState } from './models/courseAnnouncementReadState.model';
+import { CourseOutboxEvent } from './models/courseOutboxEvent.model';
 
 const PORT = process.env.PORT || 5002;
 const GRPC_BIND = process.env.COURSE_GRPC_BIND || '0.0.0.0:6002';
@@ -27,12 +31,16 @@ const bootServer = async () => {
 
 
     await LessonDiscussion.syncIndexes();
+    await CourseAnnouncement.syncIndexes();
+    await CourseAnnouncementReadState.syncIndexes();
+    await CourseOutboxEvent.syncIndexes();
     // Kết nối RabbitMQ
     const rabbitmqUrl = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
     await RabbitMQConnection.getInstance().connect(rabbitmqUrl);
 
     // Đăng ký lắng nghe events từ các service khác
     await registerEventHandlers();
+    startCourseOutboxWorker();
 
     grpcServer = await startGrpcServer(createInternalGrpcServer(), GRPC_BIND);
 
@@ -57,6 +65,7 @@ const bootServer = async () => {
 const gracefulShutdown = async () => {
   console.log('\nĐang tắt Course Service...');
   grpcServer?.forceShutdown();
+  stopCourseOutboxWorker();
   await shutdownDiscussionRealtime();
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));
   await RabbitMQConnection.getInstance().close();
