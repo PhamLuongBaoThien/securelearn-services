@@ -85,6 +85,12 @@ const seeds = [
     "{{learnerName}} vừa ghi danh khóa học {{courseName}}.",
   ],
   [
+    "SUBSCRIPTION_SETTLEMENT_AVAILABLE",
+    "IN_APP",
+    "Doanh thu thuê bao đã sẵn sàng",
+    "Kỳ {{period}}: {{amount}} từ {{qualifiedMinutes}} phút học hợp lệ trên {{courseCount}} khóa học.",
+  ],
+  [
     "REPORT_CREATED",
     "IN_APP",
     "Báo cáo mới",

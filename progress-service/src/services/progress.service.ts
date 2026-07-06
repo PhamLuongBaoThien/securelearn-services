@@ -11,6 +11,7 @@ import { LearnerActivityDaily } from '../models/learnerActivityDaily.model';
 import { publishCourseCompleted, publishLessonCompleted } from '../events/publishers';
 import courseContextService, { CourseLessonContext, CourseProgressContext, ProgressionMode } from './courseContext.service';
 import learningSessionAccessService, { LearningSessionAccessError } from './learningSessionAccess.service';
+import subscriptionUsageOutboxService from './subscriptionUsageOutbox.service';
 
 const VIDEO_COMPLETE_PERCENT = 90;
 const STREAK_MIN_ACTIVE_SECONDS = 30;
@@ -176,6 +177,8 @@ class ProgressService {
     }
     // 4. Chuẩn hóa delta thực học của học viên (giới hạn tối đa 20s để tránh gian lận gửi số lớn)
     const activeSeconds = this.normalizeActiveSeconds(input.watchedSecondsDelta);
+    const position = Math.min(lesson.duration || Number.MAX_SAFE_INTEGER, this.toNumber(input.positionSeconds));
+    const heartbeatSegments = this.buildHeartbeatSegments(input, position, lesson.duration);
     
     // 5. Ghi nhận hoặc cập nhật LearningSession (phiên học đang chạy)
     await this.upsertLearningSession(input, context, activeSeconds, false);
@@ -184,7 +187,18 @@ class ProgressService {
     if (input.lessonType === LessonProgressType.QUIZ) {
       await this.upsertQuizHeartbeat(input, context);
     } else {
-      await this.upsertVideoHeartbeat(input, context, lesson.duration);
+      await this.upsertVideoHeartbeat(input, context, lesson.duration, heartbeatSegments);
+      const range = heartbeatSegments[0];
+      if (range && context.accessSource === 'SUBSCRIPTION' && context.subscriptionTermId) {
+        const eventId = [context.subscriptionTermId, input.sessionId, input.lessonId, range.start.toFixed(3), range.end.toFixed(3)].join(':');
+        await subscriptionUsageOutboxService.enqueue({
+          termId: context.subscriptionTermId, userId: input.userId, courseId: context.courseId, courseTitle: context.courseTitle,
+          instructorId: context.instructorId, lessonId: input.lessonId, sessionId: input.sessionId, eventId,
+          qualifiedSeconds: Math.min(15, Math.max(1, Math.floor(range.end - range.start))),
+          rangeStartSeconds: range.start, rangeEndSeconds: range.end, occurredAt: new Date().toISOString(),
+        });
+        void subscriptionUsageOutboxService.flush();
+      }
     }
 
     // 7. Ghi nhận thời gian hoạt động học tập hàng ngày (phục vụ streak/goal)
@@ -562,7 +576,8 @@ class ProgressService {
   private async upsertVideoHeartbeat(
     input: HeartbeatInput,
     context: CourseProgressContext,
-    durationSeconds: number
+    durationSeconds: number,
+    heartbeatSegments: WatchedSegment[]
   ) {
     const existing = await LessonProgress.findOne({
       userId: input.userId,
@@ -576,7 +591,7 @@ class ProgressService {
       : this.segmentsFromLegacyWatchedSeconds(existing?.watchedSeconds || 0, durationSeconds);
     const watchedSegments = this.mergeSegments([
       ...existingSegments,
-      ...this.buildHeartbeatSegments(input, position, durationSeconds),
+      ...heartbeatSegments,
     ]);
     const watchedSeconds = this.sumSegments(watchedSegments);
     const watchPercent = durationSeconds > 0 ? Math.min(100, Math.round((watchedSeconds / durationSeconds) * 100)) : 0;

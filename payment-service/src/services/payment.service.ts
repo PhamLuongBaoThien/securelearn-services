@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Payment Service
 // Mục đích:
 // - xử lý checkout, callback và tra cứu transaction cho mua khóa học và thuê bao
@@ -20,6 +20,7 @@ import { getMomoConfig } from './momo/momo.config';
 import { SubscriptionPlan } from '../models/subscriptionPlan.model';
 import subscriptionService from './subscription.service';
 import { UserSubscriptionTerm } from '../models/userSubscriptionTerm.model';
+import { PurchaseAccessCutover } from '../models/purchaseAccessCutover.model';
 import couponService from './coupon.service';
 
 type CheckoutRequest = {
@@ -57,7 +58,8 @@ type RevenueSplitConfig = {
 class PaymentService {
   private readonly courseServiceUrl = process.env.COURSE_SERVICE_URL || 'http://course-service:5002';
   private readonly clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-  private readonly financeConfigKey = 'COURSE_REVENUE_SPLIT';
+  private readonly courseFinanceConfigKey = 'COURSE_REVENUE_SPLIT';
+  private readonly subscriptionFinanceConfigKey = 'SUBSCRIPTION_REVENUE_SPLIT';
   private readonly momoPendingResultCodes = new Set([1000, 7000, 7002]);
 
   public async createCourseCheckout(
@@ -185,7 +187,7 @@ class PaymentService {
 
     const normalizedProvider = this.normalizeProvider(request.provider, request.paymentMethod);
     // Snapshot tỷ lệ chia ngay tại checkout để config đổi sau này không làm lệch giao dịch cũ.
-    const split = await this.ensureFinanceSplitConfig();
+    const split = await this.ensureFinanceSplitConfig('SUBSCRIPTION');
     const adminAmount = this.calculateSplitAmount(plan.price, split.adminPercent);
     const transactionCode = this.generateTransactionCode(normalizedProvider);
     const orderInfo = `SecureLearn subscription ${plan.type} ${transactionCode}`;
@@ -915,6 +917,12 @@ class PaymentService {
       await subscriptionService.activatePaidTransaction(transaction);
       return;
     }
+    const effectiveAt = transaction.paidAt || new Date();
+    await Promise.all(transaction.items.map((item) => PurchaseAccessCutover.findOneAndUpdate(
+      { userId: transaction.userId, courseId: item.courseId },
+      { $min: { effectiveAt }, $set: { transactionId: transaction._id.toString(), transactionCode: transaction.transactionCode } },
+      { upsert: true, new: true },
+    )));
     await this.ensureRevenueSnapshot(transaction);
     if (transaction.couponSnapshot?.couponId && (transaction.discountAmount || 0) > 0) {
       await couponService.recordRedemption({
@@ -929,22 +937,36 @@ class PaymentService {
     await publishPaymentCourseSucceeded(this.toSucceededPayload(transaction));
   }
 
-  private async ensureFinanceSplitConfig(): Promise<RevenueSplitConfig> {
+  private async ensureFinanceSplitConfig(productType: 'COURSE' | 'SUBSCRIPTION' = 'COURSE'): Promise<RevenueSplitConfig> {
     const adminPercent = Number(process.env.DEFAULT_ADMIN_REVENUE_PERCENT || 25);
     const instructorPercent = Number(process.env.DEFAULT_INSTRUCTOR_REVENUE_PERCENT || 75);
     const normalizedAdmin = Number.isFinite(adminPercent) ? adminPercent : 25;
     const normalizedInstructor = Number.isFinite(instructorPercent) ? instructorPercent : 75;
+    const configKey = productType === 'SUBSCRIPTION'
+      ? this.subscriptionFinanceConfigKey
+      : this.courseFinanceConfigKey;
+
+    if (productType === 'SUBSCRIPTION') {
+      const existing = await FinanceConfig.findOne({ configKey }).lean();
+      if (!existing) {
+        const courseConfig = await FinanceConfig.findOne({ configKey: this.courseFinanceConfigKey }).lean();
+        await FinanceConfig.findOneAndUpdate(
+          { configKey },
+          { $setOnInsert: {
+            adminPercent: courseConfig?.adminPercent ?? normalizedAdmin,
+            instructorPercent: courseConfig?.instructorPercent ?? normalizedInstructor,
+          } },
+          { upsert: true, new: true }
+        );
+      }
+    }
 
     const config = await FinanceConfig.findOneAndUpdate(
-      { configKey: this.financeConfigKey },
+      { configKey },
       { $setOnInsert: { adminPercent: normalizedAdmin, instructorPercent: normalizedInstructor } },
       { upsert: true, new: true, lean: true }
     );
-
-    return {
-      adminPercent: config!.adminPercent,
-      instructorPercent: config!.instructorPercent,
-    };
+    return { adminPercent: config!.adminPercent, instructorPercent: config!.instructorPercent };
   }
 
   private calculateSplitAmount(amount: number, percent: number): number {
@@ -994,12 +1016,21 @@ class PaymentService {
     return Math.max(Number(item.price || 0) - itemDiscount, 0);
   }
 
-  private async queryTransactions(query?: { search?: string; startDate?: string; endDate?: string; provider?: string; status?: string; page?: number; limit?: number }) {
+  private async queryTransactions(query?: {
+    search?: string;
+    startDate?: string;
+    endDate?: string;
+    provider?: string;
+    status?: string;
+    productType?: 'COURSE' | 'SUBSCRIPTION';
+    page?: number;
+    limit?: number;
+  }) {
     const filter: Record<string, any> = {};
     if (query?.provider) filter.provider = query.provider;
-    if (query?.status) {
-      filter.status = query.status;
-    }
+    if (query?.status) filter.status = query.status;
+    if (query?.productType) filter.productType = query.productType;
+
     const search = String(query?.search || '').trim();
     if (search) {
       const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1021,16 +1052,13 @@ class PaymentService {
     const page = Math.max(Number(query?.page || 1), 1);
     const limit = Math.min(Math.max(Number(query?.limit || 10), 1), 100);
     const skip = (page - 1) * limit;
-
     const [transactions, total] = await Promise.all([
       PaymentTransaction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
       PaymentTransaction.countDocuments(filter),
     ]);
-
-    return { transactions, total, page, limit };
+    return { transactions, total, page, limit, filter };
   }
-
-  private async buildRevenueSummary(transactions: any[]) {
+  private async buildRevenueSummary(transactions: any[], productType: 'COURSE' | 'SUBSCRIPTION' = 'COURSE') {
     const summary = transactions.reduce(
       (acc: any, transaction: any) => {
         if (transaction.status !== 'SUCCEEDED') {
@@ -1117,7 +1145,7 @@ class PaymentService {
     summary.monthlyData.sort((a: any, b: any) => a.month.localeCompare(b.month));
 
     const [splitConfig, activeSubscriptions] = await Promise.all([
-      this.ensureFinanceSplitConfig(),
+      this.ensureFinanceSplitConfig(productType),
       UserSubscriptionTerm.countDocuments({ status: 'ACTIVE', startsAt: { $lte: new Date() }, endsAt: { $gt: new Date() } }),
     ]);
     const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -1249,11 +1277,11 @@ class PaymentService {
     return summary;
   }
 
-  public async getFinanceSplitConfig(): Promise<RevenueSplitConfig> {
-    return this.ensureFinanceSplitConfig();
+  public async getFinanceSplitConfig(productType: 'COURSE' | 'SUBSCRIPTION' = 'COURSE'): Promise<RevenueSplitConfig> {
+    return this.ensureFinanceSplitConfig(productType);
   }
 
-  public async updateFinanceSplitConfig(input: RevenueSplitConfig): Promise<RevenueSplitConfig> {
+  public async updateFinanceSplitConfig(input: RevenueSplitConfig, productType: 'COURSE' | 'SUBSCRIPTION' = 'COURSE'): Promise<RevenueSplitConfig> {
     const adminPercent = Number(input.adminPercent);
     const instructorPercent = Number(input.instructorPercent);
 
@@ -1268,14 +1296,14 @@ class PaymentService {
     }
 
     const config = await FinanceConfig.findOneAndUpdate(
-      { configKey: this.financeConfigKey },
+      { configKey: productType === 'SUBSCRIPTION' ? this.subscriptionFinanceConfigKey : this.courseFinanceConfigKey },
       {
         $set: {
           adminPercent,
           instructorPercent,
         },
         $setOnInsert: {
-          configKey: this.financeConfigKey,
+          configKey: productType === 'SUBSCRIPTION' ? this.subscriptionFinanceConfigKey : this.courseFinanceConfigKey,
         },
       },
       { new: true, upsert: true }
@@ -1287,21 +1315,30 @@ class PaymentService {
     };
   }
 
-  public async getAdminFinanceOverview(query?: { search?: string; startDate?: string; endDate?: string; provider?: string; status?: string; page?: number; limit?: number }) {
-    const { transactions, total } = await this.queryTransactions(query);
+  public async getAdminFinanceOverview(query?: {
+    search?: string;
+    startDate?: string;
+    endDate?: string;
+    provider?: string;
+    status?: string;
+    productType?: 'COURSE' | 'SUBSCRIPTION';
+    page?: number;
+    limit?: number;
+  }) {
+    const { transactions, total, filter, page, limit } = await this.queryTransactions(query);
+    const allFilteredTransactions = await PaymentTransaction.find(filter).sort({ createdAt: -1 });
     await Promise.all(
-      transactions
+      allFilteredTransactions
         .filter((transaction) => transaction.status === 'SUCCEEDED')
         .map((transaction) => this.ensureRevenueSnapshot(transaction))
     );
-    const summary = await this.buildRevenueSummary(transactions);
-    const succeededTransactions = transactions.filter((transaction) => transaction.status === 'SUCCEEDED');
+
+    const productType = query?.productType || 'COURSE';
+    const summary = await this.buildRevenueSummary(allFilteredTransactions, productType);
+    const succeededTransactions = allFilteredTransactions.filter((transaction) => transaction.status === 'SUCCEEDED');
     const totalAmount = succeededTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
-    const splitTotals = transactions.reduce(
+    const splitTotals = succeededTransactions.reduce(
       (acc, transaction) => {
-        if (transaction.status !== 'SUCCEEDED') {
-          return acc;
-        }
         const split = this.calculateTransactionSplitTotals(transaction);
         acc.adminAmount += split.adminAmount;
         acc.instructorAmount += split.instructorAmount;
@@ -1310,15 +1347,35 @@ class PaymentService {
       { adminAmount: 0, instructorAmount: 0 }
     );
 
+    const subscriptionTransactionIds = transactions
+      .filter((transaction) => transaction.productType === 'SUBSCRIPTION')
+      .map((transaction) => transaction._id.toString());
+    const terms = subscriptionTransactionIds.length
+      ? await UserSubscriptionTerm.find({ transactionId: { $in: subscriptionTransactionIds } }).lean()
+      : [];
+    const termByTransactionId = new Map(terms.map((term) => [term.transactionId, term]));
+
     return {
       ...summary,
-      transactions: transactions.map((transaction) => this.mapTransaction(transaction)),
+      transactions: transactions.map((transaction) => {
+        const mapped = this.mapTransaction(transaction);
+        const term = termByTransactionId.get(transaction._id.toString());
+        return {
+          ...mapped,
+          subscriptionTerm: term ? {
+            termId: term._id.toString(),
+            status: term.status,
+            startsAt: term.startsAt,
+            endsAt: term.endsAt,
+          } : null,
+        };
+      }),
       total,
       totalAmount,
       totalAdminAmount: splitTotals.adminAmount,
       totalInstructorAmount: splitTotals.instructorAmount,
-      page: Number(query?.page || 1),
-      limit: Number(query?.limit || 20),
+      page,
+      limit,
     };
   }
 

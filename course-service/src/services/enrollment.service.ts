@@ -5,7 +5,7 @@
 // - giữ enrollment ổn định khi user chuyển từ quyền thuê bao sang mua đứt
 // ========================
 import { Enrollment, EnrollmentSource, IEnrollment, EnrollmentStatus } from '../models/enrollment.model';
-import { Course } from '../models/course.model';
+import { Course, SubscriptionCatalogStatus } from '../models/course.model';
 import { publishEnrollmentCreated } from '../events/publishers';
 import entitlementCacheService from './entitlementCache.service';
 
@@ -139,7 +139,11 @@ class EnrollmentService {
   ): Promise<IEnrollment> {
     const course = await Course.findById(courseId);
     if (!course || course.status !== 'PUBLISHED') throw new Error('Khóa học không tồn tại hoặc chưa xuất bản.');
-    if (course.subscriptionStatus !== 'APPROVED') throw new Error('Khóa học không thuộc catalog thuê bao.');
+    // Không cho enrollment mới hoặc gia hạn enrollment cũ sang term kế tiếp sau khi khóa đã bị rút.
+    // Quyền của term đang gắn vẫn được entitlement() giữ nguyên đến endsAt.
+    if (course.subscriptionStatus !== SubscriptionCatalogStatus.APPROVED) {
+      throw new Error('Khóa học không còn khả dụng trong gói thuê bao.');
+    }
     if (userRole === 'INSTRUCTOR' && course.instructorId.toString() === userId) {
       throw new Error('Giảng viên không thể học khóa học do chính mình tạo.');
     }

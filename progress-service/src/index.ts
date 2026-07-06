@@ -6,6 +6,7 @@ import app from './app';
 import redisClient from './config/redis';
 import { RabbitMQConnection } from '@securelearn/common';
 import { registerEventHandlers } from './events/handlers';
+import subscriptionUsageOutboxService from './services/subscriptionUsageOutbox.service';
 
 const PORT = process.env.PORT || 5005;
 
@@ -21,6 +22,9 @@ const bootServer = async () => {
     } catch (error) {
       console.error('[ProgressEvent] RabbitMQ chưa sẵn sàng, progress write vẫn tiếp tục:', error);
     }
+
+    await subscriptionUsageOutboxService.flush();
+    setInterval(() => void subscriptionUsageOutboxService.flush(), 10_000).unref();
 
     app.listen(PORT, () => {
       console.log(`Progress Service đang chạy tại http://localhost:${PORT}`);

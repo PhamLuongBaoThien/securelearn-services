@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Payment Routes
 // Mục đích:
 // - gom toàn bộ endpoint checkout, webhook, finance, coupon và subscription của payment-service
@@ -52,9 +52,7 @@ router.get('/instructor/finance/subscriptions', extractUser, requireRoles('INSTR
 router.get('/admin/subscription-plans', extractUser, requirePermission('finance:read'), subscriptionController.adminPlans);
 router.put('/admin/subscription-plans', extractUser, requirePermission('finance:manage'), subscriptionController.upsertPlan);
 router.get('/admin/subscriptions/terms', extractUser, requirePermission('finance:read'), subscriptionController.adminTerms);
-router.post('/admin/subscriptions/terms/:termId/refund', extractUser, requirePermission('finance:manage'), subscriptionController.refund);
 router.get('/admin/subscriptions/settlements', extractUser, requirePermission('finance:read'), subscriptionController.settlements);
-router.post('/admin/subscriptions/settlements/:period/calculate', extractUser, requirePermission('finance:manage'), subscriptionController.calculateSettlement);
 router.patch('/admin/subscriptions/settlements/:period/status', extractUser, requirePermission('finance:manage'), subscriptionController.updateSettlementStatus);
 
 // Route để xử lý IPN từ VNPay

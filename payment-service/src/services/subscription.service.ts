@@ -1,16 +1,55 @@
 // ========================
 // Subscription Service
 // Mục đích:
-// - quản lý lifecycle của plan, term, usage, settlement và refund thuê bao
+// - quản lý lifecycle của plan, term, usage và settlement thuê bao
 // - tạo snapshot kế toán để dữ liệu doanh thu lịch sử không bị lệch khi config đổi sau này
 // ========================
 import { PaymentTransaction, type IPaymentTransaction } from '../models/paymentTransaction.model';
-import { SubscriptionAudit } from '../models/subscriptionAudit.model';
 import { SubscriptionPlan, type SubscriptionPlanType } from '../models/subscriptionPlan.model';
 import { SubscriptionSettlement, type SubscriptionSettlementStatus } from '../models/subscriptionSettlement.model';
-import { SubscriptionUsage } from '../models/subscriptionUsage.model';
+import { SubscriptionUsage, type ISubscriptionUsageInterval } from '../models/subscriptionUsage.model';
 import { UserSubscriptionTerm, type IUserSubscriptionTerm } from '../models/userSubscriptionTerm.model';
-import { publishSubscriptionTermChanged } from '../events/publishers';
+import { PurchaseAccessCutover } from '../models/purchaseAccessCutover.model';
+import { publishSubscriptionTermChanged, publishSubscriptionSettlementAvailable } from '../events/publishers';
+
+const MAX_HEARTBEAT_SECONDS = 15;
+const MAX_USAGE_UPDATE_RETRIES = 5;
+
+type NormalizedInterval = ISubscriptionUsageInterval;
+
+const normalizeUsageInterval = (rangeStartSeconds: number, rangeEndSeconds: number, qualifiedSeconds: number): NormalizedInterval | null => {
+  const rawStart = Number(rangeStartSeconds);
+  const rawEnd = Number(rangeEndSeconds);
+  if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) return null;
+
+  const start = Math.max(0, Math.floor(rawStart));
+  const requestedEnd = Math.max(start, Math.ceil(rawEnd));
+  const qualifiedLimit = Math.max(0, Math.floor(Number(qualifiedSeconds)));
+  const cappedDuration = Math.min(MAX_HEARTBEAT_SECONDS, qualifiedLimit, requestedEnd - start);
+  if (cappedDuration <= 0) return null;
+
+  return { start, end: start + cappedDuration };
+};
+
+const mergeIntervals = (intervals: ISubscriptionUsageInterval[], next: ISubscriptionUsageInterval): ISubscriptionUsageInterval[] => {
+  const sorted = [...intervals, next]
+    .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end) && item.end > item.start)
+    .map((item) => ({ start: Math.max(0, Math.floor(item.start)), end: Math.max(0, Math.ceil(item.end)) }))
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+
+  const merged: ISubscriptionUsageInterval[] = [];
+  for (const interval of sorted) {
+    const last = merged[merged.length - 1];
+    if (!last || interval.start > last.end) {
+      merged.push(interval);
+    } else {
+      last.end = Math.max(last.end, interval.end);
+    }
+  }
+  return merged;
+};
+
+const sumIntervals = (intervals: ISubscriptionUsageInterval[]): number => intervals.reduce((sum, item) => sum + Math.max(0, item.end - item.start), 0);
 
 type PlanInput = {
   type: SubscriptionPlanType;
@@ -29,8 +68,11 @@ type UsageInput = {
   instructorId: string;
   lessonId: string;
   sessionId: string;
-  segmentIndex: number;
   qualifiedSeconds: number;
+  courseTitle?: string;
+  rangeStartSeconds: number;
+  rangeEndSeconds: number;
+  eventId: string;
   occurredAt?: string;
 };
 
@@ -80,7 +122,7 @@ class SubscriptionService {
     return SubscriptionPlan.find().sort({ sortOrder: 1, price: 1 }).lean();
   }
 
-  public async upsertPlan(input: PlanInput, actorId: string) {
+  public async upsertPlan(input: PlanInput) {
     const durationDays = input.type === 'MONTHLY' ? 30 : 365;
     if (!input.name?.trim()) throw new Error('Tên gói thuê bao không được để trống.');
     if (!Number.isFinite(Number(input.price)) || Number(input.price) < 1000) {
@@ -102,12 +144,6 @@ class SubscriptionService {
       },
       { upsert: true, new: true, runValidators: true }
     );
-
-    await this.audit(actorId, 'ADMIN', 'SUBSCRIPTION_PLAN_UPSERTED', 'SubscriptionPlan', plan._id.toString(), {
-      type: plan.type,
-      price: plan.price,
-      isActive: plan.isActive,
-    });
     return plan;
   }
 
@@ -158,11 +194,6 @@ class SubscriptionService {
       }
       throw error;
     }
-
-    await this.audit(transaction.userId, transaction.userRole, 'SUBSCRIPTION_TERM_CREATED', 'UserSubscriptionTerm', term._id.toString(), {
-      transactionCode: transaction.transactionCode,
-      status,
-    });
     await this.publishTerm(term);
     return term;
   }
@@ -203,159 +234,242 @@ class SubscriptionService {
 
   public async recordUsage(input: UsageInput) {
     const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date();
-    const seconds = Math.min(15, Math.max(1, Math.floor(Number(input.qualifiedSeconds))));
+    if (!input.eventId || Number.isNaN(occurredAt.getTime())) throw new Error('Usage event không hợp lệ.');
     const term = await UserSubscriptionTerm.findOne({
-      _id: input.termId,
-      userId: input.userId,
-      status: 'ACTIVE',
-      startsAt: { $lte: occurredAt },
-      endsAt: { $gt: occurredAt },
+      _id: input.termId, userId: input.userId, status: { $in: ['ACTIVE', 'EXPIRED'] }, startsAt: { $lte: occurredAt }, endsAt: { $gt: occurredAt },
     });
     if (!term) throw new Error('Kỳ thuê bao không còn hiệu lực.');
+    const cutover = await PurchaseAccessCutover.findOne({ userId: input.userId, courseId: input.courseId, effectiveAt: { $lte: occurredAt } }).lean();
+    if (cutover) return { usageId: input.eventId, duplicate: false, acceptedSeconds: 0, rejectedByPurchase: true };
 
-    try {
-      const usage = await SubscriptionUsage.create({
-        ...input,
-        segmentIndex: Math.max(0, Math.floor(Number(input.segmentIndex))),
-        qualifiedSeconds: seconds,
-        occurredAt,
-      });
-      return {
-        usageId: usage._id.toString(),
-        duplicate: false,
-      };
-    } catch (error: any) {
-      if (error?.code === 11000) {
-        const usage = await SubscriptionUsage.findOne({
-          termId: input.termId,
-          userId: input.userId,
-          lessonId: input.lessonId,
-          segmentIndex: input.segmentIndex,
-        });
-        return {
-          usageId: usage?._id.toString() || '',
-          duplicate: true,
-        };
+    const interval = normalizeUsageInterval(input.rangeStartSeconds, input.rangeEndSeconds, input.qualifiedSeconds);
+    if (!interval) {
+      return { usageId: input.eventId, duplicate: false, acceptedSeconds: 0, rejectedByPurchase: false };
+    }
+
+    const originalPeriod = this.periodFor(occurredAt);
+    let settlementPeriod = originalPeriod;
+    while (await SubscriptionSettlement.exists({ period: settlementPeriod, status: { $in: ['LOCKED', 'AVAILABLE'] } })) {
+      settlementPeriod = this.nextPeriodString(settlementPeriod);
+    }
+
+    const identity = {
+      termId: input.termId,
+      userId: input.userId,
+      courseId: input.courseId,
+      lessonId: input.lessonId,
+      instructorId: input.instructorId,
+    };
+
+    for (let attempt = 0; attempt < MAX_USAGE_UPDATE_RETRIES; attempt += 1) {
+      const existing = await SubscriptionUsage.findOne(identity).lean();
+      if (!existing) {
+        try {
+          await SubscriptionUsage.create({
+            ...identity,
+            courseTitle: input.courseTitle || '',
+            sessionId: input.sessionId,
+            eventId: input.eventId,
+            intervals: [interval],
+            qualifiedSeconds: interval.end - interval.start,
+            periodUsages: [{ period: settlementPeriod, qualifiedSeconds: interval.end - interval.start }],
+            occurredAt,
+            rangeStartSeconds: interval.start,
+            rangeEndSeconds: interval.end,
+            version: 1,
+          });
+          return { usageId: input.eventId, duplicate: false, acceptedSeconds: interval.end - interval.start, rejectedByPurchase: false };
+        } catch (error: any) {
+          if (error?.code !== 11000) throw error;
+          continue;
+        }
       }
-      throw error;
-    }
-  }
 
-  public async calculateSettlement(period: string, actorId: string) {
-    const existingSettlement = await SubscriptionSettlement.findOne({ period });
-    if (existingSettlement && ['LOCKED', 'AVAILABLE'].includes(existingSettlement.status)) {
-      throw new Error('Settlement đã khóa hoặc available, không thể tính lại.');
+      const merged = mergeIntervals(existing.intervals || [], interval);
+      const qualifiedSeconds = sumIntervals(merged);
+      const acceptedSeconds = Math.max(0, qualifiedSeconds - (existing.qualifiedSeconds || 0));
+      const periodUsages = [...(existing.periodUsages || [])];
+      if (acceptedSeconds > 0) {
+        const periodUsage = periodUsages.find((item) => item.period === settlementPeriod);
+        if (periodUsage) periodUsage.qualifiedSeconds += acceptedSeconds;
+        else periodUsages.push({ period: settlementPeriod, qualifiedSeconds: acceptedSeconds });
+      }
+      const result = await SubscriptionUsage.updateOne(
+        { _id: existing._id, version: existing.version },
+        {
+          $set: {
+            intervals: merged,
+            qualifiedSeconds,
+            periodUsages,
+            courseTitle: input.courseTitle || existing.courseTitle || '',
+            sessionId: input.sessionId,
+            eventId: input.eventId,
+            occurredAt,
+            rangeStartSeconds: Math.min(existing.rangeStartSeconds ?? interval.start, interval.start),
+            rangeEndSeconds: Math.max(existing.rangeEndSeconds ?? interval.end, interval.end),
+          },
+          $inc: { version: 1 },
+        }
+      );
+      if (result.modifiedCount === 1) {
+        return { usageId: input.eventId, duplicate: acceptedSeconds === 0, acceptedSeconds, rejectedByPurchase: false };
+      }
     }
-    // Revenue của gói năm/tháng được ghi nhận dần theo phần thời gian overlap với tháng đang tính.
+
+    throw new Error('Không thể ghi usage thuê bao do xung đột cập nhật, worker sẽ retry.');
+  }
+  public async finalizeSettlement(period: string) {
+    const existing = await SubscriptionSettlement.findOne({ period });
+    if (existing && ['LOCKED', 'AVAILABLE'].includes(existing.status)) return existing;
     const { start, end } = this.periodBounds(period);
-    const terms = await UserSubscriptionTerm.find({
-      status: { $ne: 'REFUNDED' },
-      startsAt: { $lt: end },
-      endsAt: { $gt: start },
-    }).lean();
+    const terms = await UserSubscriptionTerm.find({ status: { $ne: 'REFUNDED' }, startsAt: { $lt: end }, endsAt: { $gt: start } }).lean();
 
     let recognizedGross = 0;
-    let adminRevenue = 0;
+    let baseAdminRevenue = 0;
     let instructorPool = 0;
+    let carriedIn = 0;
+    let carriedOut = 0;
+    let expiredToAdmin = 0;
+    let totalQualifiedSeconds = 0;
+    const aggregate = new Map<string, { instructorId: string; courseId: string; courseTitle: string; qualifiedSeconds: number; amount: number; terms: Set<string>; learners: Set<string> }>();
+    const termLedgers: Array<{ termId: string; userId: string; recognizedPool: number; carryIn: number; allocatedAmount: number; carryOut: number; expiredToAdmin: number; totalQualifiedSeconds: number; allocations: Array<{ instructorId: string; courseId: string; courseTitle: string; qualifiedSeconds: number; amount: number }> }> = [];
+
     for (const term of terms) {
       const overlapMs = Math.max(0, Math.min(term.endsAt.getTime(), end.getTime()) - Math.max(term.startsAt.getTime(), start.getTime()));
       const ratio = overlapMs / (term.durationDays * 86400000);
-      recognizedGross += Math.round(term.price * ratio);
-      adminRevenue += Math.round(term.adminAmount * ratio);
-      instructorPool += Math.round(term.instructorPoolAmount * ratio);
+      const termGross = Math.round(term.price * ratio);
+      const termAdmin = Math.round(term.adminAmount * ratio);
+      recognizedGross += termGross;
+      baseAdminRevenue += termAdmin;
+
+      const previousSettlements = await SubscriptionSettlement.find({
+        period: { $lt: period },
+        termLedgers: { $elemMatch: { termId: term._id.toString() } },
+      }).sort({ period: -1 }).select('period termLedgers').lean();
+      const previousLedgers = previousSettlements.flatMap((settlement) =>
+        settlement.termLedgers.filter((item) => item.termId === term._id.toString())
+      );
+      const previousLedger = previousLedgers[0];
+      const termCarryIn = previousLedger?.carryOut || 0;
+      const previouslyRecognizedPool = previousLedgers.reduce((sum, ledger) => sum + ledger.recognizedPool, 0);
+      const proportionalPool = Math.round(term.instructorPoolAmount * ratio);
+      // Tháng cuối nhận đúng phần còn lại để tổng recognizedPool toàn term không lệch vì làm tròn từng tháng.
+      const recognizedPool = term.endsAt <= end
+        ? Math.max(0, term.instructorPoolAmount - previouslyRecognizedPool)
+        : proportionalPool;
+      instructorPool += recognizedPool;
+      carriedIn += termCarryIn;
+      const usage = await SubscriptionUsage.aggregate<{ _id: { instructorId: string; courseId: string; courseTitle: string }; qualifiedSeconds: number }>([
+        { $match: { termId: term._id.toString(), 'periodUsages.period': period } },
+        { $unwind: '$periodUsages' },
+        { $match: { 'periodUsages.period': period } },
+        { $group: { _id: { instructorId: '$instructorId', courseId: '$courseId', courseTitle: '$courseTitle' }, qualifiedSeconds: { $sum: '$periodUsages.qualifiedSeconds' } } },
+        { $sort: { qualifiedSeconds: -1, '_id.courseId': 1 } },
+      ]);
+      const termSeconds = usage.reduce((sum, row) => sum + row.qualifiedSeconds, 0);
+      const available = recognizedPool + termCarryIn;
+      let termCarryOut = 0;
+      let termExpiredToAdmin = 0;
+      const termAllocations: Array<{ instructorId: string; courseId: string; courseTitle: string; qualifiedSeconds: number; amount: number }> = [];
+
+      if (termSeconds > 0 && available > 0) {
+        let allocated = 0;
+        for (const row of usage) {
+          const amount = Math.floor(available * row.qualifiedSeconds / termSeconds);
+          allocated += amount;
+          termAllocations.push({ ...row._id, qualifiedSeconds: row.qualifiedSeconds, amount });
+        }
+        const remainder = available - allocated;
+        if (remainder > 0 && termAllocations.length) termAllocations[0].amount += remainder;
+      } else if (term.endsAt <= end) {
+        termExpiredToAdmin = available;
+      } else {
+        termCarryOut = available;
+      }
+
+      carriedOut += termCarryOut;
+      expiredToAdmin += termExpiredToAdmin;
+      totalQualifiedSeconds += termSeconds;
+      for (const row of termAllocations) {
+        const key = row.instructorId + ':' + row.courseId;
+        const current = aggregate.get(key) || { ...row, qualifiedSeconds: 0, amount: 0, terms: new Set<string>(), learners: new Set<string>() };
+        current.qualifiedSeconds += row.qualifiedSeconds;
+        current.amount += row.amount;
+        current.terms.add(term._id.toString());
+        current.learners.add(term.userId);
+        aggregate.set(key, current);
+      }
+      termLedgers.push({
+        termId: term._id.toString(), userId: term.userId, recognizedPool, carryIn: termCarryIn,
+        allocatedAmount: termAllocations.reduce((sum, row) => sum + row.amount, 0), carryOut: termCarryOut,
+        expiredToAdmin: termExpiredToAdmin, totalQualifiedSeconds: termSeconds, allocations: termAllocations,
+      });
     }
 
-    const refundAdjustments = await UserSubscriptionTerm.find({
-      refundAdjustmentPeriod: period,
-      status: 'REFUNDED',
-    }).lean();
-    const refundGrossAdjustment = refundAdjustments.reduce((sum, term) => sum + (term.refundGrossAdjustment || 0), 0);
-    const refundAdminAdjustment = refundAdjustments.reduce((sum, term) => sum + (term.refundAdminAdjustment || 0), 0);
-    const refundInstructorPoolAdjustment = refundAdjustments.reduce(
-      (sum, term) => sum + (term.refundInstructorPoolAdjustment || 0),
-      0
-    );
-    recognizedGross -= refundGrossAdjustment;
-    adminRevenue -= refundAdminAdjustment;
+    const allocatedAmount = Array.from(aggregate.values()).reduce((sum, row) => sum + row.amount, 0);
+    const allocations = Array.from(aggregate.values()).map(row => ({
+      instructorId: row.instructorId, courseId: row.courseId, courseTitle: row.courseTitle,
+      qualifiedSeconds: row.qualifiedSeconds, amount: row.amount, termCount: row.terms.size, learnerCount: row.learners.size,
+      sharePercent: allocatedAmount > 0 ? Number(((row.amount / allocatedAmount) * 100).toFixed(4)) : 0,
+    })).sort((a, b) => b.amount - a.amount || a.courseId.localeCompare(b.courseId));
+    const adminRevenue = baseAdminRevenue + expiredToAdmin;
+    const reconciliationDifference = instructorPool + carriedIn - allocatedAmount - carriedOut - expiredToAdmin;
+    const settlement = await SubscriptionSettlement.findOneAndUpdate({ period }, { $set: {
+      status: 'LOCKED', recognizedGross, adminRevenue, instructorPool, carriedIn, carriedOut, expiredToAdmin, allocatedAmount, reconciliationDifference,
+      totalQualifiedSeconds, allocations, termLedgers, calculatedAt: new Date(), lockedAt: new Date(),
+    } }, { upsert: true, new: true });
+    return settlement;
+  }
+  public async updateSettlementStatus(period: string, status: SubscriptionSettlementStatus) {
+    const settlement = await SubscriptionSettlement.findOne({ period });
+    if (!settlement) throw new Error('Kỳ settlement không tồn tại.');
+    if (settlement.status !== 'LOCKED' || status !== 'AVAILABLE') {
+      throw new Error('Chỉ settlement đang chờ ghi nhận mới có thể chuyển sang khả dụng.');
+    }
 
-    const previous = await SubscriptionSettlement.findOne({ period: { $lt: period } }).sort({ period: -1 }).lean();
-    const carriedIn = previous?.carriedOut || 0;
-    // Pool của instructor chỉ được chia theo qualified usage đã qua heartbeat validation.
-    const usage = await SubscriptionUsage.aggregate<{
-      _id: { instructorId: string; courseId: string };
-      qualifiedSeconds: number;
-    }>([
-      {
-        $match: {
-          occurredAt: { $gte: start, $lt: end },
-          // Usage của term đã refund không được dùng để lấy tỷ trọng từ pool của các term còn hợp lệ.
-          termId: { $in: terms.map((term) => term._id.toString()) },
-        },
-      },
-      { $group: { _id: { instructorId: '$instructorId', courseId: '$courseId' }, qualifiedSeconds: { $sum: '$qualifiedSeconds' } } },
-      { $sort: { qualifiedSeconds: -1 } },
-    ]);
-    const totalQualifiedSeconds = usage.reduce((sum, item) => sum + item.qualifiedSeconds, 0);
-    const distributable = instructorPool + carriedIn - refundInstructorPoolAdjustment;
-    let allocated = 0;
-    const allocations = distributable <= 0 ? [] : usage.map((item, index) => {
-      const amount = totalQualifiedSeconds === 0
-        ? 0
-        : index === usage.length - 1
-          ? distributable - allocated
-          : Math.floor((distributable * item.qualifiedSeconds) / totalQualifiedSeconds);
-      allocated += amount;
-      return {
-        instructorId: item._id.instructorId,
-        courseId: item._id.courseId,
-        qualifiedSeconds: item.qualifiedSeconds,
-        amount,
-      };
-    });
-
-    const settlement = await SubscriptionSettlement.findOneAndUpdate(
-      { period },
-      {
-        $set: {
-          status: 'CALCULATED',
-          recognizedGross,
-          adminRevenue,
-          instructorPool,
-          refundGrossAdjustment,
-          refundAdminAdjustment,
-          refundInstructorPoolAdjustment,
-          carriedIn,
-          carriedOut: totalQualifiedSeconds === 0 || distributable <= 0 ? distributable : 0,
-          totalQualifiedSeconds,
-          allocations,
-          calculatedAt: new Date(),
-        },
-      },
-      { upsert: true, new: true }
-    );
-    await this.audit(actorId, 'ADMIN', 'SUBSCRIPTION_SETTLEMENT_CALCULATED', 'SubscriptionSettlement', settlement._id.toString(), { period });
+    settlement.status = 'AVAILABLE';
+    settlement.availableAt = new Date();
+    const grouped = new Map<string, { amount: number; qualifiedSeconds: number; courses: Set<string> }>();
+    for (const row of settlement.allocations) {
+      const value = grouped.get(row.instructorId) || { amount: 0, qualifiedSeconds: 0, courses: new Set<string>() };
+      value.amount += row.amount;
+      value.qualifiedSeconds += row.qualifiedSeconds;
+      value.courses.add(row.courseId);
+      grouped.set(row.instructorId, value);
+    }
+    await Promise.all(Array.from(grouped.entries()).map(([instructorId, value]) => publishSubscriptionSettlementAvailable({
+      eventId: 'subscription-settlement:' + period + ':' + instructorId,
+      instructorId,
+      period,
+      amount: value.amount,
+      qualifiedSeconds: value.qualifiedSeconds,
+      courseCount: value.courses.size,
+      availableAt: settlement.availableAt!.toISOString(),
+    })));
+    await settlement.save();
     return settlement;
   }
 
-  public async updateSettlementStatus(period: string, status: SubscriptionSettlementStatus, actorId: string) {
-    const settlement = await SubscriptionSettlement.findOne({ period });
-    if (!settlement) throw new Error('Kỳ settlement không tồn tại.');
-    const allowed: Record<SubscriptionSettlementStatus, SubscriptionSettlementStatus[]> = {
-      OPEN: ['CALCULATED'],
-      CALCULATED: ['LOCKED'],
-      LOCKED: ['AVAILABLE'],
-      AVAILABLE: [],
-    };
-    if (!allowed[settlement.status].includes(status)) throw new Error('Chuyển trạng thái settlement không hợp lệ.');
-    if (status === 'LOCKED' && settlement.calculatedAt && Date.now() < settlement.calculatedAt.getTime() + 7 * 86400000) {
-      throw new Error('Settlement chỉ được khóa sau 7 ngày kể từ lúc tính.');
+  public async finalizeDueSettlements(now = new Date()) {
+    const local = this.localDateParts(now);
+    const currentPeriod = local.year + '-' + String(local.month).padStart(2, '0');
+    const endExclusive = local.day === 1 && local.hour < 2
+      ? this.previousPeriodString(currentPeriod)
+      : currentPeriod;
+    const earliest = await UserSubscriptionTerm.findOne({ status: { $ne: 'REFUNDED' } }).sort({ startsAt: 1 }).select('startsAt').lean();
+    if (!earliest) return [];
+
+    const finalized: string[] = [];
+    let period = this.periodFor(earliest.startsAt);
+    while (period < endExclusive) {
+      const existing = await SubscriptionSettlement.findOne({ period }).select('status').lean();
+      if (!existing || !['LOCKED', 'AVAILABLE'].includes(existing.status as string)) {
+        await this.finalizeSettlement(period);
+        finalized.push(period);
+      }
+      period = this.nextPeriodString(period);
     }
-    settlement.status = status;
-    if (status === 'LOCKED') settlement.lockedAt = new Date();
-    if (status === 'AVAILABLE') settlement.availableAt = new Date();
-    await settlement.save();
-    await this.audit(actorId, 'ADMIN', 'SUBSCRIPTION_SETTLEMENT_STATUS_CHANGED', 'SubscriptionSettlement', settlement._id.toString(), { period, status });
-    return settlement;
+    return finalized;
   }
 
   public async getSettlements() {
@@ -369,75 +483,38 @@ class SubscriptionService {
         .filter((item) => item.instructorId === instructorId)
         .map((item) => ({ ...item, period: settlement.period, status: settlement.status }))
     );
+
+    const currentPeriod = this.periodFor(new Date());
+    const currentUsage = await SubscriptionUsage.aggregate<{
+      _id: { courseId: string; courseTitle: string };
+      qualifiedSeconds: number;
+      learnerIds: string[];
+    }>([
+      { $match: { instructorId, 'periodUsages.period': currentPeriod } },
+      { $unwind: '$periodUsages' },
+      { $match: { 'periodUsages.period': currentPeriod } },
+      { $group: {
+        _id: { courseId: '$courseId', courseTitle: '$courseTitle' },
+        qualifiedSeconds: { $sum: '$periodUsages.qualifiedSeconds' },
+        learnerIds: { $addToSet: '$userId' },
+      } },
+      { $sort: { qualifiedSeconds: -1, '_id.courseId': 1 } },
+    ]);
+    const currentQualifiedSeconds = currentUsage.reduce((sum, row) => sum + row.qualifiedSeconds, 0);
+
     return {
-      estimated: rows.filter((row) => ['OPEN', 'CALCULATED'].includes(row.status)).reduce((sum, row) => sum + row.amount, 0),
       pending: rows.filter((row) => row.status === 'LOCKED').reduce((sum, row) => sum + row.amount, 0),
       available: rows.filter((row) => row.status === 'AVAILABLE').reduce((sum, row) => sum + row.amount, 0),
-      qualifiedSeconds: rows.reduce((sum, row) => sum + row.qualifiedSeconds, 0),
+      currentQualifiedSeconds,
+      currentUsage: currentUsage.map((row) => ({
+        period: currentPeriod,
+        courseId: row._id.courseId,
+        courseTitle: row._id.courseTitle,
+        qualifiedSeconds: row.qualifiedSeconds,
+        learnerCount: row.learnerIds.length,
+      })),
       settlements: rows,
     };
-  }
-
-  public async refundTerm(termId: string, actorId: string, reason: string) {
-    const term = await UserSubscriptionTerm.findById(termId);
-    if (!term) throw new Error('Kỳ thuê bao không tồn tại.');
-    if (term.status === 'REFUNDED') return term;
-    const normalizedReason = reason.trim();
-    if (!normalizedReason) throw new Error('Vui lòng nhập lý do hoàn tiền.');
-    const refundDate = new Date();
-    const lockedSettlements = await SubscriptionSettlement.find({
-      status: { $in: ['LOCKED', 'AVAILABLE'] },
-    }).lean();
-    let recognizedRatio = 0;
-    for (const settlement of lockedSettlements) {
-      const { start, end } = this.periodBounds(settlement.period);
-      const overlapMs = Math.max(
-        0,
-        Math.min(term.endsAt.getTime(), end.getTime()) - Math.max(term.startsAt.getTime(), start.getTime())
-      );
-      recognizedRatio += overlapMs / (term.durationDays * 86400000);
-    }
-    recognizedRatio = Math.min(1, recognizedRatio);
-
-    term.status = 'REFUNDED';
-    term.refundedAt = refundDate;
-    term.refundReason = normalizedReason;
-    if (recognizedRatio > 0) {
-      term.refundAdjustmentPeriod = this.nextPeriod(refundDate);
-      term.refundGrossAdjustment = Math.round(term.price * recognizedRatio);
-      term.refundAdminAdjustment = Math.round(term.adminAmount * recognizedRatio);
-      term.refundInstructorPoolAdjustment = Math.round(term.instructorPoolAmount * recognizedRatio);
-    }
-    await term.save();
-    await PaymentTransaction.updateOne(
-      { _id: term.transactionId },
-      {
-        $set: {
-          status: 'REFUNDED',
-          refundedAt: refundDate,
-          refundedBy: actorId,
-          refundReason: normalizedReason,
-          failureReason: '',
-        },
-      }
-    );
-
-    const recalculableSettlements = await SubscriptionSettlement.find({ status: 'CALCULATED' }).lean();
-    for (const settlement of recalculableSettlements) {
-      const { start, end } = this.periodBounds(settlement.period);
-      if (term.startsAt < end && term.endsAt > start) {
-        await this.calculateSettlement(settlement.period, actorId);
-      }
-    }
-    await this.audit(actorId, 'ADMIN', 'SUBSCRIPTION_TERM_REFUNDED', 'UserSubscriptionTerm', term._id.toString(), {
-      reason: normalizedReason,
-      refundAdjustmentPeriod: term.refundAdjustmentPeriod || '',
-      refundGrossAdjustment: term.refundGrossAdjustment || 0,
-      refundAdminAdjustment: term.refundAdminAdjustment || 0,
-      refundInstructorPoolAdjustment: term.refundInstructorPoolAdjustment || 0,
-    });
-    await this.publishTerm(term);
-    return term;
   }
 
   public async getAdminTerms() {
@@ -458,26 +535,66 @@ class SubscriptionService {
     });
   }
 
-  private async audit(actorId: string, actorRole: string, action: string, entityType: string, entityId: string, details: Record<string, unknown>) {
-    await SubscriptionAudit.create({ actorId, actorRole, action, entityType, entityId, details });
-  }
-
   private addDays(date: Date, days: number) {
     return new Date(date.getTime() + days * 86400000);
+  }
+
+  private periodFor(date: Date) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      year: 'numeric',
+      month: '2-digit',
+    }).formatToParts(date);
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    if (!year || !month) throw new Error('Không thể xác định kỳ thuê bao.');
+    return year + '-' + month;
+  }
+
+  private localDateParts(date: Date) {
+    const values = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(date).map((part) => [part.type, part.value]));
+    return {
+      year: Number(values.year),
+      month: Number(values.month),
+      day: Number(values.day),
+      hour: Number(values.hour),
+    };
   }
 
   private periodBounds(period: string) {
     if (!/^\d{4}-\d{2}$/.test(period)) throw new Error('Kỳ settlement phải có định dạng YYYY-MM.');
     const [year, month] = period.split('-').map(Number);
-    const start = new Date(Date.UTC(year, month - 1, 1));
-    const end = new Date(Date.UTC(year, month, 1));
-    if (start.getUTCFullYear() !== year || start.getUTCMonth() !== month - 1) throw new Error('Kỳ settlement không hợp lệ.');
+    if (month < 1 || month > 12) throw new Error('Kỳ settlement không hợp lệ.');
+    const nextYear = month === 12 ? year + 1 : year;
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const start = new Date(
+      String(year).padStart(4, '0') + '-' + String(month).padStart(2, '0') + '-01T00:00:00+07:00'
+    );
+    const end = new Date(
+      String(nextYear).padStart(4, '0') + '-' + String(nextMonth).padStart(2, '0') + '-01T00:00:00+07:00'
+    );
     return { start, end };
   }
 
-  private nextPeriod(date: Date) {
-    const nextMonth = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1));
-    return `${nextMonth.getUTCFullYear()}-${String(nextMonth.getUTCMonth() + 1).padStart(2, '0')}`;
+  private nextPeriodString(period: string) {
+    const [year, month] = period.split('-').map(Number);
+    const nextYear = month === 12 ? year + 1 : year;
+    const nextMonth = month === 12 ? 1 : month + 1;
+    return String(nextYear).padStart(4, '0') + '-' + String(nextMonth).padStart(2, '0');
+  }
+
+  private previousPeriodString(period: string) {
+    const [year, month] = period.split('-').map(Number);
+    const previousYear = month === 1 ? year - 1 : year;
+    const previousMonth = month === 1 ? 12 : month - 1;
+    return String(previousYear).padStart(4, '0') + '-' + String(previousMonth).padStart(2, '0');
   }
 }
 

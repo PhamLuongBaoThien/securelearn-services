@@ -52,6 +52,7 @@ export enum RoutingKey {
   PAYMENT_COURSE_FAILED = "payment.course.failed",
   // Term thuê bao đổi trạng thái sẽ được fan-out sang course/identity để đồng bộ quyền học và projection UI.
   SUBSCRIPTION_TERM_CHANGED = "payment.subscription.term-changed",
+  SUBSCRIPTION_SETTLEMENT_AVAILABLE = "payment.subscription.settlement-available",
 
   // --- Asset Cleanup Events (course-service → media-service) ---
   VIDEO_ASSET_CLEANUP = "media.video.cleanup",
@@ -279,6 +280,15 @@ export interface SubscriptionTermChangedPayload {
   transactionCode: string;
 }
 
+export interface SubscriptionSettlementAvailablePayload {
+  eventId: string;
+  instructorId: string;
+  period: string;
+  amount: number;
+  qualifiedSeconds: number;
+  courseCount: number;
+  availableAt: string;
+}
 export interface ProgressLessonCompletedPayload {
   userId: string;
   courseId: string;

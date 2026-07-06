@@ -85,6 +85,10 @@ const normalizeCourseProgressContext = (payload: CourseProgressContextReply): Co
   totalLessons: payload.totalLessons,
   progressionMode: payload.progressionMode || 'FREE',
   instructorId: payload.instructorId || '',
+  accessSource: payload.accessSource || '',
+  subscriptionTermId: payload.subscriptionTermId || '',
+  accessEndsAt: payload.accessEndsAt || '',
+  courseTitle: payload.courseTitle || '',
   lessons: payload.lessons,
 });
 
@@ -212,6 +216,10 @@ export const createCourseGrpcServer = (handlers: {
           totalLessons: response.totalLessons,
           progressionMode: response.progressionMode || 'FREE',
           instructorId: response.instructorId || '',
+          accessSource: response.accessSource || '',
+          subscriptionTermId: response.subscriptionTermId || '',
+          accessEndsAt: response.accessEndsAt || '',
+          courseTitle: response.courseTitle || '',
           lessons: response.lessons,
         });
       } catch (error) {

@@ -14,6 +14,7 @@ import {
   type InboxTicketEventPayload,
   type CourseDiscussionEventPayload,
   type CourseAnnouncementPublishedPayload,
+  type SubscriptionSettlementAvailablePayload,
 } from '@securelearn/common';
 import notificationService, { type Recipient } from '../services/notification.service';
 
@@ -148,6 +149,13 @@ export const registerEventHandlers = async () => {
   await subscribeMessage<EnrollmentCreatedPayload>(Exchange.COURSE, RoutingKey.ENROLLMENT_CREATED, 'notification-service.enrollment-created', async p => {
     const [recipient] = await notificationService.getRecipients({ userId: p.instructorId, recipientType: 'USER' });
     if (recipient) await notificationService.sendEvent('ENROLLMENT_CREATED', recipient, { courseName: p.courseTitle, learnerName: p.learnerName || 'Một học viên' }, `event:${RoutingKey.ENROLLMENT_CREATED}:${p.enrollmentId}`, { category: 'LEARNING', actionUrl: '/instructor/students', actionLabel: 'Xem học viên' });
+  }, reliable);
+
+  await subscribeMessage<SubscriptionSettlementAvailablePayload>(Exchange.PAYMENT, RoutingKey.SUBSCRIPTION_SETTLEMENT_AVAILABLE, 'notification-service.subscription-settlement-available', async p => {
+    const [recipient] = await notificationService.getRecipients({ userId: p.instructorId, recipientType: 'USER' });
+    if (recipient) await notificationService.sendEvent('SUBSCRIPTION_SETTLEMENT_AVAILABLE', recipient, {
+      period: p.period, amount: p.amount.toLocaleString('vi-VN') + ' ₫', qualifiedMinutes: Math.floor(p.qualifiedSeconds / 60), courseCount: p.courseCount,
+    }, 'event:' + p.eventId, { category: 'PAYMENT', priority: 'HIGH', actionUrl: '/instructor/performance', actionLabel: 'Xem doanh thu', data: { ...p } });
   }, reliable);
 
   await subscribeMessage<CourseDiscussionEventPayload>(Exchange.COURSE, RoutingKey.DISCUSSION_CREATED, 'notification-service.discussion-created', p => handleDiscussionEvent('DISCUSSION_CREATED', p), reliable);

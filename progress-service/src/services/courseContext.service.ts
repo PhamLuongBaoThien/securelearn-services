@@ -18,10 +18,14 @@ export type CourseProgressContext = {
   allowed: boolean;
   reason?: string;
   courseId: string;
+  courseTitle: string;
   courseVersionId: string;
   totalLessons: number;
   progressionMode: ProgressionMode;
   instructorId: string;
+  accessSource: 'PURCHASE' | 'SUBSCRIPTION' | '';
+  subscriptionTermId: string;
+  accessEndsAt?: string;
   lessons: CourseLessonContext[];
 };
 
@@ -59,6 +63,10 @@ class CourseContextService {
       ...context,
       progressionMode: (context.progressionMode || 'FREE') as ProgressionMode,
       instructorId: context.instructorId || '',
+      accessSource: (context.accessSource || '') as CourseProgressContext['accessSource'],
+      subscriptionTermId: context.subscriptionTermId || '',
+      accessEndsAt: context.accessEndsAt || undefined,
+      courseTitle: context.courseTitle || '',
       lessons: context.lessons.map((lesson) => ({
         ...lesson,
         type: lesson.type as CourseLessonContext['type'],

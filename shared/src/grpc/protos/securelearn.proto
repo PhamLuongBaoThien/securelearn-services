@@ -94,6 +94,10 @@ message CourseProgressContextReply {
   repeated CourseProgressLesson lessons = 6;
   string progressionMode = 7;
   string instructorId = 8;
+  string accessSource = 9;
+  string subscriptionTermId = 10;
+  string accessEndsAt = 11;
+  string courseTitle = 12;
 }
 
 message SubscriptionUsageRequest {
@@ -103,12 +107,18 @@ message SubscriptionUsageRequest {
   string instructorId = 4;
   string lessonId = 5;
   string sessionId = 6;
-  int32 segmentIndex = 7;
+  reserved 7;
   int32 qualifiedSeconds = 8;
   string occurredAt = 9;
+  double rangeStartSeconds = 10;
+  double rangeEndSeconds = 11;
+  string eventId = 12;
+  string courseTitle = 13;
 }
 
 message SubscriptionUsageReply {
   string usageId = 1;
   bool duplicate = 2;
+  int32 acceptedSeconds = 3;
+  bool rejectedByPurchase = 4;
 }

@@ -10,6 +10,7 @@ import {
   RoutingKey,
   type PaymentCourseSucceededPayload,
   type PaymentCourseFailedPayload,
+  type SubscriptionSettlementAvailablePayload,
 } from '@securelearn/common';
 
 type SubscriptionTermChangedPayload = {
@@ -34,4 +35,8 @@ export const publishPaymentCourseFailed = async (payload: PaymentCourseFailedPay
 export const publishSubscriptionTermChanged = async (payload: SubscriptionTermChangedPayload): Promise<void> => {
   // Event này là nguồn đồng bộ cho course-service và identity-service khi term đổi trạng thái.
   await publishMessage(Exchange.PAYMENT, 'payment.subscription.term-changed' as RoutingKey, payload);
+};
+
+export const publishSubscriptionSettlementAvailable = async (payload: SubscriptionSettlementAvailablePayload): Promise<void> => {
+  await publishMessage(Exchange.PAYMENT, RoutingKey.SUBSCRIPTION_SETTLEMENT_AVAILABLE, payload);
 };

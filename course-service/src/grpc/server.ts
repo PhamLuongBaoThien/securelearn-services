@@ -115,7 +115,11 @@ export const createInternalGrpcServer = () =>
       return {
         allowed: Boolean(access.allowed),
         reason: access.allowed ? undefined : access.reason || 'NOT_ENTITLED',
+        accessSource: access.allowed && 'source' in access ? access.source || '' : '',
+        subscriptionTermId: access.allowed && 'termId' in access ? access.termId || '' : '',
+        accessEndsAt: access.allowed && 'accessEndsAt' in access && access.accessEndsAt instanceof Date ? access.accessEndsAt.toISOString() : '',
         courseId: course._id.toString(),
+        courseTitle: course.title,
         courseVersionId: currentVersionId,
         totalLessons: lessons.length,
         progressionMode: course.progressionMode || CourseProgressionMode.FREE,

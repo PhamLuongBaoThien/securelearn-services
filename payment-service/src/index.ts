@@ -29,9 +29,13 @@ const bootServer = async () => {
     // Seed plan mặc định và bật scheduler trạng thái term ngay khi service khởi động.
     await subscriptionService.ensureDefaultPlans();
     await subscriptionService.refreshTermStatuses();
+    await subscriptionService.finalizeDueSettlements();
     setInterval(() => {
-      subscriptionService.refreshTermStatuses().catch((error) => {
-        console.error('[SubscriptionScheduler] Không thể cập nhật trạng thái kỳ thuê bao:', error);
+      Promise.all([
+        subscriptionService.refreshTermStatuses(),
+        subscriptionService.finalizeDueSettlements(),
+      ]).catch((error) => {
+        console.error('[SubscriptionScheduler] Không thể cập nhật term hoặc chốt settlement:', error);
       });
     }, 60_000).unref();
     // IPN local có thể gián đoạn khi tunnel đổi URL; query định kỳ giữ trạng thái MoMo đồng bộ.

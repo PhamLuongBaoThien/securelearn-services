@@ -36,6 +36,7 @@ export {
   type ProgressCourseCompletedPayload,
   type SubscriptionTermStatus,
   type SubscriptionTermChangedPayload,
+  type SubscriptionSettlementAvailablePayload,
   type InboxEventType,
   type InboxItemCreatedPayload,
   type InboxTicketEventPayload,

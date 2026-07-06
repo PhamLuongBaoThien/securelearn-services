@@ -26,7 +26,8 @@ class FinanceController {
   public async getSplitConfig(req: AuthRequest, res: Response): Promise<void> {
     try {
       this.ensureAdmin(req);
-      const data = await paymentService.getFinanceSplitConfig();
+      const productType = req.query.productType === 'SUBSCRIPTION' ? 'SUBSCRIPTION' : 'COURSE';
+      const data = await paymentService.getFinanceSplitConfig(productType);
       res.status(200).json({ status: 'OK', data });
     } catch (error: any) {
       res.status(error.message.includes('quyền') ? 403 : 400).json({ status: 'ERR', message: error.message });
@@ -37,10 +38,11 @@ class FinanceController {
     try {
       this.ensureAdmin(req);
       const { adminPercent, instructorPercent } = req.body as { adminPercent?: number; instructorPercent?: number };
+      const productType = req.query.productType === 'SUBSCRIPTION' ? 'SUBSCRIPTION' : 'COURSE';
       const data = await paymentService.updateFinanceSplitConfig({
         adminPercent: Number(adminPercent),
         instructorPercent: Number(instructorPercent),
-      });
+      }, productType);
       res.status(200).json({ status: 'OK', message: 'Đã cập nhật cấu hình chia doanh thu.', data });
     } catch (error: any) {
       res.status(error.message.includes('quyền') ? 403 : 400).json({ status: 'ERR', message: error.message });
@@ -56,6 +58,7 @@ class FinanceController {
         endDate: String(req.query.endDate || ''),
         provider: String(req.query.provider || ''),
         status: String(req.query.status || ''),
+        productType: req.query.productType === 'SUBSCRIPTION' ? 'SUBSCRIPTION' : req.query.productType === 'COURSE' ? 'COURSE' : undefined,
         page: req.query.page ? Number(req.query.page) : 1,
         limit: req.query.limit ? Number(req.query.limit) : 10,
       });
@@ -74,6 +77,7 @@ class FinanceController {
         endDate: String(req.query.endDate || ''),
         provider: String(req.query.provider || ''),
         status: String(req.query.status || ''),
+        productType: req.query.productType === 'SUBSCRIPTION' ? 'SUBSCRIPTION' : req.query.productType === 'COURSE' ? 'COURSE' : undefined,
         page: req.query.page ? Number(req.query.page) : 1,
         limit: req.query.limit ? Number(req.query.limit) : 10,
       });

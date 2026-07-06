@@ -2,7 +2,7 @@
 // Subscription Controller
 // Mục đích:
 // - mở API public/admin cho gói thuê bao
-// - nhận checkout thuê bao, settlement và refund
+// - nhận checkout thuê bao và quản lý settlement tự động
 // - giữ controller mỏng, dồn nghiệp vụ về subscriptionService/paymentService
 // ========================
 import { Request, Response } from 'express';
@@ -71,7 +71,7 @@ class SubscriptionController {
   public upsertPlan = async (req: AuthRequest, res: Response) => {
     try {
       this.ensureAdmin(req);
-      const data = await subscriptionService.upsertPlan(req.body, req.userId!);
+      const data = await subscriptionService.upsertPlan(req.body);
       res.status(200).json({ status: 'OK', message: 'Đã lưu gói thuê bao.', data });
     } catch (error: any) {
       res.status(error.message.includes('quyền') ? 403 : 400).json({ status: 'ERR', message: error.message });
@@ -87,30 +87,12 @@ class SubscriptionController {
     }
   };
 
-  public refund = async (req: AuthRequest, res: Response) => {
-    try {
-      this.ensureAdmin(req);
-      const data = await subscriptionService.refundTerm(String(req.params.termId), req.userId!, String(req.body.reason || 'Admin manual refund'));
-      res.status(200).json({ status: 'OK', message: 'Đã ghi nhận hoàn tiền và thu hồi kỳ thuê bao.', data });
-    } catch (error: any) {
-      res.status(error.message.includes('quyền') ? 403 : 400).json({ status: 'ERR', message: error.message });
-    }
-  };
 
-  public calculateSettlement = async (req: AuthRequest, res: Response) => {
-    try {
-      this.ensureAdmin(req);
-      const data = await subscriptionService.calculateSettlement(String(req.params.period), req.userId!);
-      res.status(200).json({ status: 'OK', data });
-    } catch (error: any) {
-      res.status(error.message.includes('quyền') ? 403 : 400).json({ status: 'ERR', message: error.message });
-    }
-  };
 
   public updateSettlementStatus = async (req: AuthRequest, res: Response) => {
     try {
       this.ensureAdmin(req);
-      const data = await subscriptionService.updateSettlementStatus(String(req.params.period), req.body.status, req.userId!);
+      const data = await subscriptionService.updateSettlementStatus(String(req.params.period), req.body.status);
       res.status(200).json({ status: 'OK', data });
     } catch (error: any) {
       res.status(error.message.includes('quyền') ? 403 : 400).json({ status: 'ERR', message: error.message });

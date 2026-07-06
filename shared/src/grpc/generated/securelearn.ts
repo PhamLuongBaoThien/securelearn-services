@@ -158,6 +158,10 @@ export interface CourseProgressContextReply {
   lessons: CourseProgressLesson[];
   progressionMode: string;
   instructorId: string;
+  accessSource: string;
+  subscriptionTermId: string;
+  accessEndsAt: string;
+  courseTitle: string;
 }
 
 export interface SubscriptionUsageRequest {
@@ -167,14 +171,19 @@ export interface SubscriptionUsageRequest {
   instructorId: string;
   lessonId: string;
   sessionId: string;
-  segmentIndex: number;
   qualifiedSeconds: number;
   occurredAt: string;
+  rangeStartSeconds: number;
+  rangeEndSeconds: number;
+  eventId: string;
+  courseTitle: string;
 }
 
 export interface SubscriptionUsageReply {
   usageId: string;
   duplicate: boolean;
+  acceptedSeconds: number;
+  rejectedByPurchase: boolean;
 }
 
 function createBaseIdentitySnapshotRequest(): IdentitySnapshotRequest {
@@ -2189,6 +2198,10 @@ function createBaseCourseProgressContextReply(): CourseProgressContextReply {
     lessons: [],
     progressionMode: "",
     instructorId: "",
+    accessSource: "",
+    subscriptionTermId: "",
+    accessEndsAt: "",
+    courseTitle: "",
   };
 }
 
@@ -2217,6 +2230,18 @@ export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> 
     }
     if (message.instructorId !== "") {
       writer.uint32(66).string(message.instructorId);
+    }
+    if (message.accessSource !== "") {
+      writer.uint32(74).string(message.accessSource);
+    }
+    if (message.subscriptionTermId !== "") {
+      writer.uint32(82).string(message.subscriptionTermId);
+    }
+    if (message.accessEndsAt !== "") {
+      writer.uint32(90).string(message.accessEndsAt);
+    }
+    if (message.courseTitle !== "") {
+      writer.uint32(98).string(message.courseTitle);
     }
     return writer;
   },
@@ -2292,6 +2317,38 @@ export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> 
           message.instructorId = reader.string();
           continue;
         }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.accessSource = reader.string();
+          continue;
+        }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.subscriptionTermId = reader.string();
+          continue;
+        }
+        case 11: {
+          if (tag !== 90) {
+            break;
+          }
+
+          message.accessEndsAt = reader.string();
+          continue;
+        }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.courseTitle = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2313,6 +2370,10 @@ export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> 
         : [],
       progressionMode: isSet(object.progressionMode) ? globalThis.String(object.progressionMode) : "",
       instructorId: isSet(object.instructorId) ? globalThis.String(object.instructorId) : "",
+      accessSource: isSet(object.accessSource) ? globalThis.String(object.accessSource) : "",
+      subscriptionTermId: isSet(object.subscriptionTermId) ? globalThis.String(object.subscriptionTermId) : "",
+      accessEndsAt: isSet(object.accessEndsAt) ? globalThis.String(object.accessEndsAt) : "",
+      courseTitle: isSet(object.courseTitle) ? globalThis.String(object.courseTitle) : "",
     };
   },
 
@@ -2342,6 +2403,18 @@ export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> 
     if (message.instructorId !== "") {
       obj.instructorId = message.instructorId;
     }
+    if (message.accessSource !== "") {
+      obj.accessSource = message.accessSource;
+    }
+    if (message.subscriptionTermId !== "") {
+      obj.subscriptionTermId = message.subscriptionTermId;
+    }
+    if (message.accessEndsAt !== "") {
+      obj.accessEndsAt = message.accessEndsAt;
+    }
+    if (message.courseTitle !== "") {
+      obj.courseTitle = message.courseTitle;
+    }
     return obj;
   },
 
@@ -2358,6 +2431,10 @@ export const CourseProgressContextReply: MessageFns<CourseProgressContextReply> 
     message.lessons = object.lessons?.map((e) => CourseProgressLesson.fromPartial(e)) || [];
     message.progressionMode = object.progressionMode ?? "";
     message.instructorId = object.instructorId ?? "";
+    message.accessSource = object.accessSource ?? "";
+    message.subscriptionTermId = object.subscriptionTermId ?? "";
+    message.accessEndsAt = object.accessEndsAt ?? "";
+    message.courseTitle = object.courseTitle ?? "";
     return message;
   },
 };
@@ -2370,9 +2447,12 @@ function createBaseSubscriptionUsageRequest(): SubscriptionUsageRequest {
     instructorId: "",
     lessonId: "",
     sessionId: "",
-    segmentIndex: 0,
     qualifiedSeconds: 0,
     occurredAt: "",
+    rangeStartSeconds: 0,
+    rangeEndSeconds: 0,
+    eventId: "",
+    courseTitle: "",
   };
 }
 
@@ -2396,14 +2476,23 @@ export const SubscriptionUsageRequest: MessageFns<SubscriptionUsageRequest> = {
     if (message.sessionId !== "") {
       writer.uint32(50).string(message.sessionId);
     }
-    if (message.segmentIndex !== 0) {
-      writer.uint32(56).int32(message.segmentIndex);
-    }
     if (message.qualifiedSeconds !== 0) {
       writer.uint32(64).int32(message.qualifiedSeconds);
     }
     if (message.occurredAt !== "") {
       writer.uint32(74).string(message.occurredAt);
+    }
+    if (message.rangeStartSeconds !== 0) {
+      writer.uint32(81).double(message.rangeStartSeconds);
+    }
+    if (message.rangeEndSeconds !== 0) {
+      writer.uint32(89).double(message.rangeEndSeconds);
+    }
+    if (message.eventId !== "") {
+      writer.uint32(98).string(message.eventId);
+    }
+    if (message.courseTitle !== "") {
+      writer.uint32(106).string(message.courseTitle);
     }
     return writer;
   },
@@ -2463,14 +2552,6 @@ export const SubscriptionUsageRequest: MessageFns<SubscriptionUsageRequest> = {
           message.sessionId = reader.string();
           continue;
         }
-        case 7: {
-          if (tag !== 56) {
-            break;
-          }
-
-          message.segmentIndex = reader.int32();
-          continue;
-        }
         case 8: {
           if (tag !== 64) {
             break;
@@ -2485,6 +2566,38 @@ export const SubscriptionUsageRequest: MessageFns<SubscriptionUsageRequest> = {
           }
 
           message.occurredAt = reader.string();
+          continue;
+        }
+        case 10: {
+          if (tag !== 81) {
+            break;
+          }
+
+          message.rangeStartSeconds = reader.double();
+          continue;
+        }
+        case 11: {
+          if (tag !== 89) {
+            break;
+          }
+
+          message.rangeEndSeconds = reader.double();
+          continue;
+        }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.eventId = reader.string();
+          continue;
+        }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.courseTitle = reader.string();
           continue;
         }
       }
@@ -2504,9 +2617,12 @@ export const SubscriptionUsageRequest: MessageFns<SubscriptionUsageRequest> = {
       instructorId: isSet(object.instructorId) ? globalThis.String(object.instructorId) : "",
       lessonId: isSet(object.lessonId) ? globalThis.String(object.lessonId) : "",
       sessionId: isSet(object.sessionId) ? globalThis.String(object.sessionId) : "",
-      segmentIndex: isSet(object.segmentIndex) ? globalThis.Number(object.segmentIndex) : 0,
       qualifiedSeconds: isSet(object.qualifiedSeconds) ? globalThis.Number(object.qualifiedSeconds) : 0,
       occurredAt: isSet(object.occurredAt) ? globalThis.String(object.occurredAt) : "",
+      rangeStartSeconds: isSet(object.rangeStartSeconds) ? globalThis.Number(object.rangeStartSeconds) : 0,
+      rangeEndSeconds: isSet(object.rangeEndSeconds) ? globalThis.Number(object.rangeEndSeconds) : 0,
+      eventId: isSet(object.eventId) ? globalThis.String(object.eventId) : "",
+      courseTitle: isSet(object.courseTitle) ? globalThis.String(object.courseTitle) : "",
     };
   },
 
@@ -2530,14 +2646,23 @@ export const SubscriptionUsageRequest: MessageFns<SubscriptionUsageRequest> = {
     if (message.sessionId !== "") {
       obj.sessionId = message.sessionId;
     }
-    if (message.segmentIndex !== 0) {
-      obj.segmentIndex = Math.round(message.segmentIndex);
-    }
     if (message.qualifiedSeconds !== 0) {
       obj.qualifiedSeconds = Math.round(message.qualifiedSeconds);
     }
     if (message.occurredAt !== "") {
       obj.occurredAt = message.occurredAt;
+    }
+    if (message.rangeStartSeconds !== 0) {
+      obj.rangeStartSeconds = message.rangeStartSeconds;
+    }
+    if (message.rangeEndSeconds !== 0) {
+      obj.rangeEndSeconds = message.rangeEndSeconds;
+    }
+    if (message.eventId !== "") {
+      obj.eventId = message.eventId;
+    }
+    if (message.courseTitle !== "") {
+      obj.courseTitle = message.courseTitle;
     }
     return obj;
   },
@@ -2553,15 +2678,18 @@ export const SubscriptionUsageRequest: MessageFns<SubscriptionUsageRequest> = {
     message.instructorId = object.instructorId ?? "";
     message.lessonId = object.lessonId ?? "";
     message.sessionId = object.sessionId ?? "";
-    message.segmentIndex = object.segmentIndex ?? 0;
     message.qualifiedSeconds = object.qualifiedSeconds ?? 0;
     message.occurredAt = object.occurredAt ?? "";
+    message.rangeStartSeconds = object.rangeStartSeconds ?? 0;
+    message.rangeEndSeconds = object.rangeEndSeconds ?? 0;
+    message.eventId = object.eventId ?? "";
+    message.courseTitle = object.courseTitle ?? "";
     return message;
   },
 };
 
 function createBaseSubscriptionUsageReply(): SubscriptionUsageReply {
-  return { usageId: "", duplicate: false };
+  return { usageId: "", duplicate: false, acceptedSeconds: 0, rejectedByPurchase: false };
 }
 
 export const SubscriptionUsageReply: MessageFns<SubscriptionUsageReply> = {
@@ -2571,6 +2699,12 @@ export const SubscriptionUsageReply: MessageFns<SubscriptionUsageReply> = {
     }
     if (message.duplicate !== false) {
       writer.uint32(16).bool(message.duplicate);
+    }
+    if (message.acceptedSeconds !== 0) {
+      writer.uint32(24).int32(message.acceptedSeconds);
+    }
+    if (message.rejectedByPurchase !== false) {
+      writer.uint32(32).bool(message.rejectedByPurchase);
     }
     return writer;
   },
@@ -2598,6 +2732,22 @@ export const SubscriptionUsageReply: MessageFns<SubscriptionUsageReply> = {
           message.duplicate = reader.bool();
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.acceptedSeconds = reader.int32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.rejectedByPurchase = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2611,6 +2761,8 @@ export const SubscriptionUsageReply: MessageFns<SubscriptionUsageReply> = {
     return {
       usageId: isSet(object.usageId) ? globalThis.String(object.usageId) : "",
       duplicate: isSet(object.duplicate) ? globalThis.Boolean(object.duplicate) : false,
+      acceptedSeconds: isSet(object.acceptedSeconds) ? globalThis.Number(object.acceptedSeconds) : 0,
+      rejectedByPurchase: isSet(object.rejectedByPurchase) ? globalThis.Boolean(object.rejectedByPurchase) : false,
     };
   },
 
@@ -2622,6 +2774,12 @@ export const SubscriptionUsageReply: MessageFns<SubscriptionUsageReply> = {
     if (message.duplicate !== false) {
       obj.duplicate = message.duplicate;
     }
+    if (message.acceptedSeconds !== 0) {
+      obj.acceptedSeconds = Math.round(message.acceptedSeconds);
+    }
+    if (message.rejectedByPurchase !== false) {
+      obj.rejectedByPurchase = message.rejectedByPurchase;
+    }
     return obj;
   },
 
@@ -2632,6 +2790,8 @@ export const SubscriptionUsageReply: MessageFns<SubscriptionUsageReply> = {
     const message = createBaseSubscriptionUsageReply();
     message.usageId = object.usageId ?? "";
     message.duplicate = object.duplicate ?? false;
+    message.acceptedSeconds = object.acceptedSeconds ?? 0;
+    message.rejectedByPurchase = object.rejectedByPurchase ?? false;
     return message;
   },
 };
