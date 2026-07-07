@@ -5,6 +5,7 @@ export interface AccessIdentity {
   id: string;
   role: string;
   sid?: string;
+  permissions: string[];
 }
 
 export const verifyAccessToken = async (token?: string): Promise<AccessIdentity> => {
@@ -20,5 +21,10 @@ export const verifyAccessToken = async (token?: string): Promise<AccessIdentity>
     if (decoded.sid && states[1]) throw new Error('Phiên đăng nhập đã bị thu hồi.');
   }
 
-  return { id: String(decoded.id), role: String(decoded.role), sid: decoded.sid ? String(decoded.sid) : undefined };
+  return {
+    id: String(decoded.id),
+    role: String(decoded.role),
+    sid: decoded.sid ? String(decoded.sid) : undefined,
+    permissions: Array.isArray(decoded.permissions) ? decoded.permissions.map(String) : [],
+  };
 };

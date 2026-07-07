@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import adminController from '../controllers/admin.controller';
 import { extractUser } from '../middlewares/auth.middleware';
-import { forbidSelfAdminDeletion, requireSuperAdmin } from '../middlewares/admin-authz.middleware';
+import { forbidSelfAdminDeletion, requirePermission, requireSuperAdmin } from '../middlewares/admin-authz.middleware';
 import upload from '../middlewares/upload.middleware';
 
 const router = Router();
@@ -48,7 +48,7 @@ router.delete('/staff/:id', extractUser, requireSuperAdmin, forbidSelfAdminDelet
 
 // ─── Role Permissions (SUPER_ADMIN only) ──────────────────────────────────────
 // [GET] /api/admin/auth/roles — Lấy tất cả role + permissions (cho phép mọi admin đọc để render menu)
-router.get('/roles', extractUser, adminController.getRolePermissions);
+router.get('/roles', extractUser, requireSuperAdmin, adminController.getRolePermissions);
 
 // [POST] /api/admin/auth/roles — Tạo role mới
 router.post('/roles', extractUser, requireSuperAdmin, adminController.createRole);
@@ -61,18 +61,18 @@ router.delete('/roles/:role', extractUser, requireSuperAdmin, adminController.de
 
 // ─── User Management (Student & Instructor) ───────────────────────────────────
 // [GET] /api/admin/auth/users
-router.get('/users', extractUser, adminController.getUsers);
+router.get('/users', extractUser, requirePermission('user:read'), adminController.getUsers);
 
 // [PATCH] /api/admin/auth/users/multi-lock
-router.patch('/users/multi-lock', extractUser, adminController.multiLockUsers);
+router.patch('/users/multi-lock', extractUser, requirePermission('user:lock'), adminController.multiLockUsers);
 
 // [PATCH] /api/admin/auth/users/multi-unlock
-router.patch('/users/multi-unlock', extractUser, adminController.multiUnlockUsers);
+router.patch('/users/multi-unlock', extractUser, requirePermission('user:lock'), adminController.multiUnlockUsers);
 
 // [PATCH] /api/admin/auth/users/:id/lock
-router.patch('/users/:id/lock', extractUser, adminController.lockUser);
+router.patch('/users/:id/lock', extractUser, requirePermission('user:lock'), adminController.lockUser);
 
 // [PATCH] /api/admin/auth/users/:id/unlock
-router.patch('/users/:id/unlock', extractUser, adminController.unlockUser);
+router.patch('/users/:id/unlock', extractUser, requirePermission('user:lock'), adminController.unlockUser);
 
 export default router;

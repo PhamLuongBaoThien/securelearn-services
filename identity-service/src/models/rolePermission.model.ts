@@ -98,10 +98,10 @@ export async function seedRolePermissions(): Promise<void> {
       { label: { $exists: false } },
       [{ $set: { label: '$roleKey', color: 'zinc', isSystem: false } }]
     );
-    // Đảm bảo role hệ thống nhận permission mới sau migration.
+    // Đảm bảo role hệ thống luôn nhận đủ permission mới sau migration.
     await RolePermission.updateOne(
       { roleKey: 'SUPER_ADMIN' },
-      { $set: { isSystem: true }, $addToSet: { permissions: 'inbox:manage' } }
+      { $set: { isSystem: true, permissions: [...ALL_PERMISSIONS] } }
     );
     await RolePermission.updateOne(
       { roleKey: 'SUPPORT_AGENT' },
