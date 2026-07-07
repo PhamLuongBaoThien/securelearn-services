@@ -222,6 +222,34 @@ services:
           - POST
           - DELETE
 
+  - name: content-service
+    url: http://content-service:5008
+    routes:
+      - name: content-preflight
+        paths:
+          - /api/banners
+          - /api/admin/system/banners
+        strip_path: false
+        methods:
+          - OPTIONS
+
+      - name: content-public
+        paths:
+          - /api/banners
+        strip_path: false
+        methods:
+          - GET
+
+      - name: content-admin-protected
+        paths:
+          - /api/admin/system/banners
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
   - name: payment-service
     url: http://payment-service:5004
     routes:
@@ -456,6 +484,13 @@ plugins:
 
   - name: jwt
     route: course-admin-protected
+    config:
+      key_claim_name: iss
+      claims_to_verify:
+        - exp
+
+  - name: jwt
+    route: content-admin-protected
     config:
       key_claim_name: iss
       claims_to_verify:
