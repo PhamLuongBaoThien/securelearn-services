@@ -126,5 +126,15 @@ const paymentTransactionSchema = new Schema<IPaymentTransaction>(
 );
 
 paymentTransactionSchema.index({ userId: 1, createdAt: -1 });
+paymentTransactionSchema.index({ amount: 1 });
+paymentTransactionSchema.index({ createdAt: -1 });
+paymentTransactionSchema.index({ amount: -1, createdAt: -1 });
+paymentTransactionSchema.index({ amount: 1, createdAt: -1 });
+paymentTransactionSchema.index({ productType: 1, createdAt: -1 });
+paymentTransactionSchema.index({ productType: 1, amount: -1, createdAt: -1 });
+paymentTransactionSchema.index({ productType: 1, amount: 1, createdAt: -1 });
+paymentTransactionSchema.index({ provider: 1, status: 1, productType: 1, createdAt: -1 });
+paymentTransactionSchema.index({ provider: 1, status: 1, productType: 1, amount: -1, createdAt: -1 });
+paymentTransactionSchema.index({ provider: 1, status: 1, productType: 1, amount: 1, createdAt: -1 });
 
 export const PaymentTransaction = model<IPaymentTransaction>('PaymentTransaction', paymentTransactionSchema);

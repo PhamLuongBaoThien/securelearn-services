@@ -45,7 +45,7 @@ type EvaluatedCoupon = {
 };
 
 class CouponService {
-  public async listAdminCoupons(query?: { search?: string; status?: string; page?: number; limit?: number }) {
+  public async listAdminCoupons(query?: { search?: string; status?: string; sort?: string; page?: number; limit?: number }) {
     const filter: Record<string, any> = {};
     const search = String(query?.search || '').trim();
     if (search) {
@@ -61,13 +61,30 @@ class CouponService {
     const limit = Math.min(Math.max(Number(query?.limit || 20), 1), 100);
     const skip = (page - 1) * limit;
 
-    const coupons = await Coupon.find(filter).sort({ createdAt: -1 });
+    const couponSortOptions: Record<string, Record<string, 1 | -1>> = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      code_asc: { code: 1, createdAt: -1 },
+      code_desc: { code: -1, createdAt: -1 },
+      expires_soon: { endsAt: 1, createdAt: -1 },
+    };
+    const sortKey = query?.sort || 'newest';
+    const couponSort = couponSortOptions[sortKey] || couponSortOptions.newest;
+    const coupons = await Coupon.find(filter).sort(couponSort);
     const filteredCoupons = this.filterComputedStatus(coupons, normalizedStatus);
-    const pagedCoupons = filteredCoupons.slice(skip, skip + limit);
+    const sortedCoupons = sortKey === 'expires_soon'
+      ? [...filteredCoupons].sort((a, b) => {
+          const aEndsAt = a.endsAt ? new Date(a.endsAt).getTime() : Number.POSITIVE_INFINITY;
+          const bEndsAt = b.endsAt ? new Date(b.endsAt).getTime() : Number.POSITIVE_INFINITY;
+          if (aEndsAt !== bEndsAt) return aEndsAt - bEndsAt;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        })
+      : filteredCoupons;
+    const pagedCoupons = sortedCoupons.slice(skip, skip + limit);
 
     return {
       coupons: pagedCoupons.map((coupon) => this.mapCoupon(coupon)),
-      total: filteredCoupons.length,
+      total: sortedCoupons.length,
       page,
       limit,
     };

@@ -20,6 +20,7 @@ class CouponController {
       const data = await couponService.listAdminCoupons({
         search: String(req.query.search || ''),
         status: String(req.query.status || ''),
+        sort: String(req.query.sort || 'newest'),
         page: req.query.page ? Number(req.query.page) : 1,
         limit: req.query.limit ? Number(req.query.limit) : 20,
       });

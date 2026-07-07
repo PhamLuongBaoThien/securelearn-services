@@ -149,6 +149,14 @@ userSchema.index(
   { phone: 1 },
   { unique: true, partialFilterExpression: { phone: { $type: 'string' } } },
 );
+userSchema.index({ createdAt: -1 });
+userSchema.index({ fullName: 1, email: 1 });
+userSchema.index({ role: 1, createdAt: -1 });
+userSchema.index({ role: 1, fullName: 1, email: 1 });
+userSchema.index({ isLocked: 1, createdAt: -1 });
+userSchema.index({ isLocked: 1, fullName: 1, email: 1 });
+userSchema.index({ fullName: 1 });
+userSchema.index({ lastLoginAt: -1 });
 
 userSchema.pre('save', function (next) {
   this.hasPassword = Boolean(this.password);

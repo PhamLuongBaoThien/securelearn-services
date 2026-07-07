@@ -77,6 +77,7 @@ class FinanceController {
         endDate: String(req.query.endDate || ''),
         provider: String(req.query.provider || ''),
         status: String(req.query.status || ''),
+        sort: String(req.query.sort || 'newest'),
         productType: req.query.productType === 'SUBSCRIPTION' ? 'SUBSCRIPTION' : req.query.productType === 'COURSE' ? 'COURSE' : undefined,
         page: req.query.page ? Number(req.query.page) : 1,
         limit: req.query.limit ? Number(req.query.limit) : 10,

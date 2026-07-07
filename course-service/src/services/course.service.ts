@@ -816,6 +816,7 @@ class CourseService {
     limit?: number;
     search?: string;
     status?: string;
+    sort?: string;
   }): Promise<{
     courses: CourseReviewResponse[];
     total: number;
@@ -835,11 +836,19 @@ class CourseService {
       ];
     }
 
+    const reviewSortOptions: Record<string, Record<string, 1 | -1>> = {
+      submitted_desc: { submittedAt: -1, updatedAt: -1 },
+      submitted_asc: { submittedAt: 1, updatedAt: 1 },
+      title_asc: { title: 1, submittedAt: -1 },
+      title_desc: { title: -1, submittedAt: -1 },
+    };
+    const reviewSort = reviewSortOptions[query.sort || 'submitted_desc'] || reviewSortOptions.submitted_desc;
+
     // Admin review làm việc trực tiếp trên CourseVersion PENDING, gồm cả khóa mới và bản cập nhật.
     const [versions, total] = await Promise.all([
       CourseVersion.find(filter)
         .populate("categoryId", "name slug parentId")
-        .sort({ submittedAt: -1, updatedAt: -1 })
+        .sort(reviewSort)
         .skip(skip)
         .limit(limit)
         .lean(),
@@ -1352,6 +1361,7 @@ class CourseService {
     limit?: number;
     search?: string;
     status?: SubscriptionCatalogStatus;
+    sort?: string;
   }) {
     const page = Math.max(1, query.page || 1);
     const limit = Math.min(100, Math.max(1, query.limit || 20));
@@ -1367,10 +1377,18 @@ class CourseService {
       ];
     }
 
+    const subscriptionSortOptions: Record<string, Record<string, 1 | -1>> = {
+      submitted_desc: { updatedAt: -1 },
+      submitted_asc: { updatedAt: 1 },
+      title_asc: { title: 1, updatedAt: -1 },
+      title_desc: { title: -1, updatedAt: -1 },
+    };
+    const subscriptionSort = subscriptionSortOptions[query.sort || 'submitted_desc'] || subscriptionSortOptions.submitted_desc;
+
     const [courses, total] = await Promise.all([
       Course.find(filter)
         .populate("categoryId", "name slug parentId")
-        .sort({ updatedAt: -1 })
+        .sort(subscriptionSort)
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),

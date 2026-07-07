@@ -1022,6 +1022,7 @@ class PaymentService {
     endDate?: string;
     provider?: string;
     status?: string;
+    sort?: string;
     productType?: 'COURSE' | 'SUBSCRIPTION';
     page?: number;
     limit?: number;
@@ -1052,8 +1053,15 @@ class PaymentService {
     const page = Math.max(Number(query?.page || 1), 1);
     const limit = Math.min(Math.max(Number(query?.limit || 10), 1), 100);
     const skip = (page - 1) * limit;
+    const transactionSortOptions: Record<string, Record<string, 1 | -1>> = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      amount_desc: { amount: -1, createdAt: -1 },
+      amount_asc: { amount: 1, createdAt: -1 },
+    };
+    const transactionSort = transactionSortOptions[query?.sort || 'newest'] || transactionSortOptions.newest;
     const [transactions, total] = await Promise.all([
-      PaymentTransaction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      PaymentTransaction.find(filter).sort(transactionSort).skip(skip).limit(limit),
       PaymentTransaction.countDocuments(filter),
     ]);
     return { transactions, total, page, limit, filter };
@@ -1321,6 +1329,7 @@ class PaymentService {
     endDate?: string;
     provider?: string;
     status?: string;
+    sort?: string;
     productType?: 'COURSE' | 'SUBSCRIPTION';
     page?: number;
     limit?: number;

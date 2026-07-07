@@ -96,6 +96,13 @@ const courseVersionSchema = new Schema<ICourseVersion>(
 
 courseVersionSchema.index({ courseId: 1, versionNumber: 1 }, { unique: true });
 courseVersionSchema.index({ instructorId: 1, status: 1 });
+courseVersionSchema.index({ title: 1 });
+courseVersionSchema.index({ submittedAt: -1 });
+courseVersionSchema.index({ updatedAt: -1 });
+courseVersionSchema.index({ status: 1, submittedAt: -1, updatedAt: -1 });
+courseVersionSchema.index({ status: 1, submittedAt: 1, updatedAt: 1 });
+courseVersionSchema.index({ status: 1, title: 1, submittedAt: -1 });
+courseVersionSchema.index({ status: 1, title: -1, submittedAt: -1 });
 
 // Slug của version được tạo từ title khi title thay đổi.
 // Không yêu cầu unique (không có unique constraint), nhưng vẫn được generate đồng bộ với Course shell.

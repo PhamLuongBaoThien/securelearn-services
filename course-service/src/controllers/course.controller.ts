@@ -324,12 +324,13 @@ class CourseController {
    */
   public async getCoursesForReview(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { page, limit, search, status } = req.query;
+      const { page, limit, search, status, sort } = req.query;
       const result = await courseService.getCoursesForReview({
         page: page ? Number(page) : undefined,
         limit: limit ? Number(limit) : undefined,
         search: search as string,
         status: status as string,
+        sort: sort as string,
       });
       res.status(200).json({ status: 'OK', message: 'Lấy danh sách khóa học chờ duyệt thành công.', data: result });
     } catch (error: any) {
@@ -352,12 +353,13 @@ class CourseController {
 
   public async getSubscriptionReviewCourses(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { page, limit, search, status } = req.query;
+      const { page, limit, search, status, sort } = req.query;
       const result = await courseService.getSubscriptionReviewCourses({
         page: page ? Number(page) : undefined,
         limit: limit ? Number(limit) : undefined,
         search: search as string,
         status: status as any,
+        sort: sort as string,
       });
       res.status(200).json({ status: 'OK', data: result });
     } catch (error: any) {

@@ -307,7 +307,7 @@ class AdminController {
    */
   public async getUsers(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { role, status, search, page = 1, limit = 20 } = req.query;
+      const { role, status, search, sort, page = 1, limit = 20 } = req.query;
 
       const query: Record<string, any> = {};
       if (role) query.role = role;
@@ -329,10 +329,17 @@ class AdminController {
       }
 
       const skip = (Number(page) - 1) * Number(limit);
+      const sortOptions: Record<string, Record<string, 1 | -1>> = {
+        newest: { createdAt: -1 },
+        oldest: { createdAt: 1 },
+        name_asc: { fullName: 1, email: 1 },
+        name_desc: { fullName: -1, email: -1 },
+      };
+      const sortOption = sortOptions[String(sort || 'newest')] || sortOptions.newest;
       const [users, total] = await Promise.all([
         User.find(query)
           .select('-password')
-          .sort({ createdAt: -1 })
+          .sort(sortOption)
           .skip(skip)
           .limit(Number(limit))
           .lean(),

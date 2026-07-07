@@ -46,4 +46,11 @@ const ticketSchema = new Schema(
   { timestamps: true },
 );
 ticketSchema.index({ "sender.id": 1, lastActivityAt: -1 });
+ticketSchema.index({ createdAt: -1 });
+ticketSchema.index({ type: 1, status: 1, lastActivityAt: -1 });
+ticketSchema.index({ type: 1, status: 1, lastActivityAt: 1 });
+ticketSchema.index({ type: 1, status: 1, createdAt: -1 });
+ticketSchema.index({ type: 1, status: 1, createdAt: 1 });
+ticketSchema.index({ status: 1, lastActivityAt: -1 });
+ticketSchema.index({ status: 1, createdAt: -1 });
 export const Ticket = mongoose.model("InboxTicket", ticketSchema);

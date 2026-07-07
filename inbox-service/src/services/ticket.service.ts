@@ -178,9 +178,16 @@ class TicketService {
     if (q.from) date.$gte = new Date(q.from);
     if (q.to) date.$lte = new Date(`${q.to}T23:59:59.999Z`);
     if (Object.keys(date).length) f.createdAt = date;
+    const sortOptions: Record<string, Record<string, 1 | -1>> = {
+      activity_desc: { lastActivityAt: -1 },
+      activity_asc: { lastActivityAt: 1 },
+      created_desc: { createdAt: -1 },
+      created_asc: { createdAt: 1 },
+    };
+    const sortOption = sortOptions[String(q.sort || 'activity_desc')] || sortOptions.activity_desc;
     const [items, total] = await Promise.all([
       Ticket.find(f)
-        .sort({ lastActivityAt: -1 })
+        .sort(sortOption)
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),

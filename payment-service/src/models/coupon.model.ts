@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Coupon Model
 // Mục đích:
 // - lưu cấu hình coupon do Admin Finance quản lý cho flow mua khóa học
@@ -57,6 +57,14 @@ const couponSchema = new Schema<ICoupon>(
 );
 
 couponSchema.index({ code: 'text', name: 'text' });
+couponSchema.index({ value: 1 });
+couponSchema.index({ endsAt: 1 });
+couponSchema.index({ createdAt: -1 });
+couponSchema.index({ endsAt: 1, createdAt: -1 });
+couponSchema.index({ value: -1, createdAt: -1 });
+couponSchema.index({ code: 1, createdAt: -1 });
+couponSchema.index({ isActive: 1, createdAt: -1 });
+couponSchema.index({ isActive: 1, endsAt: 1, createdAt: -1 });
 
 export const Coupon = model<ICoupon>('Coupon', couponSchema);
 

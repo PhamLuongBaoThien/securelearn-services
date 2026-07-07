@@ -168,6 +168,14 @@ const courseSchema = new Schema<ICourse>(
 );
 
 courseSchema.index({ instructorId: 1, status: 1 });
+courseSchema.index({ title: 1 });
+courseSchema.index({ price: 1 });
+courseSchema.index({ enrollmentCount: -1 });
+courseSchema.index({ updatedAt: -1 });
+courseSchema.index({ status: 1, subscriptionStatus: 1, updatedAt: -1 });
+courseSchema.index({ status: 1, subscriptionStatus: 1, updatedAt: 1 });
+courseSchema.index({ status: 1, subscriptionStatus: 1, title: 1, updatedAt: -1 });
+courseSchema.index({ status: 1, subscriptionStatus: 1, title: -1, updatedAt: -1 });
 
 // Slug được tạo từ title khi title thay đổi.
 // Nếu slug đã tồn tại thì thêm hậu tố số (-2, -3, ...) cho đến khi tìm được slug chưa dùng.
