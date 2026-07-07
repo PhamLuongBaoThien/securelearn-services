@@ -1,4 +1,4 @@
-﻿# ========================
+# ========================
 # Kong Declarative Configuration
 # API Gateway cho SecureLearn Microservices
 #
@@ -229,6 +229,8 @@ services:
         paths:
           - /api/banners
           - /api/admin/system/banners
+          - /api/website-config
+          - /api/admin/system/config
         strip_path: false
         methods:
           - OPTIONS
@@ -236,6 +238,7 @@ services:
       - name: content-public
         paths:
           - /api/banners
+          - /api/website-config
         strip_path: false
         methods:
           - GET
@@ -243,6 +246,7 @@ services:
       - name: content-admin-protected
         paths:
           - /api/admin/system/banners
+          - /api/admin/system/config
         strip_path: false
         methods:
           - GET
