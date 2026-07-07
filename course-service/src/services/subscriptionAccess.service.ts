@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Subscription Access Service
 // Mục đích:
 // - quản lý catalog thuê bao, enroll bằng thuê bao và entitlement khi học
@@ -118,6 +118,20 @@ class SubscriptionAccessService {
     });
     await course.save();
     return course;
+  }
+
+  public async multiReview(
+    courseIds: string[],
+    action: 'APPROVE' | 'REJECT' | 'REMOVE',
+    reviewer: { id: string; name?: string; email?: string },
+    reason = ''
+  ) {
+    const results = await Promise.all(
+      courseIds.map(async (id) => {
+        return this.review(id, action, reviewer, reason);
+      })
+    );
+    return results;
   }
 
   public async catalog() {

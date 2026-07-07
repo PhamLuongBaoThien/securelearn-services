@@ -15,6 +15,7 @@ router.get('/', extractUser, requireAdmin, requirePermission('course:read'), cou
 router.get('/:id/students', extractUser, requireAdmin, requirePermission('course:read'), courseController.getCourseStudents);
 router.get('/review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getCoursesForReview);
 router.get('/subscription-review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getSubscriptionReviewCourses);
+router.patch('/subscription-review/multi', extractUser, requireAdmin, requirePermission('course:approve'), subscriptionAccessController.multiReview);
 router.get('/:id/subscription-review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getSubscriptionReviewDetail);
 router.get('/:id/review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getCourseReviewDetail);
 router.patch('/:id/approve', extractUser, requireAdmin, requirePermission('course:approve'), courseController.approveCourse);

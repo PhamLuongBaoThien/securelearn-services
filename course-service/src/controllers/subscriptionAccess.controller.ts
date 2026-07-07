@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Subscription Access Controller
 // Mục đích:
 // - mở API opt-in catalog, enroll bằng thuê bao và entitlement
@@ -43,6 +43,25 @@ class SubscriptionAccessController {
     try {
       const data = await subscriptionAccessService.review(
         String(req.params.id),
+        req.body.action,
+        { id: req.userId!, name: req.userName, email: req.userEmail },
+        String(req.body.reason || '')
+      );
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  };
+
+  public multiReview = async (req: AuthRequest, res: Response) => {
+    try {
+      const ids = req.body.ids;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp danh sách ID khóa học.' });
+        return;
+      }
+      const data = await subscriptionAccessService.multiReview(
+        ids,
         req.body.action,
         { id: req.userId!, name: req.userName, email: req.userEmail },
         String(req.body.reason || '')

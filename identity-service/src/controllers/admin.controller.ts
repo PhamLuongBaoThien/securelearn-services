@@ -222,6 +222,32 @@ class AdminController {
     }
   }
 
+  /**
+   * [DELETE] /api/admin/auth/staff/multi
+   */
+  public async multiDeleteStaff(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const ids = req.body.ids;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp danh sách ID nhân viên.' });
+        return;
+      }
+      if (ids.includes(req.userId)) {
+        res.status(400).json({ status: 'ERR', message: 'Không thể tự xóa tài khoản của chính mình.' });
+        return;
+      }
+      const superAdmins = await Admin.find({ _id: { $in: ids }, adminRole: 'SUPER_ADMIN' });
+      if (superAdmins.length > 0) {
+        res.status(400).json({ status: 'ERR', message: 'Không thể xóa tài khoản Super Admin.' });
+        return;
+      }
+      await Admin.deleteMany({ _id: { $in: ids } });
+      res.status(200).json({ status: 'OK', message: 'Xóa các tài khoản thành công.' });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   // ─── Role Permissions ──────────────────────────────────────────────────────
 
   /**
@@ -427,6 +453,83 @@ class AdminController {
       }
       await redisClient.del(`locked_user:${user._id.toString()}`);
       res.status(200).json({ status: 'OK', message: 'Đã mở khóa tài khoản.' });
+    } catch (err: any) {
+      res.status(500).json({ status: 'ERR', message: err.message });
+    }
+  }
+
+  /**
+   * [PATCH] /api/admin/auth/users/multi-lock
+   */
+  public async multiLockUsers(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const ids = req.body.ids;
+      const reason = String(req.body.reason || '').trim();
+      if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp danh sách ID người dùng.' });
+        return;
+      }
+      if (!reason) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng nhập lý do khóa tài khoản.' });
+        return;
+      }
+
+      await User.updateMany(
+        { _id: { $in: ids } },
+        {
+          $set: {
+            isLocked: true,
+            lockedAt: new Date(),
+            lockedBy: req.userId,
+            lockReason: reason,
+          }
+        }
+      );
+
+      await Promise.all(
+        ids.map(async (id) => {
+          await redisClient.set(`locked_user:${id}`, '1');
+          await authSessionService.revokeAll(id, 'ACCOUNT_LOCKED');
+        })
+      );
+
+      res.status(200).json({ status: 'OK', message: 'Đã khóa các tài khoản.' });
+    } catch (err: any) {
+      res.status(500).json({ status: 'ERR', message: err.message });
+    }
+  }
+
+  /**
+   * [PATCH] /api/admin/auth/users/multi-unlock
+   */
+  public async multiUnlockUsers(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const ids = req.body.ids;
+      const reason = String(req.body.reason || '').trim();
+      if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp danh sách ID người dùng.' });
+        return;
+      }
+
+      await User.updateMany(
+        { _id: { $in: ids } },
+        {
+          $set: {
+            isLocked: false,
+            unlockedAt: new Date(),
+            unlockedBy: req.userId,
+            unlockReason: reason,
+          }
+        }
+      );
+
+      await Promise.all(
+        ids.map(async (id) => {
+          await redisClient.del(`locked_user:${id}`);
+        })
+      );
+
+      res.status(200).json({ status: 'OK', message: 'Đã mở khóa các tài khoản.' });
     } catch (err: any) {
       res.status(500).json({ status: 'ERR', message: err.message });
     }

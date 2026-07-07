@@ -37,6 +37,9 @@ router.get('/staff', extractUser, requireSuperAdmin, adminController.getStaff);
 // [POST] /api/admin/auth/staff
 router.post('/staff', extractUser, requireSuperAdmin, adminController.createStaff);
 
+// [DELETE] /api/admin/auth/staff/multi
+router.delete('/staff/multi', extractUser, requireSuperAdmin, adminController.multiDeleteStaff);
+
 // [PUT] /api/admin/auth/staff/:id
 router.put('/staff/:id', extractUser, requireSuperAdmin, adminController.updateStaff);
 
@@ -59,6 +62,12 @@ router.delete('/roles/:role', extractUser, requireSuperAdmin, adminController.de
 // ─── User Management (Student & Instructor) ───────────────────────────────────
 // [GET] /api/admin/auth/users
 router.get('/users', extractUser, adminController.getUsers);
+
+// [PATCH] /api/admin/auth/users/multi-lock
+router.patch('/users/multi-lock', extractUser, adminController.multiLockUsers);
+
+// [PATCH] /api/admin/auth/users/multi-unlock
+router.patch('/users/multi-unlock', extractUser, adminController.multiUnlockUsers);
 
 // [PATCH] /api/admin/auth/users/:id/lock
 router.patch('/users/:id/lock', extractUser, adminController.lockUser);

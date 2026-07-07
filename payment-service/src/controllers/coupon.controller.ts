@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Coupon Controller
 // Mục đích:
 // - nhận request HTTP cho coupon từ learner và Admin Finance
@@ -63,6 +63,36 @@ class CouponController {
     try {
       await couponService.deleteCoupon(String(req.params.id || ''));
       res.status(200).json({ status: 'OK', message: 'Đã xóa coupon.' });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async multiUpdateStatus(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const ids = req.body.ids;
+      const isActive = Boolean(req.body.isActive);
+      if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp danh sách ID coupon.' });
+        return;
+      }
+      const actorName = req.userName || req.userEmail || req.userId || '';
+      await couponService.multiUpdateStatus(ids, isActive, req.userId || '', actorName);
+      res.status(200).json({ status: 'OK', message: 'Đã cập nhật trạng thái các coupon.' });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async multiDelete(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const ids = req.body.ids;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng cung cấp danh sách ID coupon.' });
+        return;
+      }
+      await couponService.multiDeleteCoupons(ids);
+      res.status(200).json({ status: 'OK', message: 'Đã xóa các coupon.' });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }

@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Coupon Service
 // Mục đích:
 // - gom toàn bộ nghiệp vụ coupon cho Admin và learner ở payment-service
@@ -122,6 +122,28 @@ class CouponService {
     if (redeemed) throw new Error('Coupon đã được sử dụng, chỉ có thể tạm dừng.');
     const deleted = await Coupon.findByIdAndDelete(id);
     if (!deleted) throw new Error('Coupon không tồn tại.');
+  }
+
+  public async multiUpdateStatus(ids: string[], isActive: boolean, adminId: string, adminName = '') {
+    const invalidIds = ids.filter(id => !Types.ObjectId.isValid(id));
+    if (invalidIds.length > 0) throw new Error('Có ID coupon không hợp lệ.');
+
+    await Coupon.updateMany(
+      { _id: { $in: ids } },
+      { $set: { isActive, updatedBy: adminId, updatedByName: adminName } }
+    );
+  }
+
+  public async multiDeleteCoupons(ids: string[]) {
+    const invalidIds = ids.filter(id => !Types.ObjectId.isValid(id));
+    if (invalidIds.length > 0) throw new Error('Có ID coupon không hợp lệ.');
+
+    const redeemedExists = await CouponRedemption.exists({ couponId: { $in: ids } });
+    if (redeemedExists) {
+      throw new Error('Có coupon đã được sử dụng trong danh sách chọn, chỉ có thể tạm tắt.');
+    }
+
+    await Coupon.deleteMany({ _id: { $in: ids } });
   }
 
   public async getAvailableCoupons(userId: string | undefined, subtotal: number) {

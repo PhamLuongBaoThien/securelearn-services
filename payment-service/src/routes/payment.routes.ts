@@ -37,6 +37,8 @@ router.get('/admin/finance/transactions', extractUser, requirePermission('financ
 
 router.get('/admin/coupons/stats', extractUser, requirePermission('finance:read'), couponController.stats);
 router.get('/admin/coupon-redemptions', extractUser, requirePermission('finance:read'), couponController.redemptions);
+router.post('/admin/coupons/multi-delete', extractUser, requirePermission('finance:manage'), couponController.multiDelete);
+router.patch('/admin/coupons/multi-status', extractUser, requirePermission('finance:manage'), couponController.multiUpdateStatus);
 router.get('/admin/coupons/:id/stats', extractUser, requirePermission('finance:read'), couponController.couponStats);
 router.get('/admin/coupons/:id/redemptions', extractUser, requirePermission('finance:read'), couponController.couponRedemptions);
 router.get('/admin/coupons', extractUser, requirePermission('finance:read'), couponController.listAdmin);
