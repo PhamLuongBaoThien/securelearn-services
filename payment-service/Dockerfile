@@ -1,12 +1,6 @@
-# Dockerfile: Payment Service
-# Build context phải là backend/ (không phải payment-service/)
-
-FROM node:20-alpine AS builder
-
-WORKDIR /build
-
-COPY shared/package*.json ./shared/
+FROM node:20.19.4-alpine3.21 AS builder
 WORKDIR /build/shared
+COPY shared/package*.json ./
 RUN npm ci
 COPY shared/tsconfig.json ./
 COPY shared/scripts ./scripts
@@ -15,28 +9,25 @@ RUN npm run build
 
 WORKDIR /build/service
 COPY payment-service/package*.json ./
-RUN sed -i 's|"file:../shared"|"file:/build/shared"|' package.json
-RUN npm install
-
+RUN npm ci
 COPY payment-service/tsconfig.json ./
 COPY payment-service/src ./src
 RUN npm run build
 
-FROM node:20-alpine
+FROM node:20.19.4-alpine3.21 AS runtime
 
-WORKDIR /app
+ENV NODE_ENV=production
+WORKDIR /app/shared
+COPY shared/package*.json ./
+COPY --from=builder /build/shared/dist ./dist
+RUN npm ci --omit=dev
 
-COPY --from=builder /build/shared /app/shared
-
+WORKDIR /app/service
 COPY payment-service/package*.json ./
-RUN sed -i 's|"file:../shared"|"file:/app/shared"|' package.json
-RUN npm install --omit=dev
-
+RUN npm ci --omit=dev
 COPY --from=builder /build/service/dist ./dist
 
-EXPOSE 5004
-
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:5004/health || exit 1
-
+USER node
+EXPOSE 5004 6004
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:5004/health/live || exit 1
 CMD ["node", "dist/index.js"]

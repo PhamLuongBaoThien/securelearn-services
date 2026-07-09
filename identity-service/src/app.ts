@@ -2,6 +2,7 @@
 // Express App Configuration
 // ========================
 import express, { Application, Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import passport from 'passport';
@@ -31,8 +32,12 @@ app.use(passport.initialize());
 routes(app);
 
 // ===== Health Check =====
-app.get('/health', (_req: Request, res: Response) => {
+app.get('/health/live', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'OK', service: 'identity-service' });
+});
+app.get('/health/ready', (_req: Request, res: Response) => {
+  const mongo = mongoose.connection.readyState === 1;
+  res.status(mongo ? 200 : 503).json({ status: mongo ? 'OK' : 'DEGRADED', service: 'identity-service', dependencies: { mongo } });
 });
 
 // ===== Error Handler =====

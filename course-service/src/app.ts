@@ -1,4 +1,4 @@
-﻿// ========================
+// ========================
 // Express App Configuration — Course Service
 // ========================
 import express, { Application, Request, Response, NextFunction } from 'express';
@@ -27,7 +27,10 @@ app.use(cookieParser());
 routes(app);
 
 // ===== Health Check =====
-app.get('/health', (_req: Request, res: Response) => {
+app.get('/health/live', (_req: Request, res: Response) => {
+  res.status(200).json({ status: 'OK', service: 'src' });
+});
+app.get('/health/ready', (_req: Request, res: Response) => {
   const dependencies = {
     mongo: mongoose.connection.readyState === 1,
     rabbitmq: RabbitMQConnection.getInstance().isConnected(),

@@ -10,14 +10,20 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 registerRoutes(app);
 
-app.get('/health', (_req: Request, res: Response) => {
+app.get('/health/live', (_req: Request, res: Response) => {
+  res.status(200).json({ status: 'OK', service: 'content-service' });
+});
+
+const readiness = (_req: Request, res: Response) => {
   const mongo = mongoose.connection.readyState === 1;
   res.status(mongo ? 200 : 503).json({
     status: mongo ? 'OK' : 'DEGRADED',
     service: 'content-service',
     dependencies: { mongo },
   });
-});
+};
+app.get('/health/ready', readiness);
+app.get('/health', readiness);
 
 app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[ContentService]', err);

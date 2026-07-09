@@ -5,6 +5,7 @@
 // - seed plan mặc định và bật scheduler cập nhật trạng thái term thuê bao
 // ========================
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 dotenv.config();
 
 import { connectDB } from './config/db';
@@ -15,6 +16,7 @@ import paymentService from './services/payment.service';
 import { createInternalGrpcServer } from './grpc/server';
 
 const PORT = process.env.PORT || 5004;
+let httpServer: ReturnType<typeof app.listen> | null = null;
 const GRPC_BIND = process.env.PAYMENT_GRPC_BIND || '0.0.0.0:6004';
 let grpcServer: { forceShutdown: () => void } | null = null;
 
@@ -49,7 +51,7 @@ const bootServer = async () => {
     }, 30_000).unref();
     grpcServer = await startGrpcServer(createInternalGrpcServer(), GRPC_BIND);
 
-    app.listen(PORT, () => {
+    httpServer = app.listen(PORT, () => {
       console.log(`Payment Service đang chạy tại http://localhost:${PORT}`);
       console.log(`API Payments: http://localhost:${PORT}/api/payments`);
       console.log(`Payment gRPC đang chạy tại ${GRPC_BIND}`);
@@ -63,6 +65,8 @@ const bootServer = async () => {
 const gracefulShutdown = async () => {
   console.log('\nĐang tắt Payment Service...');
   grpcServer?.forceShutdown();
+  await new Promise<void>((resolve) => httpServer ? httpServer.close(() => resolve()) : resolve());
+  await mongoose.disconnect();
   await RabbitMQConnection.getInstance().close();
   process.exit(0);
 };

@@ -1,15 +1,33 @@
-FROM node:20-alpine AS build
-WORKDIR /app
-COPY shared ./shared
-COPY inbox-service ./inbox-service
-WORKDIR /app/shared
-RUN npm ci && npm run build
-WORKDIR /app/inbox-service
-RUN npm ci && npm run build
-FROM node:20-alpine
-WORKDIR /app
-COPY --from=build /app/shared ./shared
-COPY --from=build /app/inbox-service ./inbox-service
-WORKDIR /app/inbox-service
+FROM node:20.19.4-alpine3.21 AS builder
+WORKDIR /build/shared
+COPY shared/package*.json ./
+RUN npm ci
+COPY shared/tsconfig.json ./
+COPY shared/scripts ./scripts
+COPY shared/src ./src
+RUN npm run build
+
+WORKDIR /build/service
+COPY inbox-service/package*.json ./
+RUN npm ci
+COPY inbox-service/tsconfig.json ./
+COPY inbox-service/src ./src
+RUN npm run build
+
+FROM node:20.19.4-alpine3.21 AS runtime
+
 ENV NODE_ENV=production
-CMD ["npm","start"]
+WORKDIR /app/shared
+COPY shared/package*.json ./
+COPY --from=builder /build/shared/dist ./dist
+RUN npm ci --omit=dev
+
+WORKDIR /app/service
+COPY inbox-service/package*.json ./
+RUN npm ci --omit=dev
+COPY --from=builder /build/service/dist ./dist
+
+USER node
+EXPOSE 5007
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:5007/health/live || exit 1
+CMD ["node", "dist/index.js"]

@@ -29,7 +29,7 @@ consumers:
   - username: securelearn-app
     jwt_secrets:
       - key: "securelearn"
-        secret: "securelearn_access_token_secret"
+        secret: '{{ getenv "KONG_JWT_SECRET" }}'
         algorithm: HS256
 
 services:

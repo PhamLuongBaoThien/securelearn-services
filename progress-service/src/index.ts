@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 dotenv.config();
 
 import { connectDB } from './config/db';
@@ -9,6 +10,7 @@ import { registerEventHandlers } from './events/handlers';
 import subscriptionUsageOutboxService from './services/subscriptionUsageOutbox.service';
 
 const PORT = process.env.PORT || 5005;
+let httpServer: ReturnType<typeof app.listen> | null = null;
 
 const bootServer = async () => {
   try {
@@ -26,7 +28,7 @@ const bootServer = async () => {
     await subscriptionUsageOutboxService.flush();
     setInterval(() => void subscriptionUsageOutboxService.flush(), 10_000).unref();
 
-    app.listen(PORT, () => {
+    httpServer = app.listen(PORT, () => {
       console.log(`Progress Service đang chạy tại http://localhost:${PORT}`);
       console.log(`API Progress: http://localhost:${PORT}/api/progress`);
     });
@@ -38,7 +40,9 @@ const bootServer = async () => {
 
 const gracefulShutdown = async () => {
   console.log('\nĐang tắt Progress Service...');
+  await new Promise<void>((resolve) => httpServer ? httpServer.close(() => resolve()) : resolve());
   redisClient.disconnect();
+  await mongoose.disconnect();
   await RabbitMQConnection.getInstance().close();
   process.exit(0);
 };

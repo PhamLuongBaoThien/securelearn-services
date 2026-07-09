@@ -1,15 +1,6 @@
-# ========================
-# Dockerfile: Media Service
-# Build context phải là backend/ để truy cập shared/
-# Runtime cần ffmpeg vì video-service có HLS processing
-# ========================
-
-FROM node:20-alpine AS builder
-
-WORKDIR /build
-
-COPY shared/package*.json ./shared/
+FROM node:20.19.4-alpine3.21 AS builder
 WORKDIR /build/shared
+COPY shared/package*.json ./
 RUN npm ci
 COPY shared/tsconfig.json ./
 COPY shared/scripts ./scripts
@@ -18,30 +9,27 @@ RUN npm run build
 
 WORKDIR /build/service
 COPY media-service/package*.json ./
-RUN sed -i 's|"file:../shared"|"file:/build/shared"|' package.json
-RUN npm install
-
+RUN npm ci
 COPY media-service/tsconfig.json ./
 COPY media-service/src ./src
 RUN npm run build
 
-FROM node:20-alpine
-
+FROM node:20.19.4-alpine3.21 AS runtime
 RUN apk add --no-cache ffmpeg
 
-WORKDIR /app
+ENV NODE_ENV=production
+WORKDIR /app/shared
+COPY shared/package*.json ./
+COPY --from=builder /build/shared/dist ./dist
+RUN npm ci --omit=dev
 
-COPY --from=builder /build/shared /app/shared
-
+WORKDIR /app/service
 COPY media-service/package*.json ./
-RUN sed -i 's|"file:../shared"|"file:/app/shared"|' package.json
-RUN npm install --omit=dev
-
+RUN npm ci --omit=dev
 COPY --from=builder /build/service/dist ./dist
+RUN mkdir -p tmp-media/incoming && chown -R node:node /app/service
 
-EXPOSE 5003
-
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:5003/health || exit 1
-
+USER node
+EXPOSE 5003 6003
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:5003/health/live || exit 1
 CMD ["node", "dist/index.js"]

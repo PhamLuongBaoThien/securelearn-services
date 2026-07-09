@@ -7,6 +7,7 @@
 // - app.use('/api/payments', paymentRoutes)
 // - /health
 import express, { Application, Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import routes from './routes/index.routes';
@@ -24,8 +25,12 @@ app.use(cookieParser());
 // Khởi tạo các routes
 routes(app);
 
-app.get('/health', (_req: Request, res: Response) => {
+app.get('/health/live', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'OK', service: 'payment-service' });
+});
+app.get('/health/ready', (_req: Request, res: Response) => {
+  const mongo = mongoose.connection.readyState === 1;
+  res.status(mongo ? 200 : 503).json({ status: mongo ? 'OK' : 'DEGRADED', service: 'payment-service', dependencies: { mongo } });
 });
 
 app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {

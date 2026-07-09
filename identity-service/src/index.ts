@@ -5,6 +5,7 @@
 // - lắng nghe event thuê bao để đồng bộ projection subscriptionStatus cho UI
 // ========================
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 dotenv.config();
 
 import { connectDB } from './config/db';
@@ -17,6 +18,7 @@ import { User } from './models/user.model';
 import publicProfileSlugService from './services/publicProfileSlug.service';
 
 const PORT = process.env.PORT || 5001;
+let httpServer: ReturnType<typeof app.listen> | null = null;
 const GRPC_BIND = process.env.IDENTITY_GRPC_BIND || '0.0.0.0:6001';
 let grpcServer: { forceShutdown: () => void } | null = null;
 
@@ -42,7 +44,7 @@ const bootServer = async () => {
     grpcServer = await startGrpcServer(createInternalGrpcServer(), GRPC_BIND);
 
     // Bật server Express
-    app.listen(PORT, () => {
+    httpServer = app.listen(PORT, () => {
       console.log(`Identity Service đang chạy tại http://localhost:${PORT}`);
       console.log(`API Auth: http://localhost:${PORT}/api/auth`);
     });
@@ -57,6 +59,8 @@ const bootServer = async () => {
 const gracefulShutdown = async () => {
   console.log('\nĐang tắt Identity Service...');
   grpcServer?.forceShutdown();
+  await new Promise<void>((resolve) => httpServer ? httpServer.close(() => resolve()) : resolve());
+  await mongoose.disconnect();
   await RabbitMQConnection.getInstance().close();
   process.exit(0);
 };
