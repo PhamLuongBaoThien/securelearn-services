@@ -178,6 +178,13 @@ type CourseShellLike = {
   subscriptionReviewedBy?: string;
   subscriptionReviewedByName?: string;
   subscriptionReviewedByEmail?: string;
+  adminWatch?: {
+    isWatched?: boolean;
+    watchedAt?: Date | null;
+    watchedBy?: string;
+    watchedByName?: string;
+    watchedByEmail?: string;
+  };
   progressionMode?: CourseProgressionMode;
   createdAt: Date;
   updatedAt: Date;
@@ -228,6 +235,13 @@ interface AdminCourseListResponse {
   level: string;
   status: string;
   subscriptionStatus: SubscriptionCatalogStatus;
+  adminWatch: {
+    isWatched: boolean;
+    watchedAt: Date | null;
+    watchedBy: string;
+    watchedByName: string;
+    watchedByEmail: string;
+  };
   price: number;
   totalLessons: number;
   totalSections: number;
@@ -874,6 +888,7 @@ class CourseService {
     categoryId?: string;
     level?: string;
     instructorId?: string;
+    adminWatched?: boolean;
     sort?: string;
   }): Promise<{
     courses: AdminCourseListResponse[];
@@ -918,6 +933,18 @@ class CourseService {
     }
     if (query.level) filter.level = query.level;
     if (query.instructorId?.trim()) filter.instructorId = query.instructorId.trim();
+    if (query.adminWatched === true) filter['adminWatch.isWatched'] = true;
+    if (query.adminWatched === false) {
+      filter.$and = [
+        ...((filter.$and as Record<string, unknown>[]) || []),
+        {
+          $or: [
+            { 'adminWatch.isWatched': false },
+            { 'adminWatch.isWatched': { $exists: false } },
+          ],
+        },
+      ];
+    }
 
     let sortOption: Record<string, 1 | -1> = { updatedAt: -1 };
     switch (query.sort) {
@@ -954,6 +981,7 @@ class CourseService {
         subscriptionApproved: number;
         subscriptionPending: number;
         withDraft: number;
+        adminWatched: number;
       }>([
         {
           $match: {
@@ -998,6 +1026,11 @@ class CourseService {
                 ],
               },
             },
+            adminWatched: {
+              $sum: {
+                $cond: [{ $eq: ["$adminWatch.isWatched", true] }, 1, 0],
+              },
+            },
           },
         },
       ]),
@@ -1008,6 +1041,7 @@ class CourseService {
       subscriptionApproved: 0,
       subscriptionPending: 0,
       withDraft: 0,
+      adminWatched: 0,
     };
 
     return {
@@ -1020,6 +1054,50 @@ class CourseService {
       summary,
     };
   }
+
+  public async updateAdminCourseWatch(
+    ids: string[],
+    isWatched: boolean,
+    reviewer: ReviewerSnapshot,
+  ): Promise<{ matched: number; modified: number }> {
+    const objectIds = Array.from(new Set(ids))
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+
+    if (objectIds.length === 0) throw new Error("Vui lòng chọn ít nhất một khóa học hợp lệ.");
+
+    const update = isWatched
+      ? {
+          $set: {
+            "adminWatch.isWatched": true,
+            "adminWatch.watchedAt": new Date(),
+            "adminWatch.watchedBy": reviewer.adminId,
+            "adminWatch.watchedByName": reviewer.adminName,
+            "adminWatch.watchedByEmail": reviewer.adminEmail,
+          },
+        }
+      : {
+          $set: {
+            "adminWatch.isWatched": false,
+            "adminWatch.watchedAt": null,
+            "adminWatch.watchedBy": "",
+            "adminWatch.watchedByName": "",
+            "adminWatch.watchedByEmail": "",
+          },
+        };
+
+    const result = await Course.updateMany(
+      {
+        _id: { $in: objectIds },
+        status: CourseStatus.PUBLISHED,
+        currentVersionId: { $ne: null },
+      },
+      update,
+    );
+
+    return { matched: result.matchedCount, modified: result.modifiedCount };
+  }
+
   public async getCourseReviewDetail(
     versionId: string,
   ): Promise<CourseResponse> {
@@ -2073,6 +2151,13 @@ class CourseService {
       status: course.status,
       subscriptionStatus:
         course.subscriptionStatus || SubscriptionCatalogStatus.NOT_OPTED_IN,
+      adminWatch: {
+        isWatched: Boolean(course.adminWatch?.isWatched),
+        watchedAt: course.adminWatch?.watchedAt || null,
+        watchedBy: course.adminWatch?.watchedBy || "",
+        watchedByName: course.adminWatch?.watchedByName || "",
+        watchedByEmail: course.adminWatch?.watchedByEmail || "",
+      },
       price: course.price || 0,
       totalLessons: course.totalLessons || 0,
       totalSections: course.totalSections || 0,

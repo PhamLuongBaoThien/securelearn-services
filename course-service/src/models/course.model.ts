@@ -81,6 +81,13 @@ export interface ICourse extends Document {
     reason: string;
     reviewedAt: Date;
   }>;
+  adminWatch: {
+    isWatched: boolean;
+    watchedAt?: Date | null;
+    watchedBy: string;
+    watchedByName: string;
+    watchedByEmail: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -161,6 +168,13 @@ const courseSchema = new Schema<ICourse>(
     subscriptionReviewedByName: { type: String, default: '' },
     subscriptionReviewedByEmail: { type: String, default: '' },
     subscriptionReviewHistory: { type: [subscriptionReviewHistorySchema], default: [] },
+    adminWatch: {
+      isWatched: { type: Boolean, default: false, index: true },
+      watchedAt: { type: Date, default: null },
+      watchedBy: { type: String, default: '' },
+      watchedByName: { type: String, default: '' },
+      watchedByEmail: { type: String, default: '' },
+    },
   },
   {
     timestamps: true,
@@ -176,6 +190,7 @@ courseSchema.index({ status: 1, subscriptionStatus: 1, updatedAt: -1 });
 courseSchema.index({ status: 1, subscriptionStatus: 1, updatedAt: 1 });
 courseSchema.index({ status: 1, subscriptionStatus: 1, title: 1, updatedAt: -1 });
 courseSchema.index({ status: 1, subscriptionStatus: 1, title: -1, updatedAt: -1 });
+courseSchema.index({ status: 1, 'adminWatch.isWatched': 1, updatedAt: -1 });
 
 // Slug được tạo từ title khi title thay đổi.
 // Nếu slug đã tồn tại thì thêm hậu tố số (-2, -3, ...) cho đến khi tìm được slug chưa dùng.

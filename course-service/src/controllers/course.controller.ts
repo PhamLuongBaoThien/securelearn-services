@@ -300,6 +300,7 @@ class CourseController {
         categoryId,
         level,
         instructorId,
+        adminWatched,
         sort,
       } = req.query;
       const result = await courseService.getAdminCourses({
@@ -311,6 +312,7 @@ class CourseController {
         categoryId: categoryId as string,
         level: level as string,
         instructorId: instructorId as string,
+        adminWatched: adminWatched === 'true' ? true : adminWatched === 'false' ? false : undefined,
         sort: sort as string,
       });
       res.status(200).json({ status: 'OK', data: result });
@@ -318,6 +320,25 @@ class CourseController {
       res.status(500).json({ status: 'ERR', message: error.message });
     }
   }
+  public async updateAdminCourseWatch(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const ids = Array.isArray(req.body.ids) ? req.body.ids.map(String) : [];
+      const isWatched = Boolean(req.body.isWatched);
+      const result = await courseService.updateAdminCourseWatch(ids, isWatched, {
+        adminId: req.userId!,
+        adminName: req.userName || '',
+        adminEmail: req.userEmail || '',
+      });
+      res.status(200).json({
+        status: 'OK',
+        message: isWatched ? 'Đã đánh dấu theo dõi khóa học.' : 'Đã bỏ theo dõi khóa học.',
+        data: result,
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   /**
    * [GET] /api/admin/courses/review
    * Danh sách khóa học/revision đang chờ admin duyệt.

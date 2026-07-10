@@ -12,6 +12,7 @@ import subscriptionAccessController from '../controllers/subscriptionAccess.cont
 const router = Router();
 
 router.get('/', extractUser, requireAdmin, requirePermission('course:read'), courseController.getAdminCourses);
+router.patch('/watch', extractUser, requireAdmin, requirePermission('course:update'), courseController.updateAdminCourseWatch);
 router.get('/:id/students', extractUser, requireAdmin, requirePermission('course:read'), courseController.getCourseStudents);
 router.get('/review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getCoursesForReview);
 router.get('/subscription-review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getSubscriptionReviewCourses);
