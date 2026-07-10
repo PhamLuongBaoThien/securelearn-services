@@ -360,6 +360,33 @@ class CourseController {
   }
 
   /**
+   * [PATCH] /api/admin/courses/review/multi
+   * Duyệt hoặc yêu cầu chỉnh sửa nhiều bản nội dung khóa học.
+   */
+  public async multiReviewCourses(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const ids = req.body.ids;
+      const action = req.body.action;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng chọn ít nhất một khóa học.' });
+        return;
+      }
+      if (action !== 'APPROVE' && action !== 'REJECT') {
+        res.status(400).json({ status: 'ERR', message: 'Hành động kiểm duyệt không hợp lệ.' });
+        return;
+      }
+
+      const result = await courseService.multiReviewCourses(ids, action, {
+        adminId: req.userId!,
+        adminName: req.userName || '',
+        adminEmail: req.userEmail || '',
+      }, req.body.reason);
+      res.status(200).json({ status: 'OK', message: 'Đã xử lý kiểm duyệt hàng loạt.', data: result });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+  /**
    * [GET] /api/admin/courses/:id/review
    * Chi tiết khóa học để admin xem curriculum trước khi duyệt.
    */

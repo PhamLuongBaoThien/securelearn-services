@@ -1276,6 +1276,70 @@ class CourseService {
     return this.mapCourseReviewResponse(rejected as unknown as VersionLike);
   }
 
+  public async multiReviewCourses(
+    versionIds: string[],
+    action: "APPROVE" | "REJECT",
+    admin: ReviewerSnapshot,
+    reason = "",
+  ): Promise<{
+    total: number;
+    success: number;
+    failed: number;
+    successIds: string[];
+    failures: Array<{ id: string; message: string }>;
+  }> {
+    const ids = Array.from(
+      new Set(
+        versionIds
+          .filter((id): id is string => typeof id === "string")
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (ids.length === 0) {
+      throw new Error("Vui lòng chọn ít nhất một khóa học hợp lệ.");
+    }
+
+    const normalizedReason = reason?.trim() || "";
+    if (action === "REJECT" && !normalizedReason) {
+      throw new Error("Vui lòng nhập góp ý chỉnh sửa.");
+    }
+
+    const settled = await Promise.allSettled(
+      ids.map(async (id) => {
+        if (action === "APPROVE") {
+          await this.approveCourse(id, admin);
+        } else {
+          await this.rejectCourse(id, admin, normalizedReason);
+        }
+        return id;
+      }),
+    );
+
+    const successIds: string[] = [];
+    const failures: Array<{ id: string; message: string }> = [];
+
+    settled.forEach((result, index) => {
+      const id = ids[index];
+      if (result.status === "fulfilled") {
+        successIds.push(result.value);
+      } else {
+        failures.push({
+          id,
+          message: result.reason instanceof Error ? result.reason.message : "Không thể kiểm duyệt khóa học.",
+        });
+      }
+    });
+
+    return {
+      total: ids.length,
+      success: successIds.length,
+      failed: failures.length,
+      successIds,
+      failures,
+    };
+  }
   public async getPublishedCourses(query: {
     page?: number;
     limit?: number;
