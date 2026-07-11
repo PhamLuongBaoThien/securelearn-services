@@ -229,6 +229,7 @@ services:
         paths:
           - /api/banners
           - /api/admin/system/banners
+          - /api/admin/system/policies
           - /api/website-config
           - /api/admin/system/config
         strip_path: false
@@ -238,6 +239,7 @@ services:
       - name: content-public
         paths:
           - /api/banners
+          - /api/policies
           - /api/website-config
         strip_path: false
         methods:
@@ -246,6 +248,7 @@ services:
       - name: content-admin-protected
         paths:
           - /api/admin/system/banners
+          - /api/admin/system/policies
           - /api/admin/system/config
         strip_path: false
         methods:
@@ -600,6 +603,7 @@ plugins:
     config:
       key_claim_name: iss
       claims_to_verify: [exp]
+
 
 
 
