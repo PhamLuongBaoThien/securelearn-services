@@ -3,6 +3,14 @@ import { Course, CourseStatus } from '../models/course.model';
 
 const MAX_CATEGORY_DEPTH = 4;
 
+interface MultiCategoryResult {
+  total: number;
+  success: number;
+  failed: number;
+  successIds: string[];
+  failures: Array<{ id: string; message: string }>;
+}
+
 interface CategoryNode {
   _id: string;
   name: string;
@@ -156,6 +164,39 @@ class CategoryService {
     return category;
   }
 
+  public async multiSetCategoryStatus(categoryIds: string[], isActive: boolean): Promise<MultiCategoryResult> {
+    const ids = this.uniqueIds(categoryIds);
+    const result: MultiCategoryResult = {
+      total: ids.length,
+      success: 0,
+      failed: 0,
+      successIds: [],
+      failures: [],
+    };
+    const pendingIds = new Set(ids);
+
+    for (const id of ids) {
+      if (!pendingIds.has(id)) continue;
+
+      try {
+        await this.setCategoryStatus(id, isActive);
+        const appliedIds = isActive ? [id] : (await this.getDescendantAndSelfIds(id)).filter((item) => pendingIds.has(item));
+
+        for (const appliedId of appliedIds) {
+          pendingIds.delete(appliedId);
+          result.success += 1;
+          result.successIds.push(appliedId);
+        }
+      } catch (error: any) {
+        pendingIds.delete(id);
+        result.failed += 1;
+        result.failures.push({ id, message: error.message || 'Không thể cập nhật trạng thái danh mục.' });
+      }
+    }
+
+    return result;
+  }
+
   public async deleteCategory(categoryId: string): Promise<void> {
     const [categoryExists, hasChildren, hasCourses] = await Promise.all([
       Category.exists({ _id: categoryId }),
@@ -174,6 +215,30 @@ class CategoryService {
     }
 
     await Category.deleteOne({ _id: categoryId });
+  }
+
+  public async multiDeleteCategories(categoryIds: string[]): Promise<MultiCategoryResult> {
+    const ids = this.uniqueIds(categoryIds);
+    const result: MultiCategoryResult = {
+      total: ids.length,
+      success: 0,
+      failed: 0,
+      successIds: [],
+      failures: [],
+    };
+
+    for (const id of ids) {
+      try {
+        await this.deleteCategory(id);
+        result.success += 1;
+        result.successIds.push(id);
+      } catch (error: any) {
+        result.failed += 1;
+        result.failures.push({ id, message: error.message || 'Không thể xóa danh mục.' });
+      }
+    }
+
+    return result;
   }
 
   public async resolveActiveCategorySlug(slug: string): Promise<ICategory> {
@@ -371,6 +436,10 @@ class CategoryService {
 
   private escapeRegex(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private uniqueIds(ids: string[]): string[] {
+    return Array.from(new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)));
   }
 }
 

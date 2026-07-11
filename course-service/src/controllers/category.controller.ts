@@ -92,6 +92,48 @@ class CategoryController {
     }
   }
 
+  public async multiSetCategoryStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const { ids, isActive } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng chọn ít nhất một danh mục.' });
+        return;
+      }
+      if (typeof isActive !== 'boolean') {
+        res.status(400).json({ status: 'ERR', message: 'Trường isActive phải là boolean.' });
+        return;
+      }
+
+      const result = await categoryService.multiSetCategoryStatus(ids, isActive);
+      res.status(200).json({
+        status: result.failed > 0 ? 'ERR' : 'OK',
+        message: result.failed > 0 ? 'Một số danh mục không thể cập nhật trạng thái.' : 'Cập nhật trạng thái danh mục thành công.',
+        data: result,
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  public async multiDeleteCategories(req: Request, res: Response): Promise<void> {
+    try {
+      const { ids } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng chọn ít nhất một danh mục.' });
+        return;
+      }
+
+      const result = await categoryService.multiDeleteCategories(ids);
+      res.status(200).json({
+        status: result.failed > 0 ? 'ERR' : 'OK',
+        message: result.failed > 0 ? 'Một số danh mục không thể xóa.' : 'Xóa danh mục thành công.',
+        data: result,
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   public async deleteCategory(req: Request, res: Response): Promise<void> {
     try {
       await categoryService.deleteCategory(req.params.id as string);
