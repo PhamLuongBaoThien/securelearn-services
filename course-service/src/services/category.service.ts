@@ -1,5 +1,6 @@
 import { Category, ICategory } from '../models/category.model';
 import { Course, CourseStatus } from '../models/course.model';
+import { CourseVersion } from '../models/courseVersion.model';
 
 const MAX_CATEGORY_DEPTH = 4;
 
@@ -20,6 +21,8 @@ interface CategoryNode {
   sortOrder: number;
   parentId: string | null;
   courseCount: number;
+  publishedCourseCount: number;
+  unpublishedCourseCount: number;
   children: CategoryNode[];
   createdAt: Date;
   updatedAt: Date;
@@ -63,8 +66,8 @@ class CategoryService {
       .sort({ sortOrder: 1, name: 1 })
       .lean();
 
-    const countMap = await this.getCourseCountsMap();
-    return this.buildTree(categories, countMap);
+    const publishedCountMap = await this.getPublishedCourseCountsMap();
+    return this.buildTree(categories, publishedCountMap);
   }
 
   public async getAdminCategories(): Promise<CategoryNode[]> {
@@ -72,13 +75,24 @@ class CategoryService {
       .sort({ sortOrder: 1, name: 1 })
       .lean();
 
-    const countMap = await this.getCourseCountsMap();
-    return this.buildTree(categories, countMap);
+    const [publishedCountMap, unpublishedCountMap] = await Promise.all([
+      this.getPublishedCourseCountsMap(),
+      this.getUnpublishedCourseCountsMap(),
+    ]);
+    return this.buildTree(categories, publishedCountMap, unpublishedCountMap);
   }
 
-  private async getCourseCountsMap(): Promise<Map<string, number>> {
+  private async getPublishedCourseCountsMap(): Promise<Map<string, number>> {
+    return this.getCourseCountsMap({ status: CourseStatus.PUBLISHED });
+  }
+
+  private async getUnpublishedCourseCountsMap(): Promise<Map<string, number>> {
+    return this.getCourseCountsMap({ status: { $ne: CourseStatus.PUBLISHED } });
+  }
+
+  private async getCourseCountsMap(matchStatus: Record<string, unknown>): Promise<Map<string, number>> {
     const courseCounts = await Course.aggregate([
-      { $match: { categoryId: { $ne: null }, status: CourseStatus.PUBLISHED } },
+      { $match: { categoryId: { $ne: null }, ...matchStatus } },
       { $group: { _id: '$categoryId', count: { $sum: 1 } } }
     ]);
     const countMap = new Map<string, number>();
@@ -198,10 +212,11 @@ class CategoryService {
   }
 
   public async deleteCategory(categoryId: string): Promise<void> {
-    const [categoryExists, hasChildren, hasCourses] = await Promise.all([
+    const [categoryExists, hasChildren, hasPublishedCourses, hasPublishedCourseVersions] = await Promise.all([
       Category.exists({ _id: categoryId }),
       Category.exists({ parentId: categoryId }),
-      Course.exists({ categoryId: categoryId })
+      Course.exists({ categoryId: categoryId, status: CourseStatus.PUBLISHED }),
+      CourseVersion.exists({ categoryId: categoryId, status: CourseStatus.PUBLISHED })
     ]);
 
     if (!categoryExists) {
@@ -210,10 +225,20 @@ class CategoryService {
     if (hasChildren) {
       throw new Error('Không thể xóa danh mục đang có danh mục con.');
     }
-    if (hasCourses) {
-      throw new Error('Không thể xóa danh mục đang có khóa học.');
+    if (hasPublishedCourses || hasPublishedCourseVersions) {
+      throw new Error('Không thể xóa danh mục đang có khóa học đã xuất bản.');
     }
 
+    await Promise.all([
+      Course.updateMany(
+        { categoryId: categoryId, status: { $ne: CourseStatus.PUBLISHED } },
+        { $set: { categoryId: null } }
+      ),
+      CourseVersion.updateMany(
+        { categoryId: categoryId, status: { $ne: CourseStatus.PUBLISHED } },
+        { $set: { categoryId: null } }
+      )
+    ]);
     await Category.deleteOne({ _id: categoryId });
   }
 
@@ -383,7 +408,8 @@ class CategoryService {
       createdAt: Date;
       updatedAt: Date;
     }>,
-    countMap: Map<string, number>
+    publishedCountMap: Map<string, number>,
+    unpublishedCountMap = new Map<string, number>()
   ): CategoryNode[] {
     const nodeMap = new Map<string, CategoryNode>();
 
@@ -398,6 +424,8 @@ class CategoryService {
         sortOrder: category.sortOrder,
         parentId: category.parentId ? category.parentId.toString() : null,
         courseCount: 0,
+        publishedCourseCount: 0,
+        unpublishedCourseCount: 0,
         children: [],
         createdAt: category.createdAt,
         updatedAt: category.updatedAt,
@@ -414,11 +442,24 @@ class CategoryService {
       }
     }
 
-    const populateCourseCount = (node: CategoryNode): number => {
-      const directCount = countMap.get(node._id) || 0;
-      const childrenCount = node.children.reduce((sum, child) => sum + populateCourseCount(child), 0);
-      node.courseCount = directCount + childrenCount;
-      return node.courseCount;
+    const populateCourseCount = (node: CategoryNode): { published: number; unpublished: number } => {
+      const directPublished = publishedCountMap.get(node._id) || 0;
+      const directUnpublished = unpublishedCountMap.get(node._id) || 0;
+      const childrenCounts = node.children.reduce(
+        (sum, child) => {
+          const childCounts = populateCourseCount(child);
+          return {
+            published: sum.published + childCounts.published,
+            unpublished: sum.unpublished + childCounts.unpublished,
+          };
+        },
+        { published: 0, unpublished: 0 }
+      );
+
+      node.publishedCourseCount = directPublished + childrenCounts.published;
+      node.unpublishedCourseCount = directUnpublished + childrenCounts.unpublished;
+      node.courseCount = node.publishedCourseCount + node.unpublishedCourseCount;
+      return { published: node.publishedCourseCount, unpublished: node.unpublishedCourseCount };
     };
 
     for (const root of roots) {
