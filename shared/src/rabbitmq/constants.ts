@@ -36,6 +36,7 @@ export enum RoutingKey {
   COURSE_VERSION_PUBLISHED = "course.version.published",
   COURSE_REJECTED = "course.course.rejected",
   COURSE_SUBMITTED_FOR_REVIEW = "course.course.submitted-for-review",
+  COURSE_SUBSCRIPTION_REVIEWED = "course.subscription.reviewed",
   ENROLLMENT_CREATED = "course.enrollment.created",
   DISCUSSION_CREATED = "course.discussion.created",
   DISCUSSION_REPLIED = "course.discussion.replied",
@@ -127,6 +128,15 @@ export interface CourseRejectedPayload {
   rejectedAt: string;
 }
 
+export interface CourseSubscriptionReviewedPayload {
+  courseId: string;
+  title: string;
+  slug?: string;
+  instructorId: string;
+  action: "APPROVE" | "REJECT" | "REMOVE";
+  reason?: string;
+  reviewedAt: string;
+}
 export interface EnrollmentCreatedPayload {
   enrollmentId: string;
   userId: string;

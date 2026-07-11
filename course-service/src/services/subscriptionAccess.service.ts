@@ -10,6 +10,7 @@ import { SubscriptionEntitlement } from '../models/subscriptionEntitlement.model
 import enrollmentService from './enrollment.service';
 import { CourseVersion } from '../models/courseVersion.model';
 import entitlementCacheService from './entitlementCache.service';
+import { publishCourseSubscriptionReviewed } from '../events/publishers';
 
 class SubscriptionAccessService {
   private async resolveCourseShellId(courseOrVersionId: string): Promise<string> {
@@ -117,6 +118,19 @@ class SubscriptionAccessService {
       reviewedAt,
     });
     await course.save();
+    try {
+      await publishCourseSubscriptionReviewed({
+        courseId: course._id.toString(),
+        title: course.title,
+        slug: course.slug,
+        instructorId: course.instructorId,
+        action,
+        reason: normalizedReason,
+        reviewedAt: reviewedAt.toISOString(),
+      });
+    } catch (err) {
+      console.error('Failed to publish COURSE_SUBSCRIPTION_REVIEWED event', err);
+    }
     return course;
   }
 

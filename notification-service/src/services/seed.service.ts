@@ -31,6 +31,23 @@ const seeds = [
     "Khóa học {{courseName}} cần chỉnh sửa: {{reason}}",
   ],
   [
+    "COURSE_SUBSCRIPTION_APPROVED",
+    "IN_APP",
+    "Khóa học đã vào gói thuê bao",
+    "Khóa học {{courseName}} đã được duyệt vào gói thuê bao.",
+  ],
+  [
+    "COURSE_SUBSCRIPTION_REJECTED",
+    "IN_APP",
+    "Khóa học chưa được vào gói thuê bao",
+    "Khóa học {{courseName}} chưa được duyệt vào gói thuê bao: {{reason}}",
+  ],
+  [
+    "COURSE_SUBSCRIPTION_REMOVED",
+    "IN_APP",
+    "Khóa học đã rút khỏi gói thuê bao",
+    "Khóa học {{courseName}} đã bị rút khỏi gói thuê bao: {{reason}}",
+  ],  [
     "WELCOME",
     "EMAIL",
     "Chào mừng đến SecureLearn",

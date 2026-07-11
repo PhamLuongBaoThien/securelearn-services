@@ -8,6 +8,7 @@ import {
   type CoursePublishedPayload,
   type CourseRejectedPayload,
   type CourseSubmittedForReviewPayload,
+  type CourseSubscriptionReviewedPayload,
   type EnrollmentCreatedPayload,
   type NotificationCampaignRequestedPayload,
   type InboxItemCreatedPayload,
@@ -97,6 +98,34 @@ const handleDiscussionEvent = async (
     },
   );
 };
+const handleCourseSubscriptionReviewed = async (payload: CourseSubscriptionReviewedPayload) => {
+  const [recipient] = await notificationService.getRecipients({ userId: payload.instructorId, recipientType: 'USER' });
+  if (!recipient) return;
+  const event = payload.action === 'APPROVE'
+    ? 'COURSE_SUBSCRIPTION_APPROVED'
+    : payload.action === 'REJECT'
+      ? 'COURSE_SUBSCRIPTION_REJECTED'
+      : 'COURSE_SUBSCRIPTION_REMOVED';
+  await notificationService.sendEvent(
+    event,
+    recipient,
+    {
+      instructorName: recipient.fullName,
+      courseName: payload.title,
+      courseUrl: payload.slug ? `/course/${payload.slug}` : '',
+      reason: payload.reason || '',
+    },
+    `event:${RoutingKey.COURSE_SUBSCRIPTION_REVIEWED}:${payload.action}:${payload.courseId}:${payload.reviewedAt}`,
+    {
+      category: 'COURSE',
+      priority: 'HIGH',
+      actionUrl: '/instructor/courses',
+      actionLabel: 'Xem khóa học',
+      data: { courseId: payload.courseId, action: payload.action },
+      channels: ['IN_APP'],
+    },
+  );
+};
 const handleCourseAnnouncement = async (payload: CourseAnnouncementPublishedPayload) => {
   const recipients = await notificationService.getCourseRecipients(payload.courseId);
   await Promise.all(recipients.map(recipient => notificationService.sendEvent(
@@ -145,6 +174,9 @@ export const registerEventHandlers = async () => {
     const admins = await notificationService.getRecipients({ recipientType: 'ADMIN', permission: 'course:approve' });
     await Promise.all(admins.map(admin => notificationService.sendEvent('COURSE_SUBMITTED_FOR_REVIEW', admin, { courseName: p.title, instructorName: p.instructorName }, `event:${RoutingKey.COURSE_SUBMITTED_FOR_REVIEW}:${p.versionId}`, { category: 'COURSE', priority: 'HIGH', actionUrl: `/admin/courses/review?versionId=${p.versionId}`, actionLabel: 'Kiểm duyệt', data: { courseId: p.courseId, versionId: p.versionId } })));
   }, reliable);
+
+
+  await subscribeMessage<CourseSubscriptionReviewedPayload>(Exchange.COURSE, RoutingKey.COURSE_SUBSCRIPTION_REVIEWED, 'notification-service.course-subscription-reviewed', handleCourseSubscriptionReviewed, reliable);
 
   await subscribeMessage<EnrollmentCreatedPayload>(Exchange.COURSE, RoutingKey.ENROLLMENT_CREATED, 'notification-service.enrollment-created', async p => {
     const [recipient] = await notificationService.getRecipients({ userId: p.instructorId, recipientType: 'USER' });

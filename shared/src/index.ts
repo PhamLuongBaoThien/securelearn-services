@@ -31,6 +31,7 @@ export {
   type CoursePublishedPayload,
   type CourseRejectedPayload,
   type CourseSubmittedForReviewPayload,
+  type CourseSubscriptionReviewedPayload,
   type CourseDiscussionEventPayload,
   type CourseAnnouncementPublishedPayload,
   type NotificationCampaignRequestedPayload,
