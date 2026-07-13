@@ -1,14 +1,25 @@
-import type { Express } from "express";
+﻿import type { Express } from "express";
 import { Router } from "express";
 import {
   extractUser,
   requireUser,
   requireInboxAdmin,
+  extractOptionalUser,
 } from "../middlewares/auth.middleware";
 import { uploadAttachments } from "../middlewares/upload.middleware";
 import { controller } from "../controllers/ticket.controller";
 import { cannedReplyController } from "../controllers/cannedReply.controller";
+import { chatbotController } from "../controllers/chatbot.controller";
 export default (app: Express) => {
+  const chatbot = Router();
+  chatbot.use(extractOptionalUser);
+  chatbot.get("/conversations", chatbotController.conversations);
+  chatbot.get("/conversations/:id/messages", chatbotController.messages);
+  chatbot.delete("/conversations/:id", chatbotController.remove);
+  chatbot.delete("/conversations", chatbotController.clear);
+  chatbot.post("/message", chatbotController.message);
+  app.use("/api/chatbot", chatbot);
+
   const user = Router();
   user.use(extractUser, requireUser);
   user.get("/unread-count", controller.unreadCount);
@@ -36,3 +47,4 @@ export default (app: Express) => {
   admin.delete("/canned-replies/:id", cannedReplyController.remove);
   app.use("/api/admin/inbox", admin);
 };
+

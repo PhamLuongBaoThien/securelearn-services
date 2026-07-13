@@ -1,4 +1,4 @@
-﻿// File này là điểm mount route cấp app của course-service.
+// File này là điểm mount route cấp app của course-service.
 // Ghi nhớ:
 // - /api/courses chứa cả course routes và quiz attempt routes
 // - /api/categories đi riêng vì vừa phục vụ admin vừa phục vụ course editor
@@ -9,10 +9,12 @@ import quizAttemptRoutes from './quizAttempt.routes';
 import adminCourseRoutes from './adminCourse.routes';
 import cartRoutes from './cart.routes';
 import wishlistRoutes from './wishlist.routes';
+import chatbotContextRoutes from './chatbotContext.routes';
 
 const routes = (app: Application) => {
   // Admin review APIs phải mount riêng để không bị slug route của /api/courses bắt nhầm.
   app.use('/api/admin/courses', adminCourseRoutes);
+  app.use('/internal/chatbot', chatbotContextRoutes);
 
   // Route này xử lý quiz attempt cho student.
   // Đặt trước courseRoutes để không bị các nested route (route "lồng nhau") quản lý của instructor chặn nhầm.
@@ -33,3 +35,4 @@ const routes = (app: Application) => {
 };
 
 export default routes;
+

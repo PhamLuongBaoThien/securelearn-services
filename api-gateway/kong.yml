@@ -1,4 +1,4 @@
-# ========================
+﻿# ========================
 # Kong Declarative Configuration
 # API Gateway cho SecureLearn Microservices
 #
@@ -408,6 +408,18 @@ services:
         paths: [/inbox.socket.io]
         strip_path: false
         protocols: [http, https]
+      - name: chatbot-preflight
+        paths: [/api/chatbot/message, /api/chatbot/conversations]
+        strip_path: false
+        methods: [OPTIONS]
+      - name: chatbot-message
+        paths: [/api/chatbot/message]
+        strip_path: false
+        methods: [POST]
+      - name: chatbot-history
+        paths: [/api/chatbot/conversations]
+        strip_path: false
+        methods: [GET, DELETE]
       - name: inbox-preflight
         paths: [/api/inbox, /api/admin/inbox]
         strip_path: false
@@ -449,6 +461,12 @@ plugins:
       minute: 100
       policy: local
 
+  - name: rate-limiting
+    route: chatbot-message
+    config:
+      minute: 10
+      limit_by: ip
+      policy: local
   # Rate limiting RIÊNG cho route upload — chặt hơn rate limit toàn cục.
   # Tối đa 10 lần gọi initiate-upload hoặc batch-part-urls mỗi phút CHO MỖI TÀI KHOẢN (Đếm theo Header Authorization).
   # Instructor thông thường chỉ upload 1-2 video/phút, nên 10 là dư giả.
@@ -603,6 +621,10 @@ plugins:
     config:
       key_claim_name: iss
       claims_to_verify: [exp]
+
+
+
+
 
 
 
