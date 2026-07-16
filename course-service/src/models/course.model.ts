@@ -51,9 +51,6 @@ export interface ICourse extends Document {
   instructorAvatarUrl: string; // Cache avatar giảng viên (cập nhật qua event)
   instructorBio: string;       // Cache tiểu sử giảng viên (cập nhật qua event)
   categoryId?: Types.ObjectId | null;
-  categoryResolutionStatus: CategoryResolutionStatus;
-  suggestedCategoryName: string;
-  suggestedCategoryNote: string;
   level: CourseLevel;
   status: CourseStatus;
   currentVersionId?: Types.ObjectId | null; // CourseVersion đang public cho học viên/catalog
@@ -121,14 +118,6 @@ const courseSchema = new Schema<ICourse>(
     instructorAvatarUrl: { type: String, default: '' },
     instructorBio: { type: String, default: '' },
     categoryId: { type: Schema.Types.ObjectId, ref: 'Category', default: null, index: true },
-    categoryResolutionStatus: {
-      type: String,
-      enum: Object.values(CategoryResolutionStatus),
-      default: CategoryResolutionStatus.NONE,
-      index: true,
-    },
-    suggestedCategoryName: { type: String, default: '', trim: true, maxlength: 120 },
-    suggestedCategoryNote: { type: String, default: '', trim: true, maxlength: 500 },
     level: {
       type: String,
       enum: Object.values(CourseLevel),
@@ -215,3 +204,4 @@ courseSchema.pre('save', async function (next) {
 });
 
 export const Course = mongoose.model<ICourse>('Course', courseSchema);
+

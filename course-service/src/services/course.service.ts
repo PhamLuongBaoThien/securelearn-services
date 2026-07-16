@@ -451,8 +451,6 @@ class CourseService {
     const shell = new Course({
       ...data,
       categoryId: resolvedCategoryId,
-      suggestedCategoryName: data.suggestedCategoryName || "",
-      suggestedCategoryNote: data.suggestedCategoryNote || "",
       status: CourseStatus.DRAFT,
     });
     await shell.save();
@@ -471,9 +469,9 @@ class CourseService {
       instructorId: shell.instructorId,
       instructorName: shell.instructorName,
       categoryId: shell.categoryId,
-      categoryResolutionStatus: shell.categoryResolutionStatus,
-      suggestedCategoryName: shell.suggestedCategoryName,
-      suggestedCategoryNote: shell.suggestedCategoryNote,
+      categoryResolutionStatus: CategoryResolutionStatus.NONE,
+      suggestedCategoryName: data.suggestedCategoryName || '',
+      suggestedCategoryNote: data.suggestedCategoryNote || '',
       level: shell.level,
       progressionMode: data.progressionMode || CourseProgressionMode.FREE,
       status: CourseStatus.DRAFT,
@@ -576,7 +574,7 @@ class CourseService {
     instructorId: string,
     data: Partial<
       Pick<
-        ICourse,
+        ICourseVersion,
         | "title"
         | "shortDescription"
         | "description"
@@ -586,7 +584,7 @@ class CourseService {
         | "categoryResolutionStatus"
         | "suggestedCategoryName"
         | "suggestedCategoryNote"
-      | "level"
+        | "level"
         | "progressionMode"
         | "price"
       >
@@ -1720,10 +1718,7 @@ class CourseService {
       | "whatYouWillLearn"
       | "requirements"
       | "categoryId"
-      | "categoryResolutionStatus"
-      | "suggestedCategoryName"
-      | "suggestedCategoryNote"
-      | "level"
+        | "level"
       | "progressionMode"
       | "price"
       | "totalDuration"
@@ -1746,10 +1741,6 @@ class CourseService {
     shell.whatYouWillLearn = version.whatYouWillLearn || [];
     shell.requirements = version.requirements || [];
     shell.categoryId = version.categoryId ?? null;
-    shell.categoryResolutionStatus =
-      version.categoryResolutionStatus || CategoryResolutionStatus.NONE;
-    shell.suggestedCategoryName = version.suggestedCategoryName || "";
-    shell.suggestedCategoryNote = version.suggestedCategoryNote || "";
     shell.level = version.level;
     shell.progressionMode = version.progressionMode || CourseProgressionMode.FREE;
     shell.price = version.price;
@@ -2250,3 +2241,5 @@ class CourseService {
 }
 
 export default new CourseService();
+
+
