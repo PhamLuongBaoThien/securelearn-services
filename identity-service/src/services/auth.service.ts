@@ -159,15 +159,12 @@ class AuthService {
   public async updateProfile(userId: string, data: { fullName?: string; phone?: string; avatarUrl?: string; bio?: string; headline?: string; website?: string; github?: string; facebook?: string; youtube?: string; linkedin?: string }): Promise<IUser | null> {
     const user = await User.findById(userId);
     if (!user) throw new Error('Người dùng không tồn tại.');
-    const previousSlug = user.publicSlug;
-    let reservedSlug: string | undefined;
     if (data.fullName !== undefined) {
       const fullName = data.fullName.trim().normalize('NFC');
       if (fullName.length < 2) throw new Error('Họ và tên phải có tối thiểu 2 ký tự.');
       if (/\d/.test(fullName)) throw new Error('Họ và tên không được chứa số.');
       if (normalizePublicSlugBase(fullName) !== normalizePublicSlugBase(user.fullName)) {
-        reservedSlug = await publicProfileSlugService.reserve(userId, fullName);
-        user.publicSlug = reservedSlug;
+        user.publicSlug = await publicProfileSlugService.buildUniqueSlug(userId, fullName);
       }
       user.fullName = fullName;
     }
@@ -191,9 +188,7 @@ class AuthService {
     if (data.linkedin !== undefined) user.profile.linkedin = data.linkedin;
     try {
       await user.save();
-      if (reservedSlug) await publicProfileSlugService.activate(userId, reservedSlug, previousSlug);
     } catch (error: any) {
-      if (reservedSlug) await publicProfileSlugService.releaseReservation(userId, reservedSlug);
       if (error?.code === 11000) throw new Error('Thông tin cập nhật đã được tài khoản khác sử dụng.');
       throw error;
     }
@@ -218,7 +213,6 @@ class AuthService {
    */
   public async deleteAccount(userId: string): Promise<void> {
     const result = await User.findByIdAndDelete(userId);
-    if (result) await publicProfileSlugService.tombstoneUser(userId);
     if (!result) {
       throw new Error('Người dùng không tồn tại.');
     }
@@ -322,3 +316,4 @@ class AuthService {
 }
 
 export default new AuthService();
+
