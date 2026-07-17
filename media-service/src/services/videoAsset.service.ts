@@ -183,8 +183,7 @@ class VideoAssetService {
       return this.rewriteLeafManifest(asset.manifestKey, keyUri, videoAssetId, sessionToken || '');
     }
 
-    const masterManifestKey = asset.masterManifestKey || asset.manifestKey;
-    const masterManifest = await s3Service.getObjectText(masterManifestKey);
+    const masterManifest = await s3Service.getObjectText(asset.manifestKey);
     return masterManifest
       .split(/\r?\n/)
       .map((line) => {
@@ -405,7 +404,6 @@ class VideoAssetService {
 
       const manifestKey = `courses/${asset.courseId}/lessons/${asset.lessonId}/videos/${asset._id}/hls/${masterManifestFileName}`;
       asset.manifestKey = manifestKey;
-      asset.masterManifestKey = manifestKey;
       asset.processingProgress = 100;
       asset.status = VideoAssetStatus.READY;
       asset.durationSec = durationSec;
@@ -451,7 +449,6 @@ class VideoAssetService {
       asset.errorMessage = error.message;
       asset.availableQualities = [];
       asset.renditions = [];
-      asset.masterManifestKey = null;
       await asset.save();
 
       console.error(`[VideoAssetService] Video ${videoAssetId} FAILED:`, error.message);
@@ -526,3 +523,4 @@ class VideoAssetService {
 }
 
 export default new VideoAssetService();
+

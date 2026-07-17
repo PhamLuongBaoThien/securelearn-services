@@ -147,6 +147,7 @@ export interface CourseProgressLesson {
   sectionOrder: number;
   required: boolean;
   equivalentLessonIds: string[];
+  videoAssetId: string;
 }
 
 export interface CourseProgressContextReply {
@@ -1999,6 +2000,7 @@ function createBaseCourseProgressLesson(): CourseProgressLesson {
     sectionOrder: 0,
     required: false,
     equivalentLessonIds: [],
+    videoAssetId: "",
   };
 }
 
@@ -2030,6 +2032,9 @@ export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
     }
     for (const v of message.equivalentLessonIds) {
       writer.uint32(74).string(v!);
+    }
+    if (message.videoAssetId !== "") {
+      writer.uint32(82).string(message.videoAssetId);
     }
     return writer;
   },
@@ -2113,6 +2118,14 @@ export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
           message.equivalentLessonIds.push(reader.string());
           continue;
         }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.videoAssetId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2135,6 +2148,7 @@ export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
       equivalentLessonIds: globalThis.Array.isArray(object?.equivalentLessonIds)
         ? object.equivalentLessonIds.map((e: any) => globalThis.String(e))
         : [],
+      videoAssetId: isSet(object.videoAssetId) ? globalThis.String(object.videoAssetId) : "",
     };
   },
 
@@ -2167,6 +2181,9 @@ export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
     if (message.equivalentLessonIds?.length) {
       obj.equivalentLessonIds = message.equivalentLessonIds;
     }
+    if (message.videoAssetId !== "") {
+      obj.videoAssetId = message.videoAssetId;
+    }
     return obj;
   },
 
@@ -2184,6 +2201,7 @@ export const CourseProgressLesson: MessageFns<CourseProgressLesson> = {
     message.sectionOrder = object.sectionOrder ?? 0;
     message.required = object.required ?? false;
     message.equivalentLessonIds = object.equivalentLessonIds?.map((e) => e) || [];
+    message.videoAssetId = object.videoAssetId ?? "";
     return message;
   },
 };

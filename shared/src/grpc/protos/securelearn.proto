@@ -83,6 +83,7 @@ message CourseProgressLesson {
   int32 sectionOrder = 7;
   bool required = 8;
   repeated string equivalentLessonIds = 9;
+  string videoAssetId = 10;
 }
 
 message CourseProgressContextReply {

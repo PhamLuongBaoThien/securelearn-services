@@ -12,6 +12,7 @@ export type CourseLessonContext = {
   sectionOrder: number;
   required: boolean;
   equivalentLessonIds: string[];
+  videoAssetId: string;
 };
 
 export type CourseProgressContext = {
@@ -73,6 +74,7 @@ class CourseContextService {
         sectionOrder: lesson.sectionOrder || 0,
         required: lesson.required !== false,
         equivalentLessonIds: lesson.equivalentLessonIds || [],
+        videoAssetId: lesson.videoAssetId || '',
       })),
     };
   }

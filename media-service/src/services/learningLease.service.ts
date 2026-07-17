@@ -23,7 +23,7 @@ const hashToken = (token: string) => crypto.createHash('sha256').update(token).d
 class LearningLeaseService {
   async validate(input: {
     userId: string; authSessionId: string; learningSessionId: string; learningSessionToken?: string;
-    tokenHash?: string; courseId: string; lessonId: string; videoAssetId: string;
+    tokenHash?: string; videoAssetId: string;
   }): Promise<MediaLearningLease> {
     if (!input.learningSessionId || input.learningSessionId.length > 128 || (input.learningSessionToken?.length || 0) > 256 || (input.tokenHash?.length || 0) > 128) {
       throw new MediaLearningLeaseError(400, 'INVALID_LEARNING_SESSION_INPUT', 'Thông tin phiên học không hợp lệ.');
@@ -39,11 +39,7 @@ class LearningLeaseService {
       && lease.tokenHash === suppliedHash
       && lease.userId === input.userId
       && lease.authSessionId === input.authSessionId
-      // VideoAsset.courseId stores the CourseVersion id. The lease keeps both
-      // the stable Course id and the CourseVersion id, so accept either form.
-      && (lease.courseId === input.courseId || lease.courseVersionId === input.courseId)
-      && lease.lessonId === input.lessonId
-      && (!lease.videoAssetId || lease.videoAssetId === input.videoAssetId);
+      && lease.videoAssetId === input.videoAssetId;
     if (!matches) throw new MediaLearningLeaseError(409, 'LEARNING_SESSION_REPLACED', 'Phiên học đã được chuyển sang thiết bị hoặc tab khác.');
     return lease;
   }

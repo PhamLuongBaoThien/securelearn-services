@@ -101,21 +101,27 @@ class VideoAssetController {
         tokenHash?: string;
         authSessionId?: string;
         clientInstanceId?: string;
+        courseVersionId?: string;
+        lessonId?: string;
       } | null = null;
       if (!bypassLearningLease) {
         const lease = await learningLeaseService.validate({
           userId: req.userId!, authSessionId: req.sessionId!, learningSessionId, learningSessionToken,
-          courseId: String(asset.courseId), lessonId: String(asset.lessonId), videoAssetId,
+          videoAssetId,
         });
         resolvedLease = {
           learningSessionId: lease.learningSessionId,
           tokenHash: lease.tokenHash,
           authSessionId: lease.authSessionId,
           clientInstanceId: lease.clientInstanceId,
+          courseVersionId: lease.courseVersionId || lease.courseId,
+          lessonId: lease.lessonId,
         };
       }
       const token = await playbackAccessService.createOneTimePlayback({
-        userId: req.userId!, videoAssetId, courseId: String(asset.courseId), lessonId: String(asset.lessonId),
+        userId: req.userId!, videoAssetId,
+        courseId: bypassLearningLease ? String(asset.courseId) : resolvedLease?.courseVersionId || String(asset.courseId),
+        lessonId: bypassLearningLease ? String(asset.lessonId) : resolvedLease?.lessonId || String(asset.lessonId),
         bypassLearningLease,
         learningSessionId: bypassLearningLease ? undefined : resolvedLease?.learningSessionId || learningSessionId,
         learningTokenHash: bypassLearningLease ? undefined : resolvedLease?.tokenHash || learningLeaseService.tokenHash(learningSessionToken),

@@ -29,7 +29,6 @@ export interface IVideoAsset extends Document {
   durationSec: number;
   rawObjectKey: string;
   manifestKey: string;
-  masterManifestKey?: string | null;
   multipartUploadId?: string | null;
   uploadCompletedAt?: Date | null;
   sourceSizeBytes: number;
@@ -68,7 +67,6 @@ const videoAssetSchema = new Schema<IVideoAsset>(
     durationSec: { type: Number, default: 0 },
     rawObjectKey: { type: String, default: '' },
     manifestKey: { type: String, default: '' },
-    masterManifestKey: { type: String, default: null },
     multipartUploadId: { type: String, default: null },
     uploadCompletedAt: { type: Date, default: null },
     sourceSizeBytes: { type: Number, default: 0 },
@@ -86,3 +84,4 @@ const videoAssetSchema = new Schema<IVideoAsset>(
 );
 
 export const VideoAsset = mongoose.model<IVideoAsset>('VideoAsset', videoAssetSchema);
+

@@ -80,7 +80,7 @@ export const createInternalGrpcServer = () =>
       const [lessons, sections, allLessons, allSections] = await Promise.all([
         Lesson.find({ courseId: course.currentVersionId })
           .sort({ order: 1, createdAt: 1 })
-          .select('_id title type duration order sectionId sourceLessonId')
+          .select('_id title type duration order sectionId sourceLessonId videoAssetId')
           .lean(),
         Section.find({ courseId: course.currentVersionId })
           .select('_id order')
@@ -146,6 +146,7 @@ export const createInternalGrpcServer = () =>
             sectionOrder,
             required: true,
             equivalentLessonIds: Array.from(equivalentLessonIds).filter((id) => id !== lessonId),
+            videoAssetId: lesson.videoAssetId?.toString() || '',
           };
         }),
       };

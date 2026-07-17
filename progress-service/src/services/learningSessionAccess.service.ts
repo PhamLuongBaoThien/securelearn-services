@@ -127,6 +127,9 @@ class LearningSessionAccessService {
     if (!context.allowed) throw new LearningSessionAccessError(403, 'LEARNING_ACCESS_DENIED', context.reason || 'Bạn không có quyền học khóa học này.');
     const lesson = context.lessons.find((item) => item.lessonId === input.lessonId);
     if (!lesson || lesson.type !== 'VIDEO') throw new LearningSessionAccessError(400, 'INVALID_VIDEO_LESSON', 'Bài học video không hợp lệ.');
+    if (!lesson.videoAssetId || lesson.videoAssetId !== input.videoAssetId) {
+      throw new LearningSessionAccessError(400, 'INVALID_VIDEO_ASSET', 'Video không thuộc bài học hiện tại.');
+    }
 
     const previous = parseLease(await redisClient.get(activeKey(input.userId)));
     const sameClient = previous?.authSessionId === input.authSessionId && previous.clientInstanceId === input.clientInstanceId;
@@ -137,7 +140,7 @@ class LearningSessionAccessService {
       tokenHash: hashToken(token), userId: input.userId, authSessionId: input.authSessionId,
       clientInstanceId: input.clientInstanceId, courseId: context.courseId,
       courseVersionId: context.courseVersionId, lessonId: input.lessonId,
-      videoAssetId: String(input.videoAssetId || '').slice(0, 128),
+      videoAssetId: lesson.videoAssetId,
       deviceName: deviceNameFromUserAgent(input.userAgent),
       startedAt: sameClient ? previous!.startedAt : now, lastActiveAt: now, leaseVersion: 0,
     };
