@@ -46,7 +46,7 @@ const couponSchema = new Schema<ICoupon>(
     perUserLimit: { type: Number, default: 1, min: 1 },
     startsAt: { type: Date },
     endsAt: { type: Date },
-    isActive: { type: Boolean, default: true, index: true },
+    isActive: { type: Boolean, default: true },
     combinable: { type: Boolean, default: false },
     createdBy: { type: String, default: '' },
     createdByName: { type: String, default: '' },
@@ -56,13 +56,8 @@ const couponSchema = new Schema<ICoupon>(
   { timestamps: true }
 );
 
-couponSchema.index({ code: 'text', name: 'text' });
-couponSchema.index({ value: 1 });
-couponSchema.index({ endsAt: 1 });
 couponSchema.index({ createdAt: -1 });
 couponSchema.index({ endsAt: 1, createdAt: -1 });
-couponSchema.index({ value: -1, createdAt: -1 });
-couponSchema.index({ code: 1, createdAt: -1 });
 couponSchema.index({ isActive: 1, createdAt: -1 });
 couponSchema.index({ isActive: 1, endsAt: 1, createdAt: -1 });
 

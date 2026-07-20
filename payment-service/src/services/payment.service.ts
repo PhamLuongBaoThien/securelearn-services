@@ -7,7 +7,6 @@
 // ========================
 import { randomUUID } from 'crypto';
 import { PaymentMethod, PaymentProvider, PaymentStatus, type PaymentCourseSucceededPayload } from '@securelearn/common';
-import { PaymentAttempt } from '../models/paymentAttempt.model';
 import { PaymentTransaction, type PaymentCourseItem, type IPaymentTransaction } from '../models/paymentTransaction.model';
 import { FinanceConfig } from '../models/financeConfig.model';
 import { PaymentWebhookEvent } from '../models/paymentWebhookEvent.model';
@@ -61,6 +60,24 @@ class PaymentService {
   private readonly courseFinanceConfigKey = 'COURSE_REVENUE_SPLIT';
   private readonly subscriptionFinanceConfigKey = 'SUBSCRIPTION_REVENUE_SPLIT';
   private readonly momoPendingResultCodes = new Set([1000, 7000, 7002]);
+
+  private logPaymentOperation(input: {
+    transactionCode: string;
+    action: 'CHECKOUT' | 'CONFIRM' | 'WEBHOOK' | 'QUERY';
+    provider: PaymentProvider;
+    success: boolean;
+    message: string;
+  }): void {
+    const entry = {
+      transactionCode: input.transactionCode,
+      action: input.action,
+      provider: input.provider,
+      success: input.success,
+      message: input.message.replace(/[\r\n\t]+/g, ' ').slice(0, 200),
+    };
+    const writeLog = input.success ? console.info : console.warn;
+    writeLog('[PaymentOperation]', JSON.stringify(entry));
+  }
 
   public async createCourseCheckout(
     user: { userId: string; userRole: string; fullName: string; email: string },
@@ -131,16 +148,12 @@ class PaymentService {
         });
       }
 
-      await PaymentAttempt.create({
-        transactionId: transaction._id.toString(),
+      this.logPaymentOperation({
         transactionCode,
-        userId: user.userId,
         action: 'CHECKOUT',
         provider: normalizedProvider,
-        paymentMethod: request.paymentMethod,
         success: true,
-        message: 'Created checkout session',
-        rawPayload: { cartCount: cart.items.length, clientIp, orderInfo, paymentUrl, couponCode: couponValidation?.coupon.code },
+        message: 'Course checkout session created',
       });
     } catch (error: any) {
       transaction.status = 'FAILED';
@@ -148,16 +161,12 @@ class PaymentService {
       transaction.failureReason = error.message || 'Không thể tạo phiên thanh toán.';
       await transaction.save();
 
-      await PaymentAttempt.create({
-        transactionId: transaction._id.toString(),
+      this.logPaymentOperation({
         transactionCode,
-        userId: user.userId,
         action: 'CHECKOUT',
         provider: normalizedProvider,
-        paymentMethod: request.paymentMethod,
         success: false,
-        message: error.message || 'Không thể tạo phiên thanh toán.',
-        rawPayload: { cartCount: cart.items.length, clientIp, orderInfo, couponCode: couponValidation?.coupon.code },
+        message: 'Course checkout session creation failed',
       });
 
       throw error;
@@ -231,16 +240,12 @@ class PaymentService {
             ipAddr: clientIp || '127.0.0.1',
           });
 
-      await PaymentAttempt.create({
-        transactionId: transaction._id.toString(),
+      this.logPaymentOperation({
         transactionCode,
-        userId: user.userId,
         action: 'CHECKOUT',
         provider: normalizedProvider,
-        paymentMethod: request.paymentMethod,
         success: true,
-        message: 'Created subscription checkout session',
-        rawPayload: { planId: plan._id.toString(), clientIp, orderInfo, paymentUrl },
+        message: 'Subscription checkout session created',
       });
       return { transaction: this.mapTransaction(transaction), paymentUrl };
     } catch (error: any) {
@@ -348,16 +353,12 @@ class PaymentService {
 
     await this.finalizeSuccessfulTransaction(transaction);
 
-    await PaymentAttempt.create({
-      transactionId: transaction._id.toString(),
+    this.logPaymentOperation({
       transactionCode: transaction.transactionCode,
-      userId: user.userId,
       action: 'CONFIRM',
       provider: transaction.provider,
-      paymentMethod: transaction.paymentMethod,
       success: true,
       message: 'Transaction confirmed',
-      rawPayload: { providerRef: transaction.providerRef },
     });
 
     return this.mapTransaction(transaction);
@@ -374,16 +375,12 @@ class PaymentService {
     transaction.failureReason = reason;
     await transaction.save();
 
-    await PaymentAttempt.create({
-      transactionId: transaction._id.toString(),
+    this.logPaymentOperation({
       transactionCode: transaction.transactionCode,
-      userId,
       action: 'CONFIRM',
       provider: transaction.provider,
-      paymentMethod: transaction.paymentMethod,
       success: false,
-      message: reason,
-      rawPayload: { reason },
+      message: 'Transaction marked as failed',
     });
 
     if (transaction.productType === 'COURSE') await publishPaymentCourseFailed({
@@ -503,16 +500,12 @@ class PaymentService {
       transaction.providerRef = transactionNo || bankTranNo || transaction.providerRef || randomUUID();
       await transaction.save();
 
-      await PaymentAttempt.create({
-        transactionId: transaction._id.toString(),
+      this.logPaymentOperation({
         transactionCode,
-        userId: transaction.userId,
         action,
         provider: 'VNPAY',
-        paymentMethod: transaction.paymentMethod,
         success: false,
         message: `VNPay response code: ${responseCode}`,
-        rawPayload: payload,
       });
 
       if (transaction.productType === 'COURSE') await publishPaymentCourseFailed({
@@ -551,16 +544,12 @@ class PaymentService {
     await transaction.save();
     await this.finalizeSuccessfulTransaction(transaction);
 
-    await PaymentAttempt.create({
-      transactionId: transaction._id.toString(),
+    this.logPaymentOperation({
       transactionCode,
-      userId: transaction.userId,
       action,
       provider: 'VNPAY',
-      paymentMethod: transaction.paymentMethod,
       success: true,
       message: `VNPay ${action} success`,
-      rawPayload: payload,
     });
 
     await PaymentWebhookEvent.create({
@@ -649,16 +638,12 @@ class PaymentService {
       transaction.providerRef = transId || transaction.providerRef || randomUUID();
       await transaction.save();
 
-      await PaymentAttempt.create({
-        transactionId: transaction._id.toString(),
+      this.logPaymentOperation({
         transactionCode: orderId,
-        userId: transaction.userId,
         action,
         provider: 'MOMO',
-        paymentMethod: transaction.paymentMethod,
         success: false,
-        message: transaction.failureReason,
-        rawPayload: payload,
+        message: `MoMo response code: ${resultCode}`,
       });
 
       if (transaction.productType === 'COURSE') await publishPaymentCourseFailed({
@@ -699,16 +684,12 @@ class PaymentService {
     await transaction.save();
     await this.finalizeSuccessfulTransaction(transaction);
 
-    await PaymentAttempt.create({
-      transactionId: transaction._id.toString(),
+    this.logPaymentOperation({
       transactionCode: orderId,
-      userId: transaction.userId,
       action,
       provider: 'MOMO',
-      paymentMethod: transaction.paymentMethod,
       success: true,
       message: `MoMo ${action} success`,
-      rawPayload: payload,
     });
 
     await PaymentWebhookEvent.create({

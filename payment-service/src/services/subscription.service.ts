@@ -268,14 +268,9 @@ class SubscriptionService {
           await SubscriptionUsage.create({
             ...identity,
             courseTitle: input.courseTitle || '',
-            sessionId: input.sessionId,
-            eventId: input.eventId,
             intervals: [interval],
             qualifiedSeconds: interval.end - interval.start,
             periodUsages: [{ period: settlementPeriod, qualifiedSeconds: interval.end - interval.start }],
-            occurredAt,
-            rangeStartSeconds: interval.start,
-            rangeEndSeconds: interval.end,
             version: 1,
           });
           return { usageId: input.eventId, duplicate: false, acceptedSeconds: interval.end - interval.start, rejectedByPurchase: false };
@@ -302,11 +297,6 @@ class SubscriptionService {
             qualifiedSeconds,
             periodUsages,
             courseTitle: input.courseTitle || existing.courseTitle || '',
-            sessionId: input.sessionId,
-            eventId: input.eventId,
-            occurredAt,
-            rangeStartSeconds: Math.min(existing.rangeStartSeconds ?? interval.start, interval.start),
-            rangeEndSeconds: Math.max(existing.rangeEndSeconds ?? interval.end, interval.end),
           },
           $inc: { version: 1 },
         }

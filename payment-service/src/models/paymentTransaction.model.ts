@@ -84,7 +84,7 @@ const paymentCourseItemSchema = new Schema<PaymentCourseItem>(
 const paymentTransactionSchema = new Schema<IPaymentTransaction>(
   {
     transactionCode: { type: String, required: true, unique: true, index: true },
-    userId: { type: String, required: true, index: true },
+    userId: { type: String, required: true },
     userRole: { type: String, required: true },
     fullName: { type: String, required: true },
     email: { type: String, required: true },
@@ -100,7 +100,7 @@ const paymentTransactionSchema = new Schema<IPaymentTransaction>(
       discountAmount: { type: Number, min: 0 },
     },
     // productType giúp callback/payment return biết giao dịch này cần enroll course hay tạo term thuê bao.
-    productType: { type: String, enum: ['COURSE', 'SUBSCRIPTION'], default: 'COURSE', index: true },
+    productType: { type: String, enum: ['COURSE', 'SUBSCRIPTION'], default: 'COURSE' },
     subscriptionSnapshot: {
       planId: { type: String },
       planType: { type: String, enum: ['MONTHLY', 'YEARLY'] },
@@ -126,7 +126,6 @@ const paymentTransactionSchema = new Schema<IPaymentTransaction>(
 );
 
 paymentTransactionSchema.index({ userId: 1, createdAt: -1 });
-paymentTransactionSchema.index({ amount: 1 });
 paymentTransactionSchema.index({ createdAt: -1 });
 paymentTransactionSchema.index({ amount: -1, createdAt: -1 });
 paymentTransactionSchema.index({ amount: 1, createdAt: -1 });

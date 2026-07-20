@@ -6,11 +6,11 @@
 import { Schema, model, Document } from 'mongoose';
 export interface IPurchaseAccessCutover extends Document { userId: string; courseId: string; transactionId: string; transactionCode: string; effectiveAt: Date; }
 const schema = new Schema<IPurchaseAccessCutover>({
-  userId: { type: String, required: true, index: true },
-  courseId: { type: String, required: true, index: true },
+  userId: { type: String, required: true },
+  courseId: { type: String, required: true },
   transactionId: { type: String, required: true },
   transactionCode: { type: String, required: true },
-  effectiveAt: { type: Date, required: true, index: true },
+  effectiveAt: { type: Date, required: true },
 }, { timestamps: true });
 schema.index({ userId: 1, courseId: 1 }, { unique: true });
 export const PurchaseAccessCutover = model<IPurchaseAccessCutover>('PurchaseAccessCutover', schema);

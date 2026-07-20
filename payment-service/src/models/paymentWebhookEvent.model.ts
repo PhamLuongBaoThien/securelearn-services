@@ -21,7 +21,7 @@ const paymentWebhookEventSchema = new Schema<IPaymentWebhookEvent>(
   {
     provider: { type: String, required: true, enum: ['VNPAY', 'MOMO'] },
     eventId: { type: String, required: true },
-    transactionCode: { type: String, required: true, index: true },
+    transactionCode: { type: String, required: true },
     status: { type: String, required: true },
     processedAt: { type: Date, required: true, default: () => new Date() },
     rawPayload: { type: Schema.Types.Mixed, default: {} },
