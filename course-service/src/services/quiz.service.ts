@@ -129,23 +129,34 @@ class QuizService {
         ? question.type
         : QuizQuestionType.SINGLE_CHOICE;
 
-      const options = (question.options || [])
-        .map((option) => ({ text: option.text?.trim() || '' }))
+      const submittedOptions = question.options || [];
+      const normalizedOptions = submittedOptions
+        .map((option, originalIndex) => ({ originalIndex, text: option.text?.trim() || '' }))
         .filter((option) => option.text.length > 0);
+      const options = normalizedOptions.map((option) => ({ text: option.text }));
 
       if (options.length < 2) {
         throw new Error(`Câu hỏi #${index + 1} phải có ít nhất 2 lựa chọn.`);
       }
 
-      const correctOptionIndexes = Array.from(new Set(question.correctOptionIndexes || []));
-      if (correctOptionIndexes.length === 0) {
+      const submittedCorrectIndexes = Array.from(new Set(question.correctOptionIndexes || []));
+      if (submittedCorrectIndexes.length === 0) {
         throw new Error(`Câu hỏi #${index + 1} phải có ít nhất 1 đáp án đúng.`);
       }
-
-      const maxIndex = options.length - 1;
-      if (correctOptionIndexes.some((value) => value < 0 || value > maxIndex)) {
+      if (submittedCorrectIndexes.some((value) => !Number.isInteger(value) || value < 0 || value >= submittedOptions.length)) {
         throw new Error(`Câu hỏi #${index + 1} có đáp án đúng không hợp lệ.`);
       }
+
+      const normalizedIndexByOriginalIndex = new Map(
+        normalizedOptions.map((option, normalizedIndex) => [option.originalIndex, normalizedIndex])
+      );
+      const correctOptionIndexes = submittedCorrectIndexes.map((originalIndex) => {
+        const normalizedIndex = normalizedIndexByOriginalIndex.get(originalIndex);
+        if (normalizedIndex === undefined) {
+          throw new Error(`Câu hỏi #${index + 1} không thể chọn một lựa chọn trống làm đáp án đúng.`);
+        }
+        return normalizedIndex;
+      });
 
       if (type === QuizQuestionType.SINGLE_CHOICE || type === QuizQuestionType.TRUE_FALSE) {
         if (correctOptionIndexes.length !== 1) {
