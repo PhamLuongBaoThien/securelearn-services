@@ -16,6 +16,14 @@ const ORPHAN_TTL_MS = Number(process.env.MEDIA_ORPHAN_TTL_MS || 30 * 60 * 1000);
 const PROCESSING_TIMEOUT_MS = Number(process.env.MEDIA_PROCESSING_TIMEOUT_MS || 45 * 60 * 1000);
 const HLS_UPLOAD_CONCURRENCY = Number(process.env.HLS_UPLOAD_CONCURRENCY || 10);
 const PLAYBACK_SEGMENT_URL_TTL_SECONDS = Number(process.env.PLAYBACK_SEGMENT_URL_TTL_SECONDS || 3600);
+const VIDEO_ENCODE_CONCURRENCY = Math.max(
+  1,
+  Math.min(8, Number.parseInt(process.env.VIDEO_ENCODE_CONCURRENCY || '2', 10) || 2),
+);
+const VIDEO_QUEUE_POLL_INTERVAL_MS = Math.max(
+  500,
+  Number.parseInt(process.env.VIDEO_QUEUE_POLL_INTERVAL_MS || '2000', 10) || 2000,
+);
 
 const MAX_CONCURRENT_UPLOADS = 3;
 const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024;
@@ -45,6 +53,11 @@ const sanitizeFileName = (fileName: string): string => {
 const toPosixPath = (value: string) => value.replace(/\\/g, '/');
 
 class VideoAssetService {
+  private activeProcessingJobs = 0;
+  private isClaimingJobs = false;
+  private processingWorkerTimer: NodeJS.Timeout | null = null;
+  private processingWorkerStopping = false;
+
   public get playbackSegmentUrlTtlSeconds(): number {
     return PLAYBACK_SEGMENT_URL_TTL_SECONDS;
   }
@@ -131,10 +144,13 @@ class VideoAssetService {
     const asset = await VideoAsset.findById(videoAssetId);
     if (!asset) throw new Error(`Video asset không tồn tại khi confirm upload: ${videoAssetId}.`);
     if (asset.status === VideoAssetStatus.UPLOADED) {
-      void this.processVideoInBackground(asset._id.toString());
+      asset.status = VideoAssetStatus.QUEUED;
+      asset.processingProgress = 5;
+      await asset.save();
+      void this.pumpProcessingQueue();
       return asset;
     }
-    if ([VideoAssetStatus.PROCESSING, VideoAssetStatus.READY].includes(asset.status)) {
+    if ([VideoAssetStatus.QUEUED, VideoAssetStatus.PROCESSING, VideoAssetStatus.READY].includes(asset.status)) {
       return asset;
     }
     if (!asset.rawObjectKey || !asset.multipartUploadId) {
@@ -147,13 +163,13 @@ class VideoAssetService {
     const exists = await s3Service.objectExists(asset.rawObjectKey);
     if (!exists) throw new Error('File không tìm thấy trên storage sau khi complete.');
 
-    asset.status = VideoAssetStatus.UPLOADED;
+    asset.status = VideoAssetStatus.QUEUED;
     asset.uploadCompletedAt = new Date();
     asset.multipartUploadId = null;
     asset.processingProgress = 5;
     await asset.save();
 
-    void this.processVideoInBackground(asset._id.toString());
+    void this.pumpProcessingQueue();
     return asset;
   }
 
@@ -292,11 +308,85 @@ class VideoAssetService {
     console.log(`[VideoAssetService] Đã xoá video asset ${videoAssetId}`);
   }
 
-  private async processVideoInBackground(videoAssetId: string): Promise<void> {
+  public async startProcessingWorker(): Promise<void> {
+    this.processingWorkerStopping = false;
+
+    // Với Deployment Recreate và 1 replica, job PROCESSING còn sót lại
+    // là job bị gián đoạn khi pod cũ dừng, nên có thể đưa về queue.
+    const recovery = await VideoAsset.updateMany(
+      { status: VideoAssetStatus.PROCESSING },
+      {
+        $set: {
+          status: VideoAssetStatus.QUEUED,
+          processingProgress: 5,
+          errorMessage: null,
+        },
+      },
+    );
+    if (recovery.modifiedCount > 0) {
+      console.log('[VideoProcessingWorker] Đã đưa ' + recovery.modifiedCount + ' job gián đoạn về queue');
+    }
+
+    this.processingWorkerTimer = setInterval(() => {
+      void this.pumpProcessingQueue();
+    }, VIDEO_QUEUE_POLL_INTERVAL_MS);
+
+    console.log(
+      '[VideoProcessingWorker] Đã khởi động (concurrency=' + VIDEO_ENCODE_CONCURRENCY +
+      ', poll=' + VIDEO_QUEUE_POLL_INTERVAL_MS + 'ms)',
+    );
+    await this.pumpProcessingQueue();
+  }
+
+  public stopProcessingWorker(): void {
+    this.processingWorkerStopping = true;
+    if (this.processingWorkerTimer) {
+      clearInterval(this.processingWorkerTimer);
+      this.processingWorkerTimer = null;
+    }
+  }
+
+  private async pumpProcessingQueue(): Promise<void> {
+    if (this.processingWorkerStopping || this.isClaimingJobs) return;
+    this.isClaimingJobs = true;
+
+    try {
+      while (!this.processingWorkerStopping && this.activeProcessingJobs < VIDEO_ENCODE_CONCURRENCY) {
+        const asset = await VideoAsset.findOneAndUpdate(
+          { status: VideoAssetStatus.QUEUED },
+          {
+            $set: {
+              status: VideoAssetStatus.PROCESSING,
+              processingProgress: 5,
+              errorMessage: null,
+            },
+          },
+          { sort: { createdAt: 1 }, new: true },
+        );
+        if (!asset) break;
+
+        this.activeProcessingJobs += 1;
+        const videoAssetId = asset._id.toString();
+        console.log(
+          '[VideoProcessingWorker] Nhận job ' + videoAssetId +
+          ' (' + this.activeProcessingJobs + '/' + VIDEO_ENCODE_CONCURRENCY + ')',
+        );
+
+        void this.processClaimedVideo(videoAssetId).finally(() => {
+          this.activeProcessingJobs = Math.max(0, this.activeProcessingJobs - 1);
+          void this.pumpProcessingQueue();
+        });
+      }
+    } finally {
+      this.isClaimingJobs = false;
+    }
+  }
+
+  private async processClaimedVideo(videoAssetId: string): Promise<void> {
     const asset = await VideoAsset.findById(videoAssetId);
     if (!asset) return;
-    if (asset.status === VideoAssetStatus.PROCESSING || asset.status === VideoAssetStatus.READY) {
-      console.log(`[VideoAssetService] Bỏ qua xử lý lại video ${videoAssetId} vì status=${asset.status}`);
+    if (asset.status !== VideoAssetStatus.PROCESSING) {
+      console.log('[VideoProcessingWorker] Bỏ qua job ' + videoAssetId + ' vì status=' + asset.status);
       return;
     }
 
@@ -350,9 +440,6 @@ class VideoAssetService {
         console.error(`[VideoAssetService] FFprobe quét lỗi (Có thể do file giả mạo/hỏng): ${probeError.message}`);
         throw new Error('Tệp tải lên bị hỏng, sai định dạng hoặc không phải là một video hợp lệ. Vui lòng kiểm tra lại!');
       }
-
-      asset.status = VideoAssetStatus.PROCESSING;
-      await asset.save();
 
       const onProgress = async (percent: number) => {
         await VideoAsset.updateOne(
@@ -484,6 +571,7 @@ class VideoAssetService {
           VideoAssetStatus.INITIATED,
           VideoAssetStatus.UPLOADING,
           VideoAssetStatus.UPLOADED,
+          VideoAssetStatus.QUEUED,
           VideoAssetStatus.READY,
           VideoAssetStatus.FAILED,
         ],

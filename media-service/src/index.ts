@@ -25,6 +25,7 @@ const bootServer = async () => {
     await registerEventHandlers();
     videoAssetService.startOrphanCleanupJob();
     videoAssetService.startProcessingTimeoutJob();
+    await videoAssetService.startProcessingWorker();
     documentAssetService.startOrphanCleanupJob();
     grpcServer = await startGrpcServer(createInternalGrpcServer(), GRPC_BIND);
 
@@ -40,6 +41,7 @@ const bootServer = async () => {
 
 const gracefulShutdown = async () => {
   console.log('\nĐang tắt Media Service...');
+  videoAssetService.stopProcessingWorker();
   grpcServer?.forceShutdown();
   await new Promise<void>((resolve) => httpServer ? httpServer.close(() => resolve()) : resolve());
   await mongoose.disconnect();

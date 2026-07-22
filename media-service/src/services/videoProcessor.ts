@@ -3,6 +3,11 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
+const FFMPEG_THREADS = Math.max(
+  1,
+  Math.min(8, Number.parseInt(process.env.FFMPEG_THREADS || '2', 10) || 2),
+);
+
 export type ProgressCallback = (percent: number) => Promise<void>;
 
 export type ProbedVideoMetadata = {
@@ -147,7 +152,7 @@ const encodeRenditionToHls = async (params: {
       .addOptions([
         '-preset veryfast',
         '-crf 23',
-        '-threads 0',
+        '-threads ' + FFMPEG_THREADS,
         '-profile:v baseline',
         '-level 4.0',
         '-pix_fmt yuv420p',

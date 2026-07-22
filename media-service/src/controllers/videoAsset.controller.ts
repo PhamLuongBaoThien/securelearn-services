@@ -262,7 +262,7 @@ class VideoAssetController {
       const normalized = typeof (asset as { toObject?: () => unknown }).toObject === 'function'
         ? (asset as { toObject: () => unknown }).toObject()
         : asset;
-      res.status(200).json({ status: 'OK', message: 'Đang xử lý video.', data: sanitizeVideoAsset(normalized as Awaited<ReturnType<typeof videoAssetService.getAsset>>) });
+      res.status(200).json({ status: 'OK', message: 'Video đã vào hàng đợi xử lý.', data: sanitizeVideoAsset(normalized as Awaited<ReturnType<typeof videoAssetService.getAsset>>) });
     } catch (error: any) {
       res.status(400).json({ status: 'ERR', message: error.message });
     }

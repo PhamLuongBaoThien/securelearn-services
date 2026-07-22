@@ -6,6 +6,7 @@ export enum VideoAssetStatus {
   INITIATED  = 'INITIATED',
   UPLOADING  = 'UPLOADING',
   UPLOADED   = 'UPLOADED',
+  QUEUED     = 'QUEUED',
   PROCESSING = 'PROCESSING',
   READY      = 'READY',
   FAILED     = 'FAILED',

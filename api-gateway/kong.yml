@@ -339,10 +339,8 @@ services:
         methods:
           - OPTIONS
 
-      # Route riêng cho các API upload — áp rate limit chặt hơn route thông thường.
-      # Lý do: API này sinh presigned URLs (cho phép PUT file lên storage),
-      # nếu bị spam có thể tạo hàng nghìn URL → chiếm bandwidth MinIO.
-      # Tách ra để gắn rate-limiting riêng: 10 req/phút (thay vì 100 req/phút toàn cục).
+      # Route riêng cho các API upload để áp JWT và định tuyến nhất quán.
+      # Các request này vẫn chịu rate limit toàn cục.
       - name: media-upload
         paths:
           - /api/media/videos/initiate-upload
@@ -467,18 +465,6 @@ plugins:
       minute: 10
       limit_by: ip
       policy: local
-  # Rate limiting RIÊNG cho route upload — chặt hơn rate limit toàn cục.
-  # Tối đa 10 lần gọi initiate-upload hoặc batch-part-urls mỗi phút CHO MỖI TÀI KHOẢN (Đếm theo Header Authorization).
-  # Instructor thông thường chỉ upload 1-2 video/phút, nên 10 là dư giả.
-  # Nếu vượt → Kong trả HTTP 429 Too Many Requests.
-  - name: rate-limiting
-    route: media-upload
-    config:
-      minute: 10
-      limit_by: header
-      header_name: Authorization
-      policy: local
-
   - name: rate-limiting
     route: identity-sessions-protected
     config:
