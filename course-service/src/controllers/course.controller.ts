@@ -235,7 +235,21 @@ class CourseController {
    */
   public async getPublishedCourses(req: Request, res: Response): Promise<void> {
     try {
-      const { page, limit, search, category, level, minPrice, maxPrice, rating, minDuration, maxDuration, sort, instructorId, ids } = req.query;
+      const {
+        page,
+        limit,
+        search,
+        category,
+        level,
+        minPrice,
+        maxPrice,
+        rating,
+        minDuration,
+        maxDuration,
+        sort,
+        instructorId,
+        ids,
+      } = req.query;
 
       const result = await courseService.getPublishedCourses({
         page: page ? Number(page) : undefined,
@@ -259,6 +273,22 @@ class CourseController {
     }
   }
 
+  /**
+   * [GET] /api/courses/:id/related
+   * Khóa học liên quan cùng category trực tiếp, loại khóa hiện tại.
+   */
+  public async getRelatedCourses(req: Request, res: Response): Promise<void> {
+    try {
+      const { page, limit } = req.query;
+      const result = await courseService.getRelatedCourses(req.params.id as string, {
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+      });
+      res.status(200).json({ status: 'OK', data: result });
+    } catch (error: any) {
+      res.status(404).json({ status: 'ERR', message: error.message });
+    }
+  }
   /**
    * [GET] /api/courses/:slug
    * Chi tiết khóa học theo slug (Public — chỉ PUBLISHED).

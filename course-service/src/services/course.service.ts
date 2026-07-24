@@ -1477,6 +1477,72 @@ class CourseService {
     };
   }
 
+  public async getRelatedCourses(courseId: string, query: {
+    page?: number;
+    limit?: number;
+  }): Promise<{
+    courses: CourseResponse[];
+    total: number;
+    page: number;
+    totalPages: number;
+  }> {
+    if (!Types.ObjectId.isValid(courseId)) {
+      throw new Error("Khóa học không tồn tại hoặc chưa được xuất bản.");
+    }
+
+    const currentCourse = await Course.findOne({
+      _id: courseId,
+      status: CourseStatus.PUBLISHED,
+      currentVersionId: { $ne: null },
+    }).lean();
+
+    if (!currentCourse) {
+      throw new Error("Khóa học không tồn tại hoặc chưa được xuất bản.");
+    }
+
+    const page = Math.max(query.page || 1, 1);
+    const limit = Math.min(Math.max(query.limit || 4, 1), 12);
+    const skip = (page - 1) * limit;
+
+    if (!currentCourse.categoryId) {
+      return { courses: [], total: 0, page, totalPages: 0 };
+    }
+
+    const filter = {
+      _id: { $ne: currentCourse._id },
+      status: CourseStatus.PUBLISHED,
+      currentVersionId: { $ne: null },
+      categoryId: currentCourse.categoryId,
+    };
+    const sortOption = { ratingAverage: -1 as const, ratingCount: -1 as const, createdAt: -1 as const };
+
+    const [shells, total] = await Promise.all([
+      Course.find(filter).sort(sortOption).skip(skip).limit(limit).lean(),
+      Course.countDocuments(filter),
+    ]);
+
+    const responses = await Promise.all(
+      shells.map(async (shell) =>
+        this.sanitizePublicCourse(
+          await this.buildVersionResponse(
+            shell.currentVersionId!.toString(),
+            shell as unknown as CourseShellLike,
+            true,
+          ),
+        ),
+      ),
+    );
+    responses.forEach((response, index) => {
+      response._id = shells[index]._id.toString();
+    });
+
+    return {
+      courses: responses,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
   public async getCourseBySlug(slug: string): Promise<CourseResponse> {
     const shell = await Course.findOne({
       slug,

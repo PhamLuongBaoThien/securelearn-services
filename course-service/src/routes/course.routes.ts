@@ -95,6 +95,7 @@ router.delete('/:id', extractUser, requireInstructor, courseController.deleteCou
 
 // [GET] /api/courses/:slug — Chi tiết khóa học theo slug
 router.get('/:id/reviews', courseReviewController.listReviews);
+router.get('/:id/related', courseController.getRelatedCourses);
 router.get('/:slug', courseController.getCourseBySlug);
 
 router.use('/:courseId/sections', extractUser, requireInstructor, sectionRoutes);
