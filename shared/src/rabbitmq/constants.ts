@@ -257,6 +257,7 @@ export interface PaymentCourseSucceededPayload {
   provider: PaymentProvider;
   paymentMethod: PaymentMethod;
   amount: number;
+  checkoutMode?: "CART" | "BUY_NOW";
   items: PaymentCourseItemPayload[];
   paidAt: string;
 }

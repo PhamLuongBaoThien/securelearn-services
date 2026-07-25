@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { Cart } from '../models/cart.model';
 import { Course, CourseStatus, ICourse } from '../models/course.model';
+import { Enrollment, EnrollmentSource, EnrollmentStatus } from '../models/enrollment.model';
 
 export interface CartCourseItem {
   _id: string;
@@ -44,6 +45,38 @@ class CartService {
     return this.getCart(userId);
   }
 
+  public async getBuyNowItem(userId: string, courseId: string, userRole?: string): Promise<CartCourseItem> {
+    const course = await this.getPublishedCourseOrThrow(courseId);
+    this.assertCanAddCourse(course, userId, userRole);
+
+    const alreadyOwned = await Enrollment.exists({
+      userId,
+      courseId: course._id,
+      source: EnrollmentSource.PURCHASE,
+      status: { $ne: EnrollmentStatus.CANCELLED },
+    });
+    if (alreadyOwned) {
+      const error = new Error('Bạn đã sở hữu khóa học này.') as Error & { courseSlug?: string };
+      error.name = 'CourseAlreadyOwnedError';
+      error.courseSlug = course.slug;
+      throw error;
+    }
+
+    return {
+      _id: course._id.toString(),
+      slug: course.slug,
+      title: course.title,
+      price: course.price,
+      thumbnail: course.thumbnail,
+      instructorName: course.instructorName,
+      instructorId: course.instructorId.toString(),
+      addedAt: new Date(),
+      level: course.level,
+      totalLessons: course.totalLessons,
+      totalDuration: course.totalDuration,
+    };
+  }
+
   public async removeItem(userId: string, courseId: string): Promise<CartResponse> {
     if (!Types.ObjectId.isValid(courseId)) {
       throw new Error('Khóa học không hợp lệ.');
@@ -54,6 +87,19 @@ class CartService {
       { $pull: { items: { courseId: new Types.ObjectId(courseId) } } }
     );
 
+    return this.getCart(userId);
+  }
+
+  public async removeItems(userId: string, courseIds: string[]): Promise<CartResponse> {
+    const objectIds = [...new Set(courseIds)]
+      .filter((courseId) => Types.ObjectId.isValid(courseId))
+      .map((courseId) => new Types.ObjectId(courseId));
+    if (objectIds.length === 0) return this.getCart(userId);
+
+    await Cart.updateOne(
+      { userId },
+      { $pull: { items: { courseId: { $in: objectIds } } } }
+    );
     return this.getCart(userId);
   }
 

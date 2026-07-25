@@ -187,8 +187,13 @@ export const registerEventHandlers = async (): Promise<void> => {
       }
 
       if (allSucceeded) {
-        await cartService.clearCart(payload.userId);
-        console.log(`[CourseEvent] Đã ghi danh và xóa giỏ hàng của user ${payload.userId} sau thanh toán ${payload.transactionCode}`);
+        if (payload.checkoutMode === 'BUY_NOW') {
+          await cartService.removeItems(payload.userId, payload.items.map((item) => item.courseId));
+          console.log('[CourseEvent] Đã ghi danh và chỉ xóa khóa học mua ngay khỏi giỏ sau thanh toán ' + payload.transactionCode);
+        } else {
+          await cartService.clearCart(payload.userId);
+          console.log('[CourseEvent] Đã ghi danh và xóa giỏ hàng sau thanh toán ' + payload.transactionCode);
+        }
       } else {
         console.warn(`[CourseEvent] Thanh toán ${payload.transactionCode} hoàn tất nhưng có ít nhất 1 khóa học chưa ghi danh thành công.`);
       }

@@ -29,6 +29,7 @@ export interface IPaymentTransaction extends Document {
   fullName: string;
   email: string;
   items: PaymentCourseItem[];
+  checkoutMode: 'CART' | 'BUY_NOW';
   grossAmount?: number;
   discountAmount?: number;
   amount: number;
@@ -89,6 +90,7 @@ const paymentTransactionSchema = new Schema<IPaymentTransaction>(
     fullName: { type: String, required: true },
     email: { type: String, required: true },
     items: { type: [paymentCourseItemSchema], required: true },
+    checkoutMode: { type: String, enum: ['CART', 'BUY_NOW'], default: 'CART' },
     grossAmount: { type: Number, min: 0 },
     discountAmount: { type: Number, default: 0, min: 0 },
     amount: { type: Number, required: true, min: 0 },

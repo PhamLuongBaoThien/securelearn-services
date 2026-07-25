@@ -7,6 +7,7 @@ const router = Router();
 router.use(extractUser, requireStudentOrInstructor);
 
 router.get('/', cartController.getCart);
+router.get('/buy-now/:courseId', cartController.getBuyNowItem);
 router.post('/items', cartController.addItem);
 router.delete('/items/:courseId', cartController.removeItem);
 router.post('/merge', cartController.mergeGuestCart);

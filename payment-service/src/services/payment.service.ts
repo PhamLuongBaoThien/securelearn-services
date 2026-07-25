@@ -24,6 +24,8 @@ import couponService from './coupon.service';
 
 type CheckoutRequest = {
   paymentMethod: PaymentMethod;
+  checkoutMode?: 'CART' | 'BUY_NOW';
+  courseId?: string;
   provider?: PaymentProvider;
   couponCode?: string;
 };
@@ -87,7 +89,13 @@ class PaymentService {
   ) {
     // Entry chính của flow mua đứt.
     // Hàm này đọc cart hiện tại, tạo PaymentTransaction PENDING và sinh URL thanh toán cho VNPay hoặc MoMo.
-    const cart = await this.fetchCart(token);
+    const checkoutMode = request.checkoutMode === 'BUY_NOW' ? 'BUY_NOW' : 'CART';
+    if (checkoutMode === 'BUY_NOW' && !request.courseId) {
+      throw new Error('Thiếu khóa học cần mua ngay.');
+    }
+    const cart = checkoutMode === 'BUY_NOW'
+      ? await this.fetchBuyNowItem(token, request.courseId!)
+      : await this.fetchCart(token);
     if (cart.items.length === 0) {
       throw new Error('Giỏ hàng của bạn đang trống.');
     }
@@ -112,6 +120,7 @@ class PaymentService {
       fullName: user.fullName,
       email: user.email,
       items: cart.items,
+      checkoutMode,
       grossAmount,
       discountAmount,
       amount: payableAmount,
@@ -260,6 +269,7 @@ class PaymentService {
 
   public async validateCourseCoupon(userId: string, token: string, code: string) {
     const cart = await this.fetchCart(token);
+
     if (cart.items.length === 0) {
       throw new Error('Giỏ hàng của bạn đang trống.');
     }
@@ -741,6 +751,22 @@ class PaymentService {
     }
   }
 
+  private async fetchBuyNowItem(token: string, courseId: string): Promise<{ items: PaymentCourseItem[]; totalPrice: number }> {
+    const response = await fetch(this.courseServiceUrl + '/api/cart/buy-now/' + encodeURIComponent(courseId), {
+      headers: { Authorization: token },
+    });
+    const data = (await response.json()) as {
+      status: 'OK' | 'ERR';
+      message?: string;
+      data?: { item?: NonNullable<CartResponse['data']>['items'][number] };
+    };
+    if (!response.ok || data.status === 'ERR' || !data.data?.item) {
+      throw new Error(data.message || 'Khóa học không thể mua ngay.');
+    }
+    const item = this.toPaymentItem(data.data.item);
+    return { items: [item], totalPrice: item.price };
+  }
+
   private async fetchCart(token: string): Promise<{ items: PaymentCourseItem[]; totalPrice: number }> {
     // payment-service không tự giữ cart.
     // Trước khi tạo checkout, service gọi ngược sang course-service để chụp lại snapshot giỏ hàng hiện tại.
@@ -798,6 +824,7 @@ class PaymentService {
       fullName: transaction.fullName,
       email: transaction.email,
       items: transaction.items,
+      checkoutMode: transaction.checkoutMode || 'CART',
       amount: transaction.amount,
       productType: transaction.productType || 'COURSE',
       subscriptionSnapshot: transaction.subscriptionSnapshot || null,
@@ -844,6 +871,7 @@ class PaymentService {
       provider: transaction.provider,
       paymentMethod: transaction.paymentMethod,
       amount: transaction.amount,
+      checkoutMode: transaction.checkoutMode || 'CART',
       items: transaction.items,
       paidAt: (transaction.paidAt || new Date()).toISOString(),
     };

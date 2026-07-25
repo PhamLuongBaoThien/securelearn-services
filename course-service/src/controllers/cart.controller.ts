@@ -12,6 +12,24 @@ class CartController {
     }
   }
 
+  public async getBuyNowItem(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const item = await cartService.getBuyNowItem(req.userId!, String(req.params.courseId || ''), req.userRole);
+      res.status(200).json({ status: 'OK', data: { item } });
+    } catch (error: any) {
+      if (error.name === 'CourseAlreadyOwnedError') {
+        res.status(409).json({
+          status: 'ERR',
+          code: 'COURSE_ALREADY_OWNED',
+          message: error.message,
+          data: { courseId: String(req.params.courseId || ''), slug: error.courseSlug || '' },
+        });
+        return;
+      }
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   public async addItem(req: AuthRequest, res: Response): Promise<void> {
     try {
       const cart = await cartService.addItem(req.userId!, req.body.courseId, req.userRole);
