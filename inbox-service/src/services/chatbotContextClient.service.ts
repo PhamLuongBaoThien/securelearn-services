@@ -1,4 +1,4 @@
-﻿export type ChatbotSource = {
+export type ChatbotSource = {
   type: "COURSE";
   title: string;
   url: string;
@@ -21,6 +21,12 @@ export type ChatbotCourseContext = {
   ratingCount: number;
   enrollmentCount: number;
   isSubscriptionIncluded: boolean;
+};
+
+export type ChatbotCategoryContext = {
+  name: string;
+  slug: string;
+  description: string;
 };
 
 type ApiResponse<T> = { status: "OK" | "ERR"; data: T; message?: string };
@@ -49,6 +55,10 @@ class ChatbotContextClient {
 
   popularCourses(limit = 8) {
     return withTimeout<ChatbotCourseContext[]>(`${COURSE_SERVICE_URL}/internal/chatbot/courses/popular?limit=${limit}`);
+  }
+
+  getCategories() {
+    return withTimeout<ChatbotCategoryContext[]>(`${COURSE_SERVICE_URL}/internal/chatbot/categories`);
   }
 }
 

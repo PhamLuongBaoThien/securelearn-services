@@ -1,4 +1,4 @@
-﻿import { ChatbotClassification, CoursePromptMode, fallbackClassify, type ChatbotIntent } from "./chatbotIntent.service";
+import { ChatbotClassification, CoursePromptMode, fallbackClassify, type ChatbotIntent } from "./chatbotIntent.service";
 
 type ClassifyInput = {
   message: string;
@@ -51,62 +51,8 @@ const normalizeClassification = (raw: any, fallback: ChatbotClassification): Cha
 
 class ChatbotClassifierService {
   async classify(input: ClassifyInput): Promise<ChatbotClassification> {
-    const fallback = fallbackClassify(input.message, input.previousCourseTitles.length > 0);
-    const apiKey = process.env.GEMINI_API_KEY;
-    const model = process.env.GEMINI_MODEL;
-    if (!apiKey || !model) return fallback;
-
-    const prompt = JSON.stringify({
-      userMessage: input.message,
-      recentHistory: input.history.slice(-6),
-      previousCourseTitles: input.previousCourseTitles.slice(0, 8),
-      outputSchema: {
-        intent: "COURSE | OUT_OF_SCOPE | SMALL_TALK",
-        courseMode: "SEARCH | ADVISOR | FOLLOW_UP",
-        searchQuery: "short Vietnamese search query for course-service; empty unless intent is COURSE",
-        smallTalkReply: "Warm Vietnamese reply when intent is SMALL_TALK; empty otherwise",
-      },
-      rules: [
-        "SMALL_TALK for greetings, thanks, goodbye, casual chat that does not need course data.",
-        "COURSE for finding, advising, pricing, duration, lesson count, or follow-up about courses.",
-        "OUT_OF_SCOPE for policies, payments, account support, admin contact, unrelated knowledge, or detailed course comparison requests.",
-        "FOLLOW_UP when the user asks about 'khóa đó', 'khóa này', 'nó', or asks more about a previously suggested course.",
-        "ADVISOR when the user wants a learning path, asks what to learn, asks what they need to understand before starting, describes first-time/beginner status, current level, goals, or asks for recommendations.",
-        "SEARCH only when the user asks for a specific course/topic to find, not when they ask for learning concepts or what to know first.",
-        "If the recent assistant message offered to suggest suitable courses and the user replies yes/ok/được/gợi ý đi, classify COURSE with courseMode SEARCH and infer searchQuery from recentHistory.",
-        "If the user asks to compare courses, do not use a compare mode; return OUT_OF_SCOPE unless they ask which course fits their personal learning goal.",
-        "Return only JSON. No markdown.",
-      ],
-    }, null, 2);
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 6000);
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: classifierSystemPrompt }] },
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0,
-            maxOutputTokens: 260,
-            responseMimeType: "application/json",
-          },
-        }),
-      });
-
-      if (!response.ok) return fallback;
-      const data = await response.json().catch(() => ({}));
-      const text = data?.candidates?.[0]?.content?.parts?.map((part: any) => part?.text || "").join("\n").trim() || "";
-      const parsed = JSON.parse(extractJson(text));
-      return normalizeClassification(parsed, fallback);
-    } catch {
-      return fallback;
-    } finally {
-      clearTimeout(timer);
-    }
+    // Phân loại Local siêu tốc (0ms, 0% Gemini Request, tiết kiệm 50% Quota)
+    return fallbackClassify(input.message, input.previousCourseTitles.length > 0);
   }
 }
 

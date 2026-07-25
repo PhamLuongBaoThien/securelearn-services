@@ -1,4 +1,4 @@
-﻿import type { Response } from "express";
+import type { Response } from "express";
 import type { AuthRequest } from "../middlewares/auth.middleware";
 import chatbotService from "../services/chatbot.service";
 
@@ -7,14 +7,17 @@ const getActor = (req: AuthRequest) => ({ userId: req.identityType === "USER" ? 
 class ChatbotController {
   message = async (req: AuthRequest, res: Response) => {
     try {
+      console.log("[ChatbotController] Incoming message:", req.body.message);
       const data = await chatbotService.handleMessage({
         message: req.body.message,
         conversationId: req.body.conversationId,
         guestToken: req.body.guestToken,
         actor: getActor(req),
       });
+      console.log("[ChatbotController] Outgoing reply:", data.reply);
       res.json({ status: "OK", data });
     } catch (error: any) {
+      console.error("[ChatbotController] Error handling message:", error);
       res.status(error.status || 500).json({ status: "ERR", message: error.message || "Chatbot chưa thể phản hồi." });
     }
   };
