@@ -23,6 +23,27 @@ class GeminiService {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30000);
     try {
+      return await this.executeFetch(input);
+    } catch (error: any) {
+      if (Number(error?.status) === 429) {
+        console.warn("[GeminiService] Dính lỗi 429 Rate-Limit, đang tự động retry sau 1 giây...");
+        await new Promise((res) => setTimeout(res, 1000));
+        return await this.executeFetch(input);
+      }
+      throw error;
+    }
+  }
+
+  private async executeFetch(input: {
+    apiKey: string;
+    model: string;
+    systemPrompt: string;
+    prompt: string;
+    maxOutputTokens: number;
+  }): Promise<string> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:generateContent?key=${encodeURIComponent(input.apiKey)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

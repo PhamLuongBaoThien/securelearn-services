@@ -73,8 +73,14 @@ const pickSuggestedCourses = (courses: ChatbotCourseContext[], reply: string, sh
   if (!courses.length) return [];
   const normalizedReply = normalizeText(reply);
 
-  // Bỏ qua các từ dừng phổ biến (cơ bản, căn bản, người mới, trình độ...) để không bị tính nhầm
-  const stopWords = new Set(["khoa", "hoc", "co", "ban", "can", "cho", "nguoi", "moi", "bat", "dau", "online", "bai", "trinh", "do"]);
+  // Nếu câu reply là câu thông báo sự cố quá tải, không hiện bất kỳ thẻ card nào
+  if (normalizedReply.includes("qua tai") || normalizedReply.includes("gian doan")) return [];
+
+  // Bỏ qua các từ dừng phổ biến và từ dừng hệ thống
+  const stopWords = new Set([
+    "khoa", "hoc", "co", "ban", "can", "cho", "nguoi", "moi", "bat", "dau", "online", "bai", "trinh", "do",
+    "truc", "tiep", "tim", "kiem", "he", "thong", "tro", "ly", "chao", "ban", "minh", "tieng", "viet"
+  ]);
 
   const mentionedCourses = courses.filter((course) => {
     const titleNorm = normalizeText(course.title);
@@ -84,11 +90,12 @@ const pickSuggestedCourses = (courses: ChatbotCourseContext[], reply: string, sh
     const coreWords = titleNorm.split(/\s+/).filter((word) => word.length >= 2 && !stopWords.has(word));
     if (!coreWords.length) return false;
 
-    // Kiểm tra từ khóa đặc trưng độc bản (ví dụ: photoshop, figma, nodejs, python...)
-    const hasUniqueCoreWord = coreWords.some((word) => word.length >= 4 && normalizedReply.includes(word));
-    if (hasUniqueCoreWord) return true;
+    // Nếu tiêu đề chỉ có 1 từ đặc trưng duy nhất (ví dụ: photoshop, figma, nodejs, python...)
+    if (coreWords.length === 1 && coreWords[0].length >= 4) {
+      return normalizedReply.includes(coreWords[0]);
+    }
 
-    // Kiểm tra cụm 2 từ đặc trưng liên tiếp
+    // Nếu tiêu đề từ 2 từ đặc trưng trở lên: BẮT BUỘC phải khớp cụm 2 từ liền nhau (Bigram) trong reply
     for (let i = 0; i < coreWords.length - 1; i++) {
       const bigram = `${coreWords[i]} ${coreWords[i + 1]}`;
       if (normalizedReply.includes(bigram)) return true;
@@ -96,10 +103,10 @@ const pickSuggestedCourses = (courses: ChatbotCourseContext[], reply: string, sh
     return false;
   });
 
+  // CHỈ HIỂN THỊ THẺ CARD KHI GEMINI AI THỰC SỰ NHẮC TỚI HOẶC GỢI Ý KHÓA HỌC CỤ THỂ
   if (mentionedCourses.length > 0) return uniqueCourses(mentionedCourses).slice(0, 4);
 
-  // Nếu reply của AI giới thiệu tổng quan về chủ đề, trả về danh sách các khóa học cùng chủ đề trong context
-  return uniqueCourses(courses).slice(0, 4);
+  return [];
 };
 
 const formatCoursePrice = (price?: number) => {
@@ -342,9 +349,24 @@ class ChatbotService {
     categories = await chatbotContextClient.getCategories().catch(() => []);
 
     if (mode === "FOLLOW_UP") {
-      const previousCourseSources = previousSources.slice(0, 4);
-      const courseGroups = await Promise.all(previousCourseSources.map((source) => chatbotContextClient.searchCourses(source.title, 1).catch(() => [])));
-      courses = uniqueCourses(courseGroups.flat());
+      const previousCourseSources = previousSources.slice(0, 8);
+      const historyUserText = history.map((h) => h.content).join(" ");
+      const topicQuery = inferCourseQueryFromHistory(history, message);
+
+      const [directCourses, topicCourses] = await Promise.all([
+        Promise.all(previousCourseSources.map((source) => chatbotContextClient.searchCourses(source.title, 1).catch(() => []))),
+        chatbotContextClient.searchCourses(topicQuery, 8).catch(() => []),
+      ]);
+
+      let combinedCourses = uniqueCourses([...directCourses.flat(), ...topicCourses]);
+
+      // Nếu câu hỏi có ý hỏi về giá rẻ nhất / thấp nhất, sắp xếp theo giá tăng dần
+      const isPriceQuery = normalizeText(message).replace(/\s+/g, "").includes("renhat") || normalizeText(message).includes("thap nhat") || normalizeText(message).includes("gia re");
+      if (isPriceQuery && combinedCourses.length > 0) {
+        combinedCourses.sort((a, b) => (a.price || 0) - (b.price || 0));
+      }
+
+      courses = combinedCourses;
     } else {
       // Dù là SEARCH hay ADVISOR, đều query CSDL để tìm các khóa học phù hợp với từ khóa
       const searchQuery = classification.searchQuery || message;
