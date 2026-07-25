@@ -42,20 +42,80 @@ const stripHtml = (value = '') =>
 const truncate = (value: string, max = 700) => (value.length > max ? `${value.slice(0, max).trim()}...` : value);
 
 class ChatbotContextService {
+  async getCategories(): Promise<Array<{ name: string; slug: string; description: string }>> {
+    const categories = await Category.find({ isActive: true }).sort({ sortOrder: 1, name: 1 }).lean();
+    return categories.map((cat) => ({
+      name: cat.name,
+      slug: cat.slug,
+      description: cat.description || '',
+    }));
+  }
+
   async searchCourses(query: unknown, limitValue: unknown): Promise<ChatbotCourseContext[]> {
-    const q = String(query || '').trim();
-    if (!q) return this.popularCourses(limitValue);
-    return this.findCourses({
-      limit: clampLimit(limitValue),
+    const rawQ = String(query || '').trim();
+    const limit = clampLimit(limitValue);
+    if (!rawQ) return this.popularCourses(limit);
+
+    // 1. Tìm các category khớp với query
+    const matchedCategories = await Category.find({
+      isActive: true,
+      $or: [
+        { name: { $regex: rawQ, $options: 'i' } },
+        { description: { $regex: rawQ, $options: 'i' } },
+      ],
+    }).select('_id').lean();
+    const matchedCategoryIds = matchedCategories.map((c) => c._id);
+
+    // 2. Tách từ khóa tìm kiếm tự nhiên (bỏ qua các từ nghi vấn hỏi giá như bao nhiêu, tiền, giá...)
+    const noiseWordsRegex = /(bao nhiêu|bao nhieu|bao|nhiêu|nhieu|tiền|tien|giá|gia|khóa học|khoa hoc|khóa|khoa|học|hoc|cho|tôi|mình|em|bạn|nhé|hỏi)/gi;
+    const cleanQuery = rawQ.replace(noiseWordsRegex, ' ').replace(/\s+/g, ' ').trim();
+
+    const keywords = (cleanQuery || rawQ)
+      .split(/\s+/)
+      .map((k) => k.trim())
+      .filter((k) => k.length >= 2);
+
+    const searchPattern = keywords.length > 0 ? keywords.join('|') : rawQ;
+
+    let results = await this.findCourses({
+      limit,
       filter: {
         $or: [
-          { title: { $regex: q, $options: 'i' } },
-          { shortDescription: { $regex: q, $options: 'i' } },
-          { description: { $regex: q, $options: 'i' } },
+          { title: { $regex: searchPattern, $options: 'i' } },
+          { shortDescription: { $regex: searchPattern, $options: 'i' } },
+          ...(matchedCategoryIds.length ? [{ categoryId: { $in: matchedCategoryIds } }] : []),
         ],
       },
       sort: { ratingAverage: -1, enrollmentCount: -1, updatedAt: -1 },
     });
+
+    // Bổ sung các khóa học cùng danh mục (Category) liên quan để gợi ý phong phú đúng chủ đề
+    if (results.length > 0 && results.length < limit) {
+      const foundCategoryNames = results.map((r) => r.category).filter(Boolean);
+      if (foundCategoryNames.length > 0) {
+        const relatedCategories = await Category.find({ name: { $in: foundCategoryNames } }).select('_id').lean();
+        const relatedCatIds = relatedCategories.map((c) => c._id);
+        if (relatedCatIds.length > 0) {
+          const sameCategoryCourses = await this.findCourses({
+            limit: limit - results.length,
+            filter: { categoryId: { $in: relatedCatIds } },
+            sort: { ratingAverage: -1, enrollmentCount: -1 },
+          });
+          const existingSlugs = new Set(results.map((r) => r.slug));
+          for (const course of sameCategoryCourses) {
+            if (!existingSlugs.has(course.slug)) {
+              results.push(course);
+              existingSlugs.add(course.slug);
+            }
+          }
+        }
+      }
+    }
+
+    if (results.length > 0) return results;
+
+    // 3. Nếu không tìm thấy khóa học khớp từ khóa, trả về danh sách khóa học phong phú trong CSDL làm ngữ cảnh cho AI
+    return this.popularCourses(limit);
   }
 
   async popularCourses(limitValue: unknown): Promise<ChatbotCourseContext[]> {

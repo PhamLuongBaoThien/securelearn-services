@@ -19,6 +19,15 @@ class ChatbotContextController {
       res.status(500).json({ status: 'ERR', message: error.message || 'Không thể lấy dữ liệu khóa học.' });
     }
   };
+
+  getCategories = async (_req: Request, res: Response) => {
+    try {
+      const data = await chatbotContextService.getCategories();
+      res.json({ status: 'OK', data });
+    } catch (error: any) {
+      res.status(500).json({ status: 'ERR', message: error.message || 'Không thể lấy dữ liệu thể loại.' });
+    }
+  };
 }
 
 export default new ChatbotContextController();

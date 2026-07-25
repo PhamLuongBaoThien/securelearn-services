@@ -5,5 +5,6 @@ const router = Router();
 
 router.get('/courses/search', chatbotContextController.searchCourses);
 router.get('/courses/popular', chatbotContextController.popularCourses);
+router.get('/categories', chatbotContextController.getCategories);
 
 export default router;
