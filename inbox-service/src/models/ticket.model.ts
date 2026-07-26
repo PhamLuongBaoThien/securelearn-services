@@ -8,7 +8,7 @@ export const TICKET_STATUSES = [
   "CLOSED",
 ] as const;
 const snapshotSchema = new Schema(
-  { id: String, name: String, email: String, role: String },
+  { id: String, name: String, email: String, role: String, avatarUrl: String },
   { _id: false },
 );
 const targetSchema = new Schema(

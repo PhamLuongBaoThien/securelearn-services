@@ -58,8 +58,45 @@ class TicketService {
       name: row.fullName,
       email: row.email,
       role: row.role,
+      avatarUrl: row.avatarUrl || "",
       permissions: row.permissions,
     };
+  }
+  private async hydrateMessageAuthors(messages: any[]) {
+    const identities = new Map<string, { id: string; type: "USER" | "ADMIN" }>();
+    for (const message of messages) {
+      const id = String(message.author?.id || "");
+      const type = message.author?.type;
+      if (id && (type === "USER" || type === "ADMIN"))
+        identities.set(`${type}:${id}`, { id, type });
+    }
+    const snapshots = await Promise.all(
+      Array.from(identities.entries()).map(async ([key, identity]) => {
+        try {
+          const row = await identityGrpcClient.getIdentitySnapshot({
+            identityId: identity.id,
+            identityType: identity.type,
+          });
+          return [
+            key,
+            row.found
+              ? { name: row.fullName, role: row.role, avatarUrl: row.avatarUrl || "" }
+              : null,
+          ] as const;
+        } catch {
+          // Keep inbox available while identity-service is temporarily unavailable.
+          return [key, null] as const;
+        }
+      }),
+    );
+    const snapshotByIdentity = new Map(snapshots);
+    return messages.map((message) => {
+      const key = `${message.author?.type}:${message.author?.id}`;
+      const current = snapshotByIdentity.get(key);
+      return current
+        ? { ...message, author: { ...message.author, ...current } }
+        : message;
+    });
   }
   private async target(input: any) {
     if (input.type === "USER") {
@@ -146,6 +183,7 @@ class TicketService {
         id: sender.id,
         name: sender.name,
         role: sender.role,
+        avatarUrl: sender.avatarUrl,
         type: "USER",
       },
       content: ticket.description,
@@ -235,7 +273,7 @@ class TicketService {
           ? TicketActivity.countDocuments({ ticketId: id })
           : Promise.resolve(0),
       ]);
-    const messages = messageRows.reverse();
+    const messages = await this.hydrateMessageAuthors(messageRows.reverse());
     const attachmentIds = messages.flatMap(
       (message: any) => message.attachmentIds || [],
     );
@@ -309,6 +347,7 @@ class TicketService {
         id: identity.id,
         name: identity.name,
         role: identity.role,
+        avatarUrl: identity.avatarUrl,
         type: actor.type,
       },
       content,
