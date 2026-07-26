@@ -539,7 +539,11 @@ class LearningInteractionService {
     const courses = await Course.find({ instructorId: userId }).select('_id title').lean();
     const courseIds = courses.map(course => course._id);
     const courseNames = new Map(courses.map(course => [String(course._id), course.title]));
-    const filter: any = { courseId: { $in: courseIds }, ...this.discussionCursor(query.cursor) };
+    const filter: any = {
+      courseId: { $in: courseIds },
+      parentId: null,
+      ...this.discussionCursor(query.cursor),
+    };
     if (query.courseId) {
       if (!courseNames.has(String(query.courseId))) throw new Error('Khóa học không thuộc giảng viên.');
       filter.courseId = new Types.ObjectId(String(query.courseId));
@@ -564,7 +568,11 @@ class LearningInteractionService {
     if (!course || userRole !== 'INSTRUCTOR' || course.instructorId !== userId) {
       throw new Error('Chỉ chủ khóa học được xem trang quản lý thảo luận.');
     }
-    const filter: any = { courseId: new Types.ObjectId(courseId), ...this.discussionCursor(query.cursor) };
+    const filter: any = {
+      courseId: new Types.ObjectId(courseId),
+      parentId: null,
+      ...this.discussionCursor(query.cursor),
+    };
     if (query.lessonId) {
       if (!Types.ObjectId.isValid(query.lessonId)) throw new Error('Bài học không hợp lệ.');
       filter.lessonId = new Types.ObjectId(query.lessonId);
