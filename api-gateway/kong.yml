@@ -1,4 +1,4 @@
-﻿# ========================
+# ========================
 # Kong Declarative Configuration
 # API Gateway cho SecureLearn Microservices
 #
@@ -290,6 +290,13 @@ services:
         methods:
           - GET
           - POST
+
+      - name: payment-subscription-plans-public
+        paths:
+          - /api/payments/subscription-plans
+        strip_path: false
+        methods:
+          - GET
 
       - name: payment-protected
         paths:
