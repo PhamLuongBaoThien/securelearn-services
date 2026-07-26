@@ -17,6 +17,8 @@ const messageSchema = new Schema(
     content: { type: String, required: true, trim: true, maxlength: 4000 },
     intent: { type: String, enum: ["COURSE", "OUT_OF_SCOPE", "SMALL_TALK"], default: undefined },
     sources: { type: [sourceSchema], default: [] },
+    // Keep the cards that were actually shown separate from the broader AI context.
+    suggestedCourses: { type: [sourceSchema], default: undefined },
   },
   { timestamps: true },
 );

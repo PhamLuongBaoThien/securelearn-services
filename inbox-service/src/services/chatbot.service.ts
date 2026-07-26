@@ -59,7 +59,9 @@ const normalizeText = (value: string) =>
     .replace(/\u0110/g, "D")
     .toLowerCase();
 
-const uniqueCourses = (courses: ChatbotCourseContext[]) => {
+type CourseCardCandidate = Pick<ChatbotCourseContext, "title" | "slug" | "url" | "price">;
+
+const uniqueCourses = <T extends CourseCardCandidate>(courses: T[]) => {
   const seen = new Set<string>();
   return courses.filter((course) => {
     const key = course.slug || course.url || course.title;
@@ -69,7 +71,7 @@ const uniqueCourses = (courses: ChatbotCourseContext[]) => {
   });
 };
 
-const pickSuggestedCourses = (courses: ChatbotCourseContext[], reply: string, shouldShowMultipleCourses: boolean) => {
+const pickSuggestedCourses = <T extends CourseCardCandidate>(courses: T[], reply: string, shouldShowMultipleCourses: boolean) => {
   if (!courses.length) return [];
   const normalizedReply = normalizeText(reply);
 
@@ -251,20 +253,42 @@ class ChatbotService {
   async listMessages(input: ConversationAccessInput) {
     const conversation = await this.findAuthorizedConversation(input);
     const messages = await ChatbotMessage.find({ conversationId: conversation._id }).sort({ createdAt: 1 }).lean();
-    return messages.map((message) => ({
-      id: message._id.toString(),
-      role: message.role,
-      content: message.content,
-      intent: message.intent,
-      suggestedCourses: (message.sources || []).filter((source: any) => source.type === "COURSE").map((source: any) => ({
-        title: source.title,
-        slug: source.url?.split("/").filter(Boolean).pop() || "",
-        url: source.url,
-        price: source.price,
-      })),
-      sources: message.sources || [],
-      createdAt: message.createdAt,
-    }));
+    return messages.map((message: any) => {
+      const contextSources = (message.sources || []).filter((source: ChatbotSource) => source.type === "COURSE");
+      const storedSuggestions = Array.isArray(message.suggestedCourses)
+        ? message.suggestedCourses as ChatbotSource[]
+        : null;
+
+      // Older records only have `sources`. Reconstruct cards from course names
+      // actually mentioned in the assistant reply instead of exposing all context.
+      const displayedSources: ChatbotSource[] = message.role !== "ASSISTANT" || message.intent !== "COURSE"
+        ? []
+        : storedSuggestions ?? pickSuggestedCourses(
+          contextSources.map((source: ChatbotSource) => ({
+            title: source.title,
+            slug: source.url?.split("/").filter(Boolean).pop() || "",
+            url: source.url,
+            price: source.price,
+          })),
+          message.content,
+          true,
+        ).map((course) => ({ type: "COURSE", title: course.title, url: course.url, price: course.price }));
+
+      return {
+        id: message._id.toString(),
+        role: message.role,
+        content: message.content,
+        intent: message.intent,
+        suggestedCourses: displayedSources.map((source) => ({
+          title: source.title,
+          slug: source.url?.split("/").filter(Boolean).pop() || "",
+          url: source.url,
+          price: source.price,
+        })),
+        sources: message.sources || [],
+        createdAt: message.createdAt,
+      };
+    });
   }
 
   async removeConversation(input: ConversationAccessInput) {
@@ -314,7 +338,7 @@ class ChatbotService {
 
     if (classification.intent === "SMALL_TALK") {
       const reply = classification.smallTalkReply || buildSmallTalkReply(message);
-      await this.persistExchange(conversation, message, reply, "SMALL_TALK", []);
+      await this.persistExchange(conversation, message, reply, "SMALL_TALK", [], []);
       return {
         conversationId: conversation._id.toString(),
         ...(guestToken ? { guestToken } : {}),
@@ -328,7 +352,7 @@ class ChatbotService {
     const intent: ChatbotIntent = classification.intent;
 
     if (intent === "OUT_OF_SCOPE") {
-      await this.persistExchange(conversation, message, outOfScopeReply, intent, []);
+      await this.persistExchange(conversation, message, outOfScopeReply, intent, [], []);
       return {
         conversationId: conversation._id.toString(),
         ...(guestToken ? { guestToken } : {}),
@@ -396,7 +420,8 @@ class ChatbotService {
     }
     const suggestedCourses = pickSuggestedCourses(courses, reply, shouldShowMultipleCourses);
 
-    await this.persistExchange(conversation, message, reply, intent, sources);
+    const displayedSources = toCourseSources(suggestedCourses);
+    await this.persistExchange(conversation, message, reply, intent, sources, displayedSources);
 
     return {
       conversationId: conversation._id.toString(),
@@ -442,9 +467,23 @@ class ChatbotService {
     return conversation;
   }
 
-  private async persistExchange(conversation: any, message: string, reply: string, intent: ChatbotIntent, sources: ChatbotSource[]) {
+  private async persistExchange(
+    conversation: any,
+    message: string,
+    reply: string,
+    intent: ChatbotIntent,
+    sources: ChatbotSource[],
+    suggestedCourses: ChatbotSource[],
+  ) {
     await ChatbotMessage.create({ conversationId: conversation._id, role: "USER", content: message, intent, sources: [] });
-    await ChatbotMessage.create({ conversationId: conversation._id, role: "ASSISTANT", content: reply, intent, sources });
+    await ChatbotMessage.create({
+      conversationId: conversation._id,
+      role: "ASSISTANT",
+      content: reply,
+      intent,
+      sources,
+      suggestedCourses,
+    });
     conversation.lastIntent = intent;
     conversation.lastSources = sources as any;
     conversation.expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30);
