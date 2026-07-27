@@ -143,9 +143,10 @@ class AdminService {
 
     await this.ensureRoleExists(payload.adminRole || 'SUPPORT_AGENT');
 
+    // Admin và User là hai loại tài khoản độc lập, nên có thể dùng cùng một email.
+    // Email vẫn phải duy nhất trong collection Admin.
     const existingAdmin = await Admin.findOne({ email: payload.email });
-    const existingUser = await User.findOne({ email: payload.email });
-    if (existingAdmin || existingUser) throw new Error('Email này đã được sử dụng.');
+    if (existingAdmin) throw new Error('Email này đã được sử dụng cho một tài khoản nhân viên.');
 
     if (payload.phone) {
       const existingPhoneAdmin = await Admin.findOne({ phone: payload.phone });
