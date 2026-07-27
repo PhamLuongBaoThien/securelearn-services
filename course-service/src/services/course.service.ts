@@ -834,6 +834,9 @@ class CourseService {
     total: number;
     page: number;
     totalPages: number;
+    summary: {
+      pending: number;
+    };
   }> {
     const page = query.page || 1;
     const limit = query.limit || 20;
@@ -857,7 +860,7 @@ class CourseService {
     const reviewSort = reviewSortOptions[query.sort || 'submitted_desc'] || reviewSortOptions.submitted_desc;
 
     // Admin review làm việc trực tiếp trên CourseVersion PENDING, gồm cả khóa mới và bản cập nhật.
-    const [versions, total] = await Promise.all([
+    const [versions, total, pending] = await Promise.all([
       CourseVersion.find(filter)
         .populate("categoryId", "name slug parentId")
         .sort(reviewSort)
@@ -865,6 +868,7 @@ class CourseService {
         .limit(limit)
         .lean(),
       CourseVersion.countDocuments(filter),
+      CourseVersion.countDocuments({ status: CourseStatus.PENDING }),
     ]);
 
     return {
@@ -874,6 +878,9 @@ class CourseService {
       total,
       page,
       totalPages: Math.ceil(total / limit),
+      summary: {
+        pending,
+      },
     };
   }
 

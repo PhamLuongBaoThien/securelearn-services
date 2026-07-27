@@ -336,7 +336,7 @@ class AdminController {
         name_desc: { fullName: -1, email: -1 },
       };
       const sortOption = sortOptions[String(sort || 'newest')] || sortOptions.newest;
-      const [users, total] = await Promise.all([
+      const [users, total, totalUsers, totalInstructors, totalLocked] = await Promise.all([
         User.find(query)
           .select('-password')
           .sort(sortOption)
@@ -344,6 +344,9 @@ class AdminController {
           .limit(Number(limit))
           .lean(),
         User.countDocuments(query),
+        User.countDocuments(),
+        User.countDocuments({ role: 'INSTRUCTOR' }),
+        User.countDocuments({ isLocked: true }),
       ]);
 
       const adminIds = Array.from(
@@ -398,6 +401,11 @@ class AdminController {
           total,
           page: Number(page),
           totalPages: Math.ceil(total / Number(limit)),
+          summary: {
+            totalUsers,
+            totalInstructors,
+            totalLocked,
+          },
         },
       });
     } catch (err: any) {
