@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadBucketCommand } from '@aws-sdk/client-s3'; import { Readable } from 'stream'; import crypto from 'crypto';
-const bucket=process.env.S3_BUCKET_NAME||'securelearn-media';
+const bucket=process.env.S3_BUCKET_NAME||'securelearn-inbox';
 const client=new S3Client({region:process.env.S3_REGION||'us-east-1',endpoint:process.env.S3_ENDPOINT,forcePathStyle:true,credentials:process.env.S3_ACCESS_KEY_ID?{accessKeyId:process.env.S3_ACCESS_KEY_ID,secretAccessKey:process.env.S3_SECRET_ACCESS_KEY||''}:undefined});
 const detected=(b:Buffer)=>{if(b.subarray(0,4).toString()==='%PDF')return'application/pdf';if(b[0]===0xff&&b[1]===0xd8&&b[2]===0xff)return'image/jpeg';if(b[0]===0x89&&b.subarray(1,4).toString()==='PNG')return'image/png';if(b.subarray(0,4).toString()==='RIFF'&&b.subarray(8,12).toString()==='WEBP')return'image/webp';return'';};
 export const sanitizeName=(v:string)=>v.normalize('NFKD').replace(/[^a-zA-Z0-9._ -]/g,'_').slice(0,180)||'attachment';
