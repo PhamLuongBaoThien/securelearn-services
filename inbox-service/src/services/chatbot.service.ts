@@ -415,6 +415,10 @@ class ChatbotService {
     try {
       reply = await geminiService.generateReply({ systemPrompt, prompt });
     } catch (error: any) {
+      console.error("[ChatbotService] Gemini request failed:", {
+        status: error?.status,
+        message: error?.message,
+      });
       if (![429, 502, 503, 504].includes(Number(error?.status))) throw error;
       reply = buildCourseFallbackReply(courses, categories, shouldShowMultipleCourses, mode, message);
     }
