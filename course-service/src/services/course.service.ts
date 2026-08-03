@@ -28,6 +28,7 @@ import {
 import categoryService from "./category.service";
 import mediaReferenceService from "./mediaReference.service";
 import subscriptionAccessService from "./subscriptionAccess.service";
+import learningInteractionVersionMigrationService from "./learningInteractionVersionMigration.service";
 
 interface CourseLessonResponse {
   _id: string;
@@ -700,11 +701,11 @@ class CourseService {
     }
     let profileCheck;
     try { profileCheck = await identityGrpcClient.checkInstructorProfile(instructorId); }
-    catch { throw new Error('Không thể xác minh hồ sơ giảng viên lúc này. Vui lòng thử lại sau.'); }
+    catch { throw new Error('Không thể xác minh hồ sơ người giảng dạy lúc này. Vui lòng thử lại sau.'); }
     if (!profileCheck.complete) {
-      const labels: Record<string, string> = { role: 'vai trò giảng viên', fullName: 'họ tên', email: 'email đã xác minh', phone: 'số điện thoại', avatar: 'ảnh đại diện', headline: 'chức danh', bio: 'tiểu sử' };
+      const labels: Record<string, string> = { role: 'vai trò người giảng dạy', fullName: 'họ tên', email: 'email đã xác minh', phone: 'số điện thoại', avatar: 'ảnh đại diện', headline: 'chức danh', bio: 'tiểu sử' };
       const missing = profileCheck.missingFields.map((field: string) => labels[field] || field).join(', ');
-      const error = new Error(`Hồ sơ giảng viên chưa đầy đủ: ${missing}.`);
+      const error = new Error(`Hồ sơ người giảng dạy chưa đầy đủ: ${missing}.`);
       (error as any).code = 'INSTRUCTOR_PROFILE_INCOMPLETE';
       (error as any).missingFields = profileCheck.missingFields;
       throw error;
@@ -1131,6 +1132,9 @@ class CourseService {
     const shell = await Course.findById(version.courseId);
     if (!shell) throw new Error("Khóa học gốc không tồn tại.");
     const previousVersionId = shell.currentVersionId?.toString() || "";
+    const lessonMappings = previousVersionId && previousVersionId !== version._id.toString()
+      ? await this.buildVersionLessonMappings(previousVersionId, version._id.toString())
+      : [];
 
     const needsAdminClassification =
       version.categoryResolutionStatus ===
@@ -1181,6 +1185,19 @@ class CourseService {
     shell.draftVersionId = null;
     shell.status = CourseStatus.PUBLISHED;
     await this.syncShellDraftCache(shell._id.toString(), version, shell);
+
+    // Discussion/reaction dùng lesson identity ổn định; đồng thời cập nhật lessonId vật lý
+    // để các trang quản lý và dữ liệu cũ tiếp tục trỏ đúng version vừa xuất bản.
+    try {
+      await learningInteractionVersionMigrationService.migrateMappings(
+        shell._id.toString(),
+        lessonMappings,
+      );
+    } catch (err) {
+      // API vẫn dual-read theo identity/lesson lịch sử, nên không chặn publish nếu backfill lỗi.
+      console.error("Failed to migrate learning interactions to published version", err);
+    }
+
     // Sau khi public version mới, xóa media chỉ còn nằm trong archived versions.
     await mediaReferenceService.cleanupArchivedVersionMedia(
       shell._id as Types.ObjectId,
@@ -1216,10 +1233,7 @@ class CourseService {
           publishedAt: version.reviewedAt
             ? version.reviewedAt.toISOString()
             : new Date().toISOString(),
-          lessonMappings: await this.buildVersionLessonMappings(
-            previousVersionId,
-            version._id.toString(),
-          ),
+          lessonMappings,
         });
       } catch (err) {
         console.error("Failed to publish COURSE_VERSION_PUBLISHED event", err);

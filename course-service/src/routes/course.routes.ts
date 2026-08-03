@@ -52,6 +52,7 @@ router.patch('/:id/lessons/:lessonId/discussions/:discussionId', extractUser, re
 router.delete('/:id/lessons/:lessonId/discussions/:discussionId', extractUser, requireStudentOrInstructor, learningInteractionController.deleteDiscussion);
 router.patch('/:id/lessons/:lessonId/discussions/:discussionId/moderation', extractUser, requireInstructor, learningInteractionController.moderateDiscussion);
 router.patch('/:id/lessons/:lessonId/discussions/:discussionId/pin', extractUser, requireInstructor, learningInteractionController.pinDiscussion);
+router.get('/:id/discussions/:discussionId/context', extractUser, requireStudentOrInstructor, learningInteractionController.resolveDiscussionContext);
 router.get('/:id/discussions/manage', extractUser, requireInstructor, learningInteractionController.listCourseDiscussions);
 router.get('/:id/reviews/me', extractUser, requireStudentOrInstructor, courseReviewController.getMyReview);
 router.post('/:id/reviews', extractUser, requireStudentOrInstructor, courseReviewController.upsertReview);

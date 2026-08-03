@@ -121,6 +121,15 @@ class LearningInteractionController {
     } catch (error: any) { res.status(statusFor(error)).json({ status: 'ERR', message: error.message }); }
   };
 
+  public resolveDiscussionContext = async (req: AuthRequest, res: Response) => {
+    try {
+      const data = await learningInteractionService.resolveDiscussionContext(
+        req.userId!, req.userRole!, String(req.params.id), String(req.params.discussionId),
+      );
+      res.status(200).json({ status: 'OK', data });
+    } catch (error: any) { res.status(statusFor(error)).json({ status: 'ERR', message: error.message }); }
+  };
+
   public listInstructorDiscussions = async (req: AuthRequest, res: Response) => {
     try {
       const data = await learningInteractionService.listInstructorDiscussions(req.userId!, req.query);

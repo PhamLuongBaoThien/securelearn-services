@@ -6,6 +6,7 @@
 // ========================
 import { Types } from 'mongoose';
 import { Course } from '../models/course.model';
+import { CourseVersion } from '../models/courseVersion.model';
 import { Lesson } from '../models/lesson.model';
 import { ILearningNote, LearningNote } from '../models/learningNote.model';
 import { LessonDiscussion } from '../models/lessonDiscussion.model';
@@ -14,6 +15,7 @@ import { Exchange, RoutingKey, publishMessage, type CourseDiscussionEventPayload
 import { emitDiscussionCreated, emitDiscussionDeleted, emitDiscussionHidden, emitDiscussionUpdated } from './discussionRealtime.service';
 import subscriptionAccessService from './subscriptionAccess.service';
 import { identityGrpcClient } from '../grpc/identity.client';
+import { buildInteractionLessonScope, resolveLessonIdentityId } from '../utils/lessonIdentity.utils';
 
 class LearningInteractionService {
   private stripHtml(html: string) {
@@ -85,15 +87,52 @@ class LearningInteractionService {
     )));
   }
 
-  private async assertAccess(userId: string, userRole: string, courseId: string, lessonId: string) {
+  private async assertAccess(userId: string, userRole: string, courseId: string, requestedLessonId: string) {
     const course = await Course.findById(courseId).select('_id title instructorId currentVersionId').lean();
     if (!course?.currentVersionId) throw new Error('Khóa học không tồn tại.');
 
-    const lesson = await Lesson.findOne({
-      _id: lessonId,
-      courseId: course.currentVersionId,
-    }).select('_id title').lean();
+    let lesson = Types.ObjectId.isValid(requestedLessonId)
+      ? await Lesson.findOne({
+          _id: requestedLessonId,
+          courseId: course.currentVersionId,
+        }).select('_id courseId sourceLessonId title').lean()
+      : null;
+
+    // Deep link thông báo có thể giữ lessonId của version cũ. Quy đổi nó về lesson
+    // hiện tại thông qua sourceLessonId ổn định, nhưng chỉ khi version cũ thuộc đúng course.
+    if (!lesson && Types.ObjectId.isValid(requestedLessonId)) {
+      const historicalLesson = await Lesson.findById(requestedLessonId)
+        .select('_id courseId sourceLessonId')
+        .lean();
+      if (historicalLesson) {
+        const belongsToCourse = await CourseVersion.exists({
+          _id: historicalLesson.courseId,
+          courseId: course._id,
+        });
+        if (belongsToCourse) {
+          const historicalIdentityId = historicalLesson.sourceLessonId || historicalLesson._id;
+          lesson = await Lesson.findOne({
+            courseId: course.currentVersionId,
+            $or: [
+              { _id: historicalIdentityId },
+              { sourceLessonId: historicalIdentityId },
+            ],
+          }).select('_id courseId sourceLessonId title').lean();
+        }
+      }
+    }
     if (!lesson) throw new Error('Bài học không thuộc khóa học này.');
+
+    const lessonIdentityId = resolveLessonIdentityId(lesson);
+    const courseVersionIds = await CourseVersion.find({ courseId: course._id }).distinct('_id');
+    const compatibleLessons = await Lesson.find({
+      courseId: { $in: courseVersionIds },
+      $or: [
+        { _id: lessonIdentityId },
+        { sourceLessonId: lessonIdentityId },
+      ],
+    }).select('_id').lean();
+    const compatibleLessonIds = compatibleLessons.map((item) => new Types.ObjectId(item._id));
 
     const isOwner = userRole === 'INSTRUCTOR' && course.instructorId === userId;
     if (!isOwner) {
@@ -104,6 +143,8 @@ class LearningInteractionService {
     return {
       courseId: new Types.ObjectId(course._id),
       lessonId: new Types.ObjectId(lesson._id),
+      lessonIdentityId,
+      compatibleLessonIds,
       isOwner,
       instructorId: course.instructorId,
       courseTitle: course.title || 'Khóa học',
@@ -111,31 +152,85 @@ class LearningInteractionService {
     };
   }
 
+  private interactionLessonScope(access: {
+    lessonIdentityId: Types.ObjectId;
+    compatibleLessonIds: Types.ObjectId[];
+  }) {
+    return buildInteractionLessonScope(
+      access.lessonIdentityId,
+      access.compatibleLessonIds,
+    );
+  }
+
+  private discussionFilter(
+    access: {
+      courseId: Types.ObjectId;
+      lessonIdentityId: Types.ObjectId;
+      compatibleLessonIds: Types.ObjectId[];
+    },
+    filter: Record<string, unknown> = {},
+  ) {
+    return {
+      courseId: access.courseId,
+      ...filter,
+      $and: [this.interactionLessonScope(access)],
+    };
+  }
+
   private async getOrMigrateNoteDocument(
     userId: string,
-    courseId: Types.ObjectId,
-    lessonId: Types.ObjectId,
+    access: {
+      courseId: Types.ObjectId;
+      lessonId: Types.ObjectId;
+      lessonIdentityId: Types.ObjectId;
+      compatibleLessonIds: Types.ObjectId[];
+    },
   ) {
-    const document = await LearningNote.findOne({ userId, courseId, lessonId });
-    if (!document) return null;
+    const documents = await LearningNote.find({
+      userId,
+      courseId: access.courseId,
+      $and: [this.interactionLessonScope(access)],
+    }).sort({ updatedAt: -1 });
+    if (!documents.length) return null;
 
-    const hasLegacyNote = this.stripHtml(document.content || '');
-    if (!document.notes.length && hasLegacyNote) {
-      document.notes = [
-        {
+    const canonical = documents.find((item) => item.lessonId.equals(access.lessonId)) || documents[0];
+    const noteIds = new Set<string>();
+    const mergedNotes: ILearningNote['notes'] = [];
+
+    for (const document of documents) {
+      const hasLegacyNote = this.stripHtml(document.content || '');
+      if (!document.notes.length && hasLegacyNote) {
+        document.notes.push({
           _id: new Types.ObjectId(),
           content: document.content!,
           timestampSec: this.normalizeTimestamp(document.timestampSec || 0),
           createdAt: document.createdAt,
           updatedAt: document.updatedAt,
-        },
-      ];
-      document.content = '';
-      document.timestampSec = 0;
-      await document.save();
+        });
+      }
+      for (const note of document.notes) {
+        const noteId = String(note._id);
+        if (noteIds.has(noteId)) continue;
+        noteIds.add(noteId);
+        mergedNotes.push(note);
+      }
     }
 
-    return document;
+    canonical.lessonId = access.lessonId;
+    canonical.lessonIdentityId = access.lessonIdentityId;
+    canonical.notes = mergedNotes;
+    canonical.content = '';
+    canonical.timestampSec = 0;
+    await canonical.save();
+
+    const duplicateIds = documents
+      .filter((item) => !item._id.equals(canonical._id))
+      .map((item) => item._id);
+    if (duplicateIds.length) {
+      await LearningNote.deleteMany({ _id: { $in: duplicateIds } });
+    }
+
+    return canonical;
   }
 
   private sortNotesByTimestamp(notes: Array<{ timestampSec: number; createdAt?: Date }>) {
@@ -160,7 +255,7 @@ class LearningInteractionService {
 
   public async listNotes(userId: string, userRole: string, courseId: string, lessonId: string) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
-    const document = await this.getOrMigrateNoteDocument(userId, access.courseId, access.lessonId);
+    const document = await this.getOrMigrateNoteDocument(userId, access);
     return this.serializeNotes(document);
   }
 
@@ -175,13 +270,14 @@ class LearningInteractionService {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
     const normalizedContent = this.normalizeNoteContent(content);
     const normalizedTimestamp = this.normalizeTimestamp(timestampSec);
-    let document = await this.getOrMigrateNoteDocument(userId, access.courseId, access.lessonId);
+    let document = await this.getOrMigrateNoteDocument(userId, access);
 
     if (!document) {
       document = await LearningNote.create({
         userId,
         courseId: access.courseId,
         lessonId: access.lessonId,
+        lessonIdentityId: access.lessonIdentityId,
         notes: [],
       });
     }
@@ -208,7 +304,7 @@ class LearningInteractionService {
     timestampSec: number,
   ) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
-    const document = await this.getOrMigrateNoteDocument(userId, access.courseId, access.lessonId);
+    const document = await this.getOrMigrateNoteDocument(userId, access);
     if (!document) throw new Error('Ghi chú không tồn tại.');
 
     const note = document.notes.find((item) => String(item._id) === noteId);
@@ -229,7 +325,7 @@ class LearningInteractionService {
     noteId: string,
   ) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
-    const document = await this.getOrMigrateNoteDocument(userId, access.courseId, access.lessonId);
+    const document = await this.getOrMigrateNoteDocument(userId, access);
     if (!document) throw new Error('Ghi chú không tồn tại.');
 
     const noteIndex = document.notes.findIndex((item) => String(item._id) === noteId);
@@ -271,22 +367,56 @@ class LearningInteractionService {
     ] };
   }
 
-  private serializeDiscussion(item: any, viewerId: string, isOwner: boolean) {
+  private serializeDiscussion(item: any, viewerId: string, isOwner: boolean, currentLessonId?: string) {
     const hiddenForViewer = Boolean(item.hiddenAt) && !isOwner;
     const deleted = Boolean(item.deletedAt);
     return {
       ...item,
       _id: String(item._id),
       courseId: String(item.courseId),
-      lessonId: String(item.lessonId),
+      lessonId: currentLessonId || String(item.lessonId),
       parentId: item.parentId ? String(item.parentId) : null,
       replyToId: item.replyToId ? String(item.replyToId) : undefined,
-      content: deleted ? 'Bình luận đã bị xóa' : hiddenForViewer ? 'Bình luận đã bị giảng viên ẩn' : item.content,
+      content: deleted ? 'Bình luận đã bị xóa' : hiddenForViewer ? 'Bình luận đã bị người giảng dạy ẩn' : item.content,
       canEdit: item.authorId === viewerId && !deleted,
       canDelete: item.authorId === viewerId && !deleted,
       canModerate: isOwner,
       hiddenForViewer,
     };
+  }
+
+  private async normalizeDiscussionLessonReferences(
+    items: any[],
+    access: {
+      courseId: Types.ObjectId;
+      lessonId: Types.ObjectId;
+      lessonIdentityId: Types.ObjectId;
+    },
+  ) {
+    const discussionIds = items.map((item) => item?._id).filter(Boolean);
+    if (!discussionIds.length) return;
+
+    await Promise.all([
+      LessonDiscussion.updateMany(
+        { _id: { $in: discussionIds } },
+        { $set: { lessonId: access.lessonId, lessonIdentityId: access.lessonIdentityId } },
+      ),
+      LessonDiscussionReaction.updateMany(
+        { discussionId: { $in: discussionIds } },
+        {
+          $set: {
+            courseId: access.courseId,
+            lessonId: access.lessonId,
+            lessonIdentityId: access.lessonIdentityId,
+          },
+        },
+      ),
+    ]);
+
+    for (const item of items) {
+      item.lessonId = access.lessonId;
+      item.lessonIdentityId = access.lessonIdentityId;
+    }
   }
 
   private async publishDiscussionNotification(
@@ -310,16 +440,15 @@ class LearningInteractionService {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
     const limit = Math.min(50, Math.max(1, Number(query.limit) || 20));
     const sort = query.sort === 'popular' ? 'popular' : 'latest';
-    const pinnedRows = query.cursor ? [] : await LessonDiscussion.find({
-      courseId: access.courseId, lessonId: access.lessonId, parentId: null, pinnedAt: { $ne: null },
-    }).sort({ pinnedAt: -1 }).limit(3).lean();
+    const pinnedRows = query.cursor ? [] : await LessonDiscussion.find(this.discussionFilter(access, {
+      parentId: null, pinnedAt: { $ne: null },
+    })).sort({ pinnedAt: -1 }).limit(3).lean();
     const cursorFilter = sort === 'popular'
       ? this.popularDiscussionCursor(query.cursor)
       : this.discussionCursor(query.cursor);
-    const rows = await LessonDiscussion.find({
-      courseId: access.courseId, lessonId: access.lessonId, parentId: null, pinnedAt: null,
-      ...cursorFilter,
-    }).sort(sort === 'popular' ? { likeCount: -1, _id: -1 } : { _id: -1 }).limit(limit + 1).lean();
+    const rows = await LessonDiscussion.find(this.discussionFilter(access, {
+      parentId: null, pinnedAt: null, ...cursorFilter,
+    })).sort(sort === 'popular' ? { likeCount: -1, _id: -1 } : { _id: -1 }).limit(limit + 1).lean();
     const hasMore = rows.length > limit;
     const unpinnedRows = rows.slice(0, limit);
     const pageRows: any[] = [...pinnedRows, ...unpinnedRows];
@@ -328,40 +457,42 @@ class LearningInteractionService {
       ? sort === 'popular' ? `${Number(lastUnpinned.likeCount) || 0}_${lastUnpinned._id}` : String(lastUnpinned._id)
       : null;
     if (!query.cursor && query.focusId && Types.ObjectId.isValid(query.focusId)) {
-      const focused: any = await LessonDiscussion.findOne({
-        _id: query.focusId, courseId: access.courseId, lessonId: access.lessonId,
-      }).lean();
+      const focused: any = await LessonDiscussion.findOne(this.discussionFilter(access, {
+        _id: query.focusId,
+      })).lean();
       const rootId = focused?.parentId || focused?._id;
       if (rootId) {
         let root: any = pageRows.find(item => String(item._id) === String(rootId));
         if (!root) {
-          root = await LessonDiscussion.findOne({
-            _id: rootId, courseId: access.courseId, lessonId: access.lessonId, parentId: null,
-          }).lean();
+          root = await LessonDiscussion.findOne(this.discussionFilter(access, {
+            _id: rootId, parentId: null,
+          })).lean();
           if (root) pageRows.splice(pinnedRows.length, 0, root);
         }
         if (root && focused?.parentId) root.focusReplyId = String(focused._id);
       }
     }
+    await this.normalizeDiscussionLessonReferences(pageRows, access);
     await Promise.all([this.hydrateDiscussionAuthors(pageRows), this.hydrateDiscussionReactions(pageRows, userId)]);
-    const items = pageRows.map(item => this.serializeDiscussion(item, userId, access.isOwner));
+    const items = pageRows.map(item => this.serializeDiscussion(item, userId, access.isOwner, String(access.lessonId)));
     return { items, nextCursor, hasMore };
   }
   public async listDiscussionReplies(userId: string, userRole: string, courseId: string, lessonId: string, discussionId: string, query: { cursor?: string; limit?: number; focusId?: string } = {}) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
     if (!Types.ObjectId.isValid(discussionId)) throw new Error('Bình luận không hợp lệ.');
-    const root = await LessonDiscussion.findOne({
-      _id: discussionId, courseId: access.courseId, lessonId: access.lessonId, parentId: null,
-    }).select('_id').lean();
+    const root = await LessonDiscussion.findOne(this.discussionFilter(access, {
+      _id: discussionId, parentId: null,
+    })).select('_id').lean();
     if (!root) throw new Error('Bình luận không tồn tại.');
     const limit = Math.min(30, Math.max(1, Number(query.limit) || 10));
-    const rows = await LessonDiscussion.find({
-      courseId: access.courseId, lessonId: access.lessonId, parentId: root._id, ...this.discussionCursor(query.cursor, 'after'),
-    }).sort({ _id: 1 }).limit(limit + 1).lean();
+    const rows = await LessonDiscussion.find(this.discussionFilter(access, {
+      parentId: root._id, ...this.discussionCursor(query.cursor, 'after'),
+    })).sort({ _id: 1 }).limit(limit + 1).lean();
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
+    await this.normalizeDiscussionLessonReferences(pageRows, access);
     await this.hydrateDiscussionAuthors(pageRows);
-    const items = pageRows.map(item => this.serializeDiscussion(item, userId, access.isOwner));
+    const items = pageRows.map(item => this.serializeDiscussion(item, userId, access.isOwner, String(access.lessonId)));
     return { items, nextCursor: hasMore ? String(items[items.length - 1]?._id || '') : null, hasMore };
   }
 
@@ -379,29 +510,30 @@ class LearningInteractionService {
     let replyTarget: any = null;
     if (parentId) {
       if (!Types.ObjectId.isValid(parentId)) throw new Error('Bình luận cha không hợp lệ.');
-      const requestedParent: any = await LessonDiscussion.findOne({
-        _id: parentId, courseId: access.courseId, lessonId: access.lessonId,
-      });
+      const requestedParent: any = await LessonDiscussion.findOne(this.discussionFilter(access, {
+        _id: parentId,
+      }));
       if (!requestedParent) throw new Error('Bình luận cha không tồn tại.');
       parent = requestedParent.parentId
-        ? await LessonDiscussion.findOne({
-          _id: requestedParent.parentId, courseId: access.courseId, lessonId: access.lessonId, parentId: null,
-        })
+        ? await LessonDiscussion.findOne(this.discussionFilter(access, {
+          _id: requestedParent.parentId, parentId: null,
+        }))
         : requestedParent;
       if (!parent) throw new Error('Bình luận gốc không tồn tại.');
 
       const targetId = replyToId || requestedParent._id.toString();
       if (!Types.ObjectId.isValid(targetId)) throw new Error('Bình luận được trả lời không hợp lệ.');
-      replyTarget = await LessonDiscussion.findOne({
-        _id: targetId, courseId: access.courseId, lessonId: access.lessonId,
+      replyTarget = await LessonDiscussion.findOne(this.discussionFilter(access, {
+        _id: targetId,
         $or: [{ _id: parent._id }, { parentId: parent._id }],
-      });
+      }));
       if (!replyTarget) throw new Error('Bình luận được trả lời không thuộc cuộc thảo luận này.');
     }
 
     const discussion = await LessonDiscussion.create({
-      courseId: access.courseId, lessonId: access.lessonId, parentId: parent?._id || null,
-      authorId: user.id, authorName: author.name || (access.isOwner ? 'Giảng viên' : 'Học viên'),
+      courseId: access.courseId, lessonId: access.lessonId, lessonIdentityId: access.lessonIdentityId,
+      parentId: parent?._id || null,
+      authorId: user.id, authorName: author.name || (access.isOwner ? 'Người giảng dạy' : 'Học viên'),
       authorAvatarUrl: author.avatarUrl,
       authorRole: access.isOwner ? 'INSTRUCTOR' : 'STUDENT',
       content: normalizedContent,
@@ -410,16 +542,16 @@ class LearningInteractionService {
     });
     if (parent) await LessonDiscussion.updateOne({ _id: parent._id }, { $inc: { replyCount: 1 } });
 
-    const serialized = this.serializeDiscussion(discussion.toObject(), user.id, access.isOwner);
-    emitDiscussionCreated(courseId, lessonId, serialized, access.instructorId);
+    const serialized = this.serializeDiscussion(discussion.toObject(), user.id, access.isOwner, String(access.lessonId));
+    emitDiscussionCreated(courseId, String(access.lessonId), serialized, access.instructorId);
     const payload: CourseDiscussionEventPayload = {
       eventId: new Types.ObjectId().toString(), discussionId: discussion.id,
       parentId: parent ? String(parent._id) : undefined,
-      courseId, courseTitle: access.courseTitle, lessonId, lessonTitle: access.lessonTitle,
+      courseId, courseTitle: access.courseTitle, lessonId: String(access.lessonId), lessonTitle: access.lessonTitle,
       actorId: user.id, actorName: discussion.authorName,
       recipientId: replyTarget ? replyTarget.authorId : access.instructorId,
       contentPreview: normalizedContent.slice(0, 240), occurredAt: new Date().toISOString(),
-      actionUrl: `/student/courses/${courseId}/learn?lessonId=${lessonId}&discussionId=${discussion.id}`,
+      actionUrl: `/student/courses/${courseId}/learn?lessonId=${access.lessonId}&discussionId=${discussion.id}`,
     };
     await this.publishDiscussionNotification(parent ? RoutingKey.DISCUSSION_REPLIED : RoutingKey.DISCUSSION_CREATED, payload);
     return serialized;
@@ -428,15 +560,17 @@ class LearningInteractionService {
   public async setDiscussionReaction(userId: string, userRole: string, courseId: string, lessonId: string, discussionId: string, liked: boolean) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
     if (!Types.ObjectId.isValid(discussionId)) throw new Error('Thảo luận không hợp lệ.');
-    const item: any = await LessonDiscussion.findOne({
-      _id: discussionId, courseId: access.courseId, lessonId: access.lessonId, deletedAt: null, hiddenAt: null,
-    });
+    const item: any = await LessonDiscussion.findOne(this.discussionFilter(access, {
+      _id: discussionId, deletedAt: null, hiddenAt: null,
+    }));
     if (!item) throw new Error('Thảo luận không tồn tại hoặc đã bị ẩn.');
+    await this.normalizeDiscussionLessonReferences([item], access);
 
     if (liked) {
       try {
         await LessonDiscussionReaction.create({
-          discussionId: item._id, courseId: access.courseId, lessonId: access.lessonId, userId,
+          discussionId: item._id, courseId: access.courseId, lessonId: access.lessonId,
+          lessonIdentityId: access.lessonIdentityId, userId,
         });
         item.likeCount = (Number(item.likeCount) || 0) + 1;
         await item.save();
@@ -452,8 +586,8 @@ class LearningInteractionService {
     }
 
     const updated = await LessonDiscussion.findById(item._id).lean();
-    const serialized = this.serializeDiscussion({ ...updated, likedByViewer: liked }, userId, access.isOwner);
-    emitDiscussionUpdated(courseId, lessonId, serialized, access.instructorId);
+    const serialized = this.serializeDiscussion({ ...updated, likedByViewer: liked }, userId, access.isOwner, String(access.lessonId));
+    emitDiscussionUpdated(courseId, String(access.lessonId), serialized, access.instructorId);
     return serialized;
   }
   public async updateDiscussion(userId: string, userRole: string, courseId: string, lessonId: string, discussionId: string, content: string) {
@@ -462,26 +596,28 @@ class LearningInteractionService {
     const normalized = content.trim();
     if (!normalized) throw new Error('Vui lòng nhập nội dung thảo luận.');
     if (normalized.length > 2_000) throw new Error('Nội dung thảo luận tối đa 2.000 ký tự.');
-    const item: any = await LessonDiscussion.findOne({
-      _id: discussionId, courseId: access.courseId, lessonId: access.lessonId, authorId: userId, deletedAt: null,
-    });
+    const item: any = await LessonDiscussion.findOne(this.discussionFilter(access, {
+      _id: discussionId, authorId: userId, deletedAt: null,
+    }));
     if (!item) throw new Error('Bạn không có quyền sửa bình luận này.');
+    await this.normalizeDiscussionLessonReferences([item], access);
     item.content = normalized; item.editedAt = new Date(); await item.save();
-    const serialized = this.serializeDiscussion(item.toObject(), userId, access.isOwner);
-    emitDiscussionUpdated(courseId, lessonId, serialized, access.instructorId);
+    const serialized = this.serializeDiscussion(item.toObject(), userId, access.isOwner, String(access.lessonId));
+    emitDiscussionUpdated(courseId, String(access.lessonId), serialized, access.instructorId);
     return serialized;
   }
 
   public async deleteDiscussion(userId: string, userRole: string, courseId: string, lessonId: string, discussionId: string) {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
     if (!Types.ObjectId.isValid(discussionId)) throw new Error('Bình luận không hợp lệ.');
-    const item: any = await LessonDiscussion.findOne({
-      _id: discussionId, courseId: access.courseId, lessonId: access.lessonId, authorId: userId, deletedAt: null,
-    });
+    const item: any = await LessonDiscussion.findOne(this.discussionFilter(access, {
+      _id: discussionId, authorId: userId, deletedAt: null,
+    }));
     if (!item) throw new Error('Bạn không có quyền xóa bình luận này.');
+    await this.normalizeDiscussionLessonReferences([item], access);
     item.deletedAt = new Date(); await item.save();
-    const serialized = this.serializeDiscussion(item.toObject(), userId, access.isOwner);
-    emitDiscussionDeleted(courseId, lessonId, serialized, access.instructorId);
+    const serialized = this.serializeDiscussion(item.toObject(), userId, access.isOwner, String(access.lessonId));
+    emitDiscussionDeleted(courseId, String(access.lessonId), serialized, access.instructorId);
     return serialized;
   }
 
@@ -489,8 +625,9 @@ class LearningInteractionService {
     const access = await this.assertAccess(userId, userRole, courseId, lessonId);
     if (!access.isOwner) throw new Error('Chỉ chủ khóa học được quản lý bình luận.');
     if (!Types.ObjectId.isValid(discussionId)) throw new Error('Bình luận không hợp lệ.');
-    const item: any = await LessonDiscussion.findOne({ _id: discussionId, courseId: access.courseId, lessonId: access.lessonId });
+    const item: any = await LessonDiscussion.findOne(this.discussionFilter(access, { _id: discussionId }));
     if (!item) throw new Error('Bình luận không tồn tại.');
+    await this.normalizeDiscussionLessonReferences([item], access);
     item.hiddenAt = hidden ? new Date() : undefined;
     item.hiddenBy = hidden ? userId : undefined;
     if (hidden) {
@@ -498,8 +635,8 @@ class LearningInteractionService {
       item.pinnedBy = undefined;
     }
     await item.save();
-    const serialized = this.serializeDiscussion(item.toObject(), userId, true);
-    emitDiscussionHidden(courseId, lessonId, serialized, access.instructorId);
+    const serialized = this.serializeDiscussion(item.toObject(), userId, true, String(access.lessonId));
+    emitDiscussionHidden(courseId, String(access.lessonId), serialized, access.instructorId);
     return serialized;
   }
 
@@ -508,16 +645,16 @@ class LearningInteractionService {
     if (!access.isOwner) throw new Error('Chỉ chủ khóa học được ghim thảo luận.');
     if (!Types.ObjectId.isValid(discussionId)) throw new Error('Thảo luận không hợp lệ.');
 
-    const item: any = await LessonDiscussion.findOne({
-      _id: discussionId, courseId: access.courseId, lessonId: access.lessonId,
-      parentId: null, deletedAt: null, hiddenAt: null,
-    });
+    const item: any = await LessonDiscussion.findOne(this.discussionFilter(access, {
+      _id: discussionId, parentId: null, deletedAt: null, hiddenAt: null,
+    }));
     if (!item) throw new Error('Chỉ có thể ghim thảo luận gốc đang hiển thị.');
+    await this.normalizeDiscussionLessonReferences([item], access);
 
     if (pinned && !item.pinnedAt) {
-      const pinnedCount = await LessonDiscussion.countDocuments({
-        courseId: access.courseId, lessonId: access.lessonId, parentId: null, pinnedAt: { $ne: null },
-      });
+      const pinnedCount = await LessonDiscussion.countDocuments(this.discussionFilter(access, {
+        parentId: null, pinnedAt: { $ne: null },
+      }));
       if (pinnedCount >= 3) throw new Error('Mỗi bài học chỉ được ghim tối đa 3 thảo luận.');
       item.pinnedAt = new Date();
       item.pinnedBy = userId;
@@ -527,9 +664,39 @@ class LearningInteractionService {
     }
 
     await item.save();
-    const serialized = this.serializeDiscussion(item.toObject(), userId, true);
-    emitDiscussionUpdated(courseId, lessonId, serialized, access.instructorId);
+    const serialized = this.serializeDiscussion(item.toObject(), userId, true, String(access.lessonId));
+    emitDiscussionUpdated(courseId, String(access.lessonId), serialized, access.instructorId);
     return serialized;
+  }
+
+  public async resolveDiscussionContext(
+    userId: string,
+    userRole: string,
+    courseId: string,
+    discussionId: string,
+  ) {
+    if (!Types.ObjectId.isValid(courseId) || !Types.ObjectId.isValid(discussionId)) {
+      throw new Error('Thảo luận không hợp lệ.');
+    }
+    const discussion = await LessonDiscussion.findOne({
+      _id: discussionId,
+      courseId: new Types.ObjectId(courseId),
+    });
+    if (!discussion) throw new Error('Thảo luận không tồn tại.');
+
+    const access = await this.assertAccess(
+      userId,
+      userRole,
+      courseId,
+      String(discussion.lessonId),
+    );
+    await this.normalizeDiscussionLessonReferences([discussion], access);
+
+    return {
+      courseId,
+      lessonId: String(access.lessonId),
+      discussionId,
+    };
   }
 
   public async listInstructorDiscussions(
@@ -545,7 +712,7 @@ class LearningInteractionService {
       ...this.discussionCursor(query.cursor),
     };
     if (query.courseId) {
-      if (!courseNames.has(String(query.courseId))) throw new Error('Khóa học không thuộc giảng viên.');
+      if (!courseNames.has(String(query.courseId))) throw new Error('Khóa học không thuộc quyền quản lý của bạn.');
       filter.courseId = new Types.ObjectId(String(query.courseId));
     }
     if (query.lessonId) filter.lessonId = new Types.ObjectId(String(query.lessonId));

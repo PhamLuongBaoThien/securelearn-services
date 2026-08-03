@@ -4,6 +4,7 @@ import mongoose, { Document, Schema, Types } from 'mongoose';
 export interface ILessonDiscussion extends Document {
   courseId: Types.ObjectId;
   lessonId: Types.ObjectId;
+  lessonIdentityId?: Types.ObjectId | null;
   parentId: Types.ObjectId | null;
   replyToId?: Types.ObjectId;
   replyToAuthorName?: string;
@@ -28,6 +29,7 @@ const lessonDiscussionSchema = new Schema<ILessonDiscussion>(
   {
     courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true, index: true },
     lessonId: { type: Schema.Types.ObjectId, ref: 'Lesson', required: true, index: true },
+    lessonIdentityId: { type: Schema.Types.ObjectId, default: null, index: true },
     parentId: { type: Schema.Types.ObjectId, ref: 'LessonDiscussion', default: null, index: true },
     replyToId: { type: Schema.Types.ObjectId, ref: 'LessonDiscussion' },
     replyToAuthorName: String,
@@ -51,6 +53,7 @@ const lessonDiscussionSchema = new Schema<ILessonDiscussion>(
 lessonDiscussionSchema.index({ courseId: 1, lessonId: 1, parentId: 1, _id: -1 });
 lessonDiscussionSchema.index({ courseId: 1, lessonId: 1, parentId: 1, pinnedAt: -1 });
 lessonDiscussionSchema.index({ courseId: 1, lessonId: 1, parentId: 1, likeCount: -1, _id: -1 });
+lessonDiscussionSchema.index({ courseId: 1, lessonIdentityId: 1, parentId: 1, _id: -1 });
 lessonDiscussionSchema.index({ courseId: 1, parentId: 1, _id: -1 });
 
 export const LessonDiscussion = mongoose.model<ILessonDiscussion>(
