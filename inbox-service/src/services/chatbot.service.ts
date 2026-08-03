@@ -6,6 +6,7 @@ import chatbotClassifierService from "./chatbotClassifier.service";
 import chatbotContextClient, { ChatbotCourseContext, ChatbotCategoryContext, ChatbotSource } from "./chatbotContextClient.service";
 import { buildSmallTalkReply, type ChatbotIntent, type CoursePromptMode } from "./chatbotIntent.service";
 import geminiService from "./gemini.service";
+import { parseStructuredCourseReply, selectRecommendedCourses } from "./chatbotRecommendation.service";
 
 const MAX_MESSAGE_LENGTH = 1000;
 const HISTORY_LIMIT = 10;
@@ -59,9 +60,7 @@ const normalizeText = (value: string) =>
     .replace(/\u0110/g, "D")
     .toLowerCase();
 
-type CourseCardCandidate = Pick<ChatbotCourseContext, "title" | "slug" | "url" | "price">;
-
-const uniqueCourses = <T extends CourseCardCandidate>(courses: T[]) => {
+const uniqueCourses = <T extends Pick<ChatbotCourseContext, "title" | "slug" | "url">>(courses: T[]) => {
   const seen = new Set<string>();
   return courses.filter((course) => {
     const key = course.slug || course.url || course.title;
@@ -69,46 +68,6 @@ const uniqueCourses = <T extends CourseCardCandidate>(courses: T[]) => {
     seen.add(key);
     return true;
   });
-};
-
-const pickSuggestedCourses = <T extends CourseCardCandidate>(courses: T[], reply: string, shouldShowMultipleCourses: boolean) => {
-  if (!courses.length) return [];
-  const normalizedReply = normalizeText(reply);
-
-  // Nếu câu reply là câu thông báo sự cố quá tải, không hiện bất kỳ thẻ card nào
-  if (normalizedReply.includes("qua tai") || normalizedReply.includes("gian doan")) return [];
-
-  // Bỏ qua các từ dừng phổ biến và từ dừng hệ thống
-  const stopWords = new Set([
-    "khoa", "hoc", "co", "ban", "can", "cho", "nguoi", "moi", "bat", "dau", "online", "bai", "trinh", "do",
-    "truc", "tiep", "tim", "kiem", "he", "thong", "tro", "ly", "chao", "ban", "minh", "tieng", "viet"
-  ]);
-
-  const mentionedCourses = courses.filter((course) => {
-    const titleNorm = normalizeText(course.title);
-    const slugNorm = normalizeText(course.slug || "");
-    if (normalizedReply.includes(titleNorm) || (slugNorm && normalizedReply.includes(slugNorm))) return true;
-
-    const coreWords = titleNorm.split(/\s+/).filter((word) => word.length >= 2 && !stopWords.has(word));
-    if (!coreWords.length) return false;
-
-    // Nếu tiêu đề chỉ có 1 từ đặc trưng duy nhất (ví dụ: photoshop, figma, nodejs, python...)
-    if (coreWords.length === 1 && coreWords[0].length >= 4) {
-      return normalizedReply.includes(coreWords[0]);
-    }
-
-    // Nếu tiêu đề từ 2 từ đặc trưng trở lên: BẮT BUỘC phải khớp cụm 2 từ liền nhau (Bigram) trong reply
-    for (let i = 0; i < coreWords.length - 1; i++) {
-      const bigram = `${coreWords[i]} ${coreWords[i + 1]}`;
-      if (normalizedReply.includes(bigram)) return true;
-    }
-    return false;
-  });
-
-  // CHỈ HIỂN THỊ THẺ CARD KHI GEMINI AI THỰC SỰ NHẮC TỚI HOẶC GỢI Ý KHÓA HỌC CỤ THỂ
-  if (mentionedCourses.length > 0) return uniqueCourses(mentionedCourses).slice(0, 4);
-
-  return [];
 };
 
 const formatCoursePrice = (price?: number) => {
@@ -176,13 +135,7 @@ const inferCourseQueryFromHistory = (history: Array<{ role: string; content: str
   return "khóa học cho người mới bắt đầu";
 };
 
-const buildCourseFallbackReply = (
-  _courses: ChatbotCourseContext[],
-  _categories: ChatbotCategoryContext[],
-  _shouldShowMultipleCourses: boolean,
-  _mode: CoursePromptMode,
-  _message: string
-) => {
+const buildCourseFallbackReply = () => {
   return `Chào bạn! Hệ thống Trợ lý AI hiện đang quá tải hoặc tạm thời gián đoạn kết nối. Bạn vui lòng thử lại sau ít phút hoặc tìm kiếm khóa học trực tiếp trên thanh tìm kiếm nhé!`;
 };
 
@@ -190,7 +143,7 @@ const systemPrompt = `Bạn là chatbot cố vấn khóa học cho người dùn
 Chỉ hỗ trợ tìm kiếm, tư vấn lộ trình và gợi ý các khóa học DỰA TRÊN DỮ LIỆU THỰC TẾ (courses và categories) được cung cấp trong context.
 ĐẶC BIỆT: Nếu người dùng hỏi xin lộ trình hoặc gợi ý khóa học cho một chủ đề (như chỉnh sửa ảnh, thiết kế, Figma, Photoshop, lập trình...) mà trong context courses chưa có khóa học trực tiếp, BẠN VẪN PHẢI TƯ VẤN LỘ TRÌNH HỌC TỔNG QUAN HỮU ÍCH CHO CHỦ ĐỀ ĐÓ (gồm các bước/kỹ năng cần học). Sau đó, hãy lịch sự thông báo rằng SecureLearn hiện chưa có khóa học riêng cho chủ đề này và gợi ý người dùng tham khảo các thể loại/khóa học hiện có trong context.
 Không tự bịa tên khóa học hay link không có trong context.
-Trả lời bằng tiếng Việt ngắn gọn, rõ ràng, trình bày đẹp mắt.`;
+Trả lời bằng tiếng Việt ngắn gọn, rõ ràng, trình bày đẹp mắt.\nAlways return exactly one JSON object with two fields: "reply" (the user-facing answer) and "recommendedCourseSlugs" (an array of slugs copied verbatim from context.courses).\nOnly include a slug when the course is genuinely recommended, and include that course exact full title in reply. Mention each selected course title exactly once, copied verbatim; never paraphrase, translate, correct, or add an alternative spelling.\nRecommend at most 5 specific courses in each reply. For broad requests, end with one short question that helps narrow the learner goal.\nUse an empty recommendedCourseSlugs array when no specific course is recommended.\nNever return a markdown code fence or any content outside the JSON object.`;
 
 const buildPrompt = (input: {
   message: string;
@@ -228,6 +181,12 @@ const buildPrompt = (input: {
       : input.mode === "FOLLOW_UP"
         ? "Hãy trả lời câu hỏi nối tiếp dựa trên khóa học trong context. Trường durationText (ví dụ: '5 phút', '3 giờ') và totalLessonsText chính là thời lượng và số bài học chuẩn của khóa học. Hãy tự tin trả lời chính xác thông tin thời lượng và số bài học này cho người dùng, không né tránh hay bảo thiếu thông tin."
         : "Hãy tư vấn lộ trình ngắn gọn hoặc gợi ý các khóa học phù hợp từ context (hoặc giới thiệu danh mục categories trong context nếu chưa có khóa học phù hợp). Nhắc tên khóa học tự nhiên nếu có.",
+    outputContract: {
+      reply: "string",
+      recommendedCourseSlugs: ["slug copied verbatim from context.courses"],
+      rule: "Every selected slug must belong to context.courses and its exact full title must appear in reply.",
+      maximumCoursesPerReply: 5,
+    },
   }, null, 2);
 };
 
@@ -254,26 +213,9 @@ class ChatbotService {
     const conversation = await this.findAuthorizedConversation(input);
     const messages = await ChatbotMessage.find({ conversationId: conversation._id }).sort({ createdAt: 1 }).lean();
     return messages.map((message: any) => {
-      const contextSources = (message.sources || []).filter((source: ChatbotSource) => source.type === "COURSE");
-      const storedSuggestions = Array.isArray(message.suggestedCourses)
-        ? message.suggestedCourses as ChatbotSource[]
-        : null;
-
-      // Older records only have `sources`. Reconstruct cards from course names
-      // actually mentioned in the assistant reply instead of exposing all context.
       const displayedSources: ChatbotSource[] = message.role !== "ASSISTANT" || message.intent !== "COURSE"
         ? []
-        : storedSuggestions ?? pickSuggestedCourses(
-          contextSources.map((source: ChatbotSource) => ({
-            title: source.title,
-            slug: source.url?.split("/").filter(Boolean).pop() || "",
-            url: source.url,
-            price: source.price,
-          })),
-          message.content,
-          true,
-        ).map((course) => ({ type: "COURSE", title: course.title, url: course.url, price: course.price }));
-
+        : Array.isArray(message.suggestedCourses) ? message.suggestedCourses as ChatbotSource[] : [];
       return {
         id: message._id.toString(),
         role: message.role,
@@ -410,19 +352,22 @@ class ChatbotService {
       categories,
       lastSources: promptSources,
     });
-    const shouldShowMultipleCourses = mode === "ADVISOR" || mode === "SEARCH";
     let reply = "";
+    let recommendedCourseSlugs: string[] = [];
     try {
-      reply = await geminiService.generateReply({ systemPrompt, prompt });
+      const rawResponse = await geminiService.generateReply({ systemPrompt, prompt, responseMimeType: "application/json" });
+      const structuredResponse = parseStructuredCourseReply(rawResponse);
+      reply = structuredResponse.reply;
+      recommendedCourseSlugs = structuredResponse.recommendedCourseSlugs;
     } catch (error: any) {
       console.error("[ChatbotService] Gemini request failed:", {
         status: error?.status,
         message: error?.message,
       });
       if (![429, 502, 503, 504].includes(Number(error?.status))) throw error;
-      reply = buildCourseFallbackReply(courses, categories, shouldShowMultipleCourses, mode, message);
+      reply = buildCourseFallbackReply();
     }
-    const suggestedCourses = pickSuggestedCourses(courses, reply, shouldShowMultipleCourses);
+    const suggestedCourses = selectRecommendedCourses(courses, recommendedCourseSlugs, reply);
 
     const displayedSources = toCourseSources(suggestedCourses);
     await this.persistExchange(conversation, message, reply, intent, sources, displayedSources);

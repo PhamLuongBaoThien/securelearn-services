@@ -2,15 +2,31 @@ type GeminiPart = { text: string };
 type GeminiCandidate = { content?: { parts?: GeminiPart[] }; finishReason?: string };
 type GeminiResponse = { candidates?: GeminiCandidate[]; error?: { message?: string } };
 
+const DEFAULT_GEMINI_TIMEOUT_MS = 60000;
+
+const resolveTimeoutMs = (value: string | undefined) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 1000 ? parsed : DEFAULT_GEMINI_TIMEOUT_MS;
+};
+
 class GeminiService {
-  async generateReply(input: { systemPrompt: string; prompt: string }): Promise<string> {
+  async generateReply(input: { systemPrompt: string; prompt: string; responseMimeType?: "application/json" }): Promise<string> {
     const apiKey = process.env.GEMINI_API_KEY;
     const model = process.env.GEMINI_MODEL;
+    const timeoutMs = resolveTimeoutMs(process.env.GEMINI_TIMEOUT_MS);
     if (!apiKey || !model) {
       throw Object.assign(new Error("Gemini chưa được cấu hình. Vui lòng cấu hình GEMINI_API_KEY và GEMINI_MODEL."), { status: 503 });
     }
 
-    return this.requestGemini({ apiKey, model, systemPrompt: input.systemPrompt, prompt: input.prompt, maxOutputTokens: 2048 });
+    return this.requestGemini({
+      apiKey,
+      model,
+      systemPrompt: input.systemPrompt,
+      prompt: input.prompt,
+      maxOutputTokens: 1024,
+      responseMimeType: input.responseMimeType,
+      timeoutMs,
+    });
   }
 
   private async requestGemini(input: {
@@ -18,10 +34,10 @@ class GeminiService {
     model: string;
     systemPrompt: string;
     prompt: string;
+    responseMimeType?: "application/json";
     maxOutputTokens: number;
+    timeoutMs: number;
   }): Promise<string> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
     try {
       return await this.executeFetch(input);
     } catch (error: any) {
@@ -40,9 +56,11 @@ class GeminiService {
     systemPrompt: string;
     prompt: string;
     maxOutputTokens: number;
+    timeoutMs: number;
+    responseMimeType?: "application/json";
   }): Promise<string> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), input.timeoutMs);
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:generateContent?key=${encodeURIComponent(input.apiKey)}`, {
         method: "POST",
@@ -51,7 +69,11 @@ class GeminiService {
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: input.systemPrompt }] },
           contents: [{ role: "user", parts: [{ text: input.prompt }] }],
-          generationConfig: { temperature: 0.25, maxOutputTokens: input.maxOutputTokens },
+          generationConfig: {
+            maxOutputTokens: input.maxOutputTokens,
+            thinkingConfig: { thinkingLevel: "minimal" },
+            ...(input.responseMimeType ? { responseMimeType: input.responseMimeType } : {}),
+          },
         }),
       });
       const data = (await response.json().catch(() => ({}))) as GeminiResponse;

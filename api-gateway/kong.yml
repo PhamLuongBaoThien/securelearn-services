@@ -408,6 +408,7 @@ services:
 
   - name: inbox-service
     url: http://inbox-service:5007
+    read_timeout: 75000
     routes:
       - name: inbox-realtime
         paths: [/inbox.socket.io]
