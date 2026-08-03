@@ -528,7 +528,7 @@ class ProgressService {
   ): Promise<CourseAnalyticsResponse> {
     const context = await this.loadReadableContext(userId, userRole, courseId);
     if (userRole !== 'INSTRUCTOR' || context.instructorId !== userId) {
-      throw new Error('Chỉ giảng viên sở hữu khóa học mới được xem analytics.');
+      throw new Error('Chỉ tác giả khóa học mới được xem dữ liệu phân tích.');
     }
 
     const [courseRows, lessonRows] = await Promise.all([

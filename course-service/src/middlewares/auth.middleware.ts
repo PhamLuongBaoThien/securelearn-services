@@ -51,7 +51,7 @@ export const extractUser = async (req: AuthRequest, res: Response, next: NextFun
 
 export const requireInstructor = (req: AuthRequest, res: Response, next: NextFunction): void => {
   if (req.userRole !== 'INSTRUCTOR') {
-    res.status(403).json({ status: 'ERR', message: 'Chỉ giảng viên mới có quyền thực hiện hành động này.' });
+    res.status(403).json({ status: 'ERR', message: 'Chỉ người giảng dạy mới có quyền thực hiện hành động này.' });
     return;
   }
   next();

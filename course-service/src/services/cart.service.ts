@@ -163,7 +163,7 @@ class CartService {
 
   private assertCanAddCourse(course: ICourse, userId: string, userRole?: string): void {
     if (userRole === 'INSTRUCTOR' && course.instructorId.toString() === userId) {
-      throw new Error('Giảng viên không thể thêm khóa học do chính mình tạo vào giỏ hàng.');
+      throw new Error('Bạn không thể thêm khóa học do chính mình tạo vào giỏ hàng.');
     }
   }
 

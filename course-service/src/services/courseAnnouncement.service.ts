@@ -53,7 +53,7 @@ class CourseAnnouncementService {
     if (!plain(content)) throw new Error('Nội dung thông báo là bắt buộc.');
     const row: any = await CourseAnnouncement.create({
       courseId: course._id, instructorId: user.id,
-      instructorName: user.name || course.instructorName || 'Giảng viên',
+      instructorName: user.name || course.instructorName || 'Người giảng dạy',
       instructorAvatarUrl: course.instructorAvatarUrl || '', title, content,
       status: 'PUBLISHED', revision: 1, publishedAt: new Date(),
     });

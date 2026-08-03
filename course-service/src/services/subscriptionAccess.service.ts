@@ -52,7 +52,7 @@ class SubscriptionAccessService {
     // Rút khỏi catalog chỉ chặn enroll mới; learner đã học bằng thuê bao vẫn được học tới hết term đang active.
     course.subscriptionStatus = SubscriptionCatalogStatus.REMOVED;
     const reviewedAt = new Date();
-    const normalizedReason = reason.trim() || 'Giảng viên chủ động rút khóa học khỏi gói thuê bao.';
+    const normalizedReason = reason.trim() || 'Người giảng dạy chủ động rút khóa học khỏi gói thuê bao.';
     course.subscriptionReviewReason = normalizedReason;
     course.subscriptionReviewedAt = reviewedAt;
     course.subscriptionReviewedBy = instructorId;

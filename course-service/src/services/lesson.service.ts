@@ -426,7 +426,7 @@ class LessonService {
     label: string,
   ): void {
     if (asset.ownerUserId !== instructorId) {
-      throw new Error(`${label} không thuộc quyền sở hữu của giảng viên hiện tại.`);
+      throw new Error(`${label} không thuộc quyền sở hữu của tài khoản hiện tại.`);
     }
     if (asset.courseId !== courseId) {
       throw new Error(`${label} không thuộc khóa học hiện tại.`);

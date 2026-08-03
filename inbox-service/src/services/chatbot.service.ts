@@ -100,7 +100,7 @@ const courseSummary = (course: ChatbotCourseContext) => {
   if (course.totalLessons) parts.push(`${course.totalLessons} bài học`);
   const duration = formatCourseDuration(course.totalDuration);
   if (duration) parts.push(`khoảng ${duration}`);
-  if (course.instructorName) parts.push(`giảng viên ${course.instructorName}`);
+  if (course.instructorName) parts.push(`người giảng dạy ${course.instructorName}`);
   return parts.join(", ");
 };
 

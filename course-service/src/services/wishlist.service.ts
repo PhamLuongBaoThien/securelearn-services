@@ -117,7 +117,7 @@ class WishlistService {
 
   private assertCanSaveCourse(course: ICourse, userId: string, userRole?: string): void {
     if (userRole === 'INSTRUCTOR' && course.instructorId.toString() === userId) {
-      throw new Error('Giảng viên không thể lưu khóa học do chính mình tạo vào danh sách mong muốn.');
+      throw new Error('Bạn không thể lưu khóa học do chính mình tạo vào danh sách mong muốn.');
     }
   }
 

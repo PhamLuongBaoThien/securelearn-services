@@ -105,7 +105,7 @@ class CourseReviewService {
   ) {
     const course = await this.getPublishedCourse(courseId);
     if (course.instructorId === reviewer.userId) {
-      throw new Error('Giảng viên không thể đánh giá khóa học do chính mình tạo.');
+      throw new Error('Người giảng dạy không thể đánh giá khóa học do chính mình tạo.');
     }
     await this.assertActiveEnrollment(reviewer.userId, courseId);
 

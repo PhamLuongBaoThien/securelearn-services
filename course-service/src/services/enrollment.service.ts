@@ -76,7 +76,7 @@ class EnrollmentService {
 
     // 2. Giảng viên không được ghi danh khóa học do chính mình tạo
     if (userRole === 'INSTRUCTOR' && course.instructorId.toString() === userId) {
-      throw new Error('Giảng viên không thể ghi danh khóa học do chính mình tạo.');
+      throw new Error('Bạn không thể ghi danh khóa học do chính mình tạo.');
     }
 
     // 3. Kiểm tra đã ghi danh chưa
@@ -145,7 +145,7 @@ class EnrollmentService {
       throw new Error('Khóa học không còn khả dụng trong gói thuê bao.');
     }
     if (userRole === 'INSTRUCTOR' && course.instructorId.toString() === userId) {
-      throw new Error('Giảng viên không thể học khóa học do chính mình tạo.');
+      throw new Error('Bạn không thể học khóa học do chính mình tạo.');
     }
     const existing = await Enrollment.findOne({ userId, courseId });
     if (existing?.source === EnrollmentSource.PURCHASE) return existing;

@@ -44,7 +44,7 @@ class CourseReviewController {
       res.status(200).json({ status: 'OK', message: 'Đã lưu đánh giá khóa học.', data });
     } catch (error: any) {
       const message = error.message || 'Không thể lưu đánh giá.';
-      const status = message.includes('ghi danh') || message.includes('Giảng viên') ? 403 : 400;
+      const status = message.includes('ghi danh') || message.includes('Người giảng dạy') ? 403 : 400;
       res.status(status).json({ status: 'ERR', message });
     }
   }
@@ -54,7 +54,7 @@ class CourseReviewController {
       const data = await courseReviewService.getInstructorRatingStats(String(req.params.instructorId));
       res.status(200).json({ status: 'OK', data });
     } catch (error: any) {
-      res.status(500).json({ status: 'ERR', message: error.message || 'Không thể tải đánh giá giảng viên.' });
+      res.status(500).json({ status: 'ERR', message: error.message || 'Không thể tải đánh giá người giảng dạy.' });
     }
   }
 }

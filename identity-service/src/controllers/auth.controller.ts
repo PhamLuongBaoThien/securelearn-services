@@ -136,7 +136,7 @@ class AuthController {
     try {
       const instructor = await authService.getPublicInstructorProfile(req.params.id as string);
       if (!instructor) {
-        res.status(404).json({ status: 'ERR', message: 'Không tìm thấy giảng viên.' });
+        res.status(404).json({ status: 'ERR', message: 'Không tìm thấy người giảng dạy.' });
         return;
       }
 
