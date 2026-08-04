@@ -9,6 +9,13 @@ const ACCESS_TOKEN_TTL_SECONDS = 10 * 60;
 
 type SessionTokenPayload = { id: string; role: string; sid: string };
 
+export class InvalidAuthSessionError extends Error {
+  constructor() {
+    super('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+    this.name = 'InvalidAuthSessionError';
+  }
+}
+
 class AuthSessionService {
   private async blacklist(sessionId: string): Promise<void> {
     await redisClient.set(`revoked_session:${sessionId}`, '1', 'EX', ACCESS_TOKEN_TTL_SECONDS);
@@ -38,9 +45,8 @@ class AuthSessionService {
     return { sessionId, refreshToken };
   }
 
-  public async rotateSession(rawToken: string, payload: SessionTokenPayload, metadata: SessionMetadata) {
+  public async refreshSession(rawToken: string, payload: SessionTokenPayload, metadata: SessionMetadata) {
     const now = new Date();
-    const refreshToken = generalRefreshToken(payload);
     const session = await AuthSession.findOneAndUpdate(
       {
         sessionId: payload.sid,
@@ -51,22 +57,14 @@ class AuthSessionService {
       },
       {
         $set: {
-          refreshTokenHash: hashRefreshToken(refreshToken),
           lastActiveAt: now,
-          expiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
           ipAddress: metadata.ipAddress,
         },
       },
       { new: true },
     );
-    if (session) return { refreshToken, sessionId: session.sessionId };
-
-    const existing = await AuthSession.findOne({ sessionId: payload.sid, userId: payload.id });
-    if (existing && !existing.revokedAt && existing.expiresAt.getTime() > Date.now()) {
-      await this.revokeRecord(existing, 'REFRESH_TOKEN_REUSE');
-      throw new Error('Phiên đăng nhập không còn an toàn và đã bị thu hồi.');
-    }
-    throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+    if (session) return session.sessionId;
+    throw new InvalidAuthSessionError();
   }
   public async replaceSessionRole(userId: string, sessionId: string, role: string) {
     const session = await AuthSession.findOne({

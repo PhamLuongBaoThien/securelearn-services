@@ -6,12 +6,25 @@ import authService from '../services/auth.service';
 import { generalAccessToken, refreshTokenJwtService } from '../services/jwt.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import redisClient from '../config/redis';
-import authSessionService from '../services/authSession.service';
+import authSessionService, { InvalidAuthSessionError } from '../services/authSession.service';
 import { getSessionMetadata } from '../utils/session.utils';
 
 const REFRESH_TOKEN_COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 ngày
 
 class AuthController {
+  private async revokeExistingCookieSession(req: Request): Promise<void> {
+    const existingToken = req.cookies?.refresh_token;
+    if (!existingToken) return;
+
+    try {
+      const result = await refreshTokenJwtService(existingToken);
+      if (result.status === 'OK' && result.decoded?.id && result.decoded.sid) {
+        await authSessionService.revokeCurrent(result.decoded.id, result.decoded.sid);
+      }
+    } catch (error) {
+      console.warn('Không thể thu hồi phiên cookie cũ trước khi đăng nhập:', error);
+    }
+  }
   /**
    * [POST] /api/auth/register
    * Đăng ký tài khoản bằng email + mật khẩu.
@@ -38,7 +51,7 @@ class AuthController {
    * Đăng nhập bằng email + mật khẩu.
    * Trả về access_token trong body + refresh_token trong HttpOnly Cookie.
    */
-  public async login(req: Request, res: Response): Promise<void> {
+  public login = async (req: Request, res: Response): Promise<void> => {
     try {
       const { email, password } = req.body;
       if (!email || !password) {
@@ -49,6 +62,7 @@ class AuthController {
       const { sessionId, refreshToken } = await authSessionService.createSession(
         user._id.toString(), user.role, getSessionMetadata(req),
       );
+      await this.revokeExistingCookieSession(req);
       const access_token = generalAccessToken({
         id: user._id.toString(), role: user.role, fullName: user.fullName, email: user.email, sid: sessionId,
       });
@@ -65,11 +79,11 @@ class AuthController {
     } catch (error: any) {
       res.status(401).json({ status: 'ERR', message: error.message });
     }
-  }
+  };
 
   /**
    * [POST] /api/auth/refresh-token
-   * Rotate refresh token của phiên hiện tại và cấp access token mới.
+   * Xác thực refresh token của phiên hiện tại và cấp access token mới.
    */
   public async refreshToken(req: Request, res: Response): Promise<void> {
     try {
@@ -92,21 +106,23 @@ class AuthController {
         res.status(403).json({ status: 'ERR', message: 'Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.' });
         return;
       }
-      const rotated = await authSessionService.rotateSession(
+      const sessionId = await authSessionService.refreshSession(
         token,
         { id: result.decoded.id, role: user.role, sid: result.decoded.sid },
         getSessionMetadata(req),
       );
       const access_token = generalAccessToken({
-        id: result.decoded.id, role: user.role, fullName: user.fullName ?? '', email: user.email ?? '', sid: rotated.sessionId,
-      });
-      res.cookie('refresh_token', rotated.refreshToken, {
-        httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE,
+        id: result.decoded.id, role: user.role, fullName: user.fullName ?? '', email: user.email ?? '', sid: sessionId,
       });
       res.status(200).json({ status: 'OK', message: 'Cấp lại access token thành công.', access_token });
     } catch (error: any) {
-      res.clearCookie('refresh_token');
-      res.status(401).json({ status: 'ERR', message: error.message || 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
+      if (error instanceof InvalidAuthSessionError) {
+        res.clearCookie('refresh_token');
+        res.status(401).json({ status: 'ERR', message: error.message });
+        return;
+      }
+      console.error('Không thể làm mới phiên đăng nhập:', error);
+      res.status(503).json({ status: 'ERR', message: 'Không thể làm mới phiên đăng nhập lúc này. Vui lòng thử lại.' });
     }
   }
 
@@ -171,12 +187,13 @@ class AuthController {
   /**
    * Callback sau khi Google OAuth2 xác thực thành công.
    */
-  public async googleCallback(req: Request, res: Response): Promise<void> {
+  public googleCallback = async (req: Request, res: Response): Promise<void> => {
     try {
       const user: any = req.user;
       const { sessionId, refreshToken } = await authSessionService.createSession(
         user._id.toString(), user.role, getSessionMetadata(req),
       );
+      await this.revokeExistingCookieSession(req);
       const access_token = generalAccessToken({
         id: user._id.toString(), role: user.role, fullName: user.fullName, email: user.email, sid: sessionId,
       });
@@ -185,10 +202,11 @@ class AuthController {
       });
       const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
       res.redirect(`${clientUrl}/oauth-callback?token=${access_token}`);
-    } catch (_error: any) {
+    } catch (error: any) {
+      console.error('Lỗi xử lý đăng nhập Google:', error);
       res.status(500).json({ status: 'ERR', message: 'Lỗi xử lý đăng nhập Google.' });
     }
-  }
+  };
 
   /** [POST] /api/auth/logout */
   public async logout(req: AuthRequest, res: Response): Promise<void> {
