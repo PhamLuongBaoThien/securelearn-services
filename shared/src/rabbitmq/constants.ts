@@ -195,6 +195,11 @@ export interface CourseVersionPublishedLessonMapping {
   oldLessonId: string;
   newLessonId: string;
   lessonType: "VIDEO" | "QUIZ";
+  /**
+   * false khi lesson video giữ cùng logical identity nhưng đã đổi video asset.
+   * Optional để consumer vẫn tương thích với event được tạo bởi phiên bản cũ.
+   */
+  preserveProgress?: boolean;
 }
 
 export interface CourseVersionPublishedPayload {

@@ -334,23 +334,27 @@ class ProgressService {
       return;
     }
 
-    const lessonIdMap = new Map(payload.lessonMappings.map((item) => [item.oldLessonId, item.newLessonId]));
-    const newLessonIds = payload.lessonMappings.map((item) => item.newLessonId);
+    const mappingByOldLessonId = new Map(payload.lessonMappings.map((item) => [item.oldLessonId, item]));
+    const newLessonIds = Array.from(new Set(payload.lessonMappings.map((item) => item.newLessonId)));
     const oldLessonRows = await LessonProgress.find({
       courseId: payload.courseId,
-      lessonId: { $in: [...lessonIdMap.keys()] },
+      lessonId: { $in: [...mappingByOldLessonId.keys()] },
     }).lean();
     const affectedUserIds = new Set<string>();
 
     for (const oldRow of oldLessonRows) {
-      const newLessonId = lessonIdMap.get(oldRow.lessonId);
-      if (!newLessonId) continue;
+      const mapping = mappingByOldLessonId.get(oldRow.lessonId);
+      if (!mapping) continue;
       affectedUserIds.add(oldRow.userId);
+
+      // Video đã đổi asset (hoặc mapping chỉ dựa vào vị trí) phải bắt đầu lại.
+      // Không tạo row rỗng để tránh ghi đè tiến độ mới nếu event được retry đến muộn.
+      if (mapping.preserveProgress === false) continue;
 
       const existing = await LessonProgress.findOne({
         userId: oldRow.userId,
         courseId: payload.courseId,
-        lessonId: newLessonId,
+        lessonId: mapping.newLessonId,
       });
       const nextStatus = existing?.status === LessonProgressStatus.COMPLETED || oldRow.status === LessonProgressStatus.COMPLETED
         ? LessonProgressStatus.COMPLETED
@@ -358,13 +362,13 @@ class ProgressService {
       const nextCompletedAt = existing?.completedAt || oldRow.completedAt || null;
 
       await LessonProgress.findOneAndUpdate(
-        { userId: oldRow.userId, courseId: payload.courseId, lessonId: newLessonId },
+        { userId: oldRow.userId, courseId: payload.courseId, lessonId: mapping.newLessonId },
         {
           $set: {
             userId: oldRow.userId,
             courseId: payload.courseId,
             courseVersionId: payload.newVersionId,
-            lessonId: newLessonId,
+            lessonId: mapping.newLessonId,
             lessonType: oldRow.lessonType,
             status: nextStatus,
             watchedSegments: existing?.watchedSegments?.length ? existing.watchedSegments : oldRow.watchedSegments || [],
@@ -401,9 +405,13 @@ class ProgressService {
       });
       const totalLessons = payload.totalLessons || existingCourseProgress?.totalLessons || newLessonIds.length;
       const progressPercent = totalLessons > 0 ? Math.min(100, Math.round((completedLessons / totalLessons) * 100)) : 0;
-      const mappedLastLessonId = existingCourseProgress?.lastLessonId
-        ? lessonIdMap.get(existingCourseProgress.lastLessonId) || existingCourseProgress.lastLessonId
-        : '';
+      const lastLessonMapping = existingCourseProgress?.lastLessonId
+        ? mappingByOldLessonId.get(existingCourseProgress.lastLessonId)
+        : undefined;
+      const mappedLastLessonId = lastLessonMapping?.newLessonId || existingCourseProgress?.lastLessonId || '';
+      const lastPositionSeconds = lastLessonMapping?.preserveProgress === false
+        ? 0
+        : existingCourseProgress?.lastPositionSeconds || 0;
       const completedAt = totalLessons > 0 && completedLessons >= totalLessons
         ? existingCourseProgress?.completedAt || new Date(payload.publishedAt || Date.now())
         : null;
@@ -417,6 +425,7 @@ class ProgressService {
             totalLessons,
             progressPercent,
             lastLessonId: mappedLastLessonId,
+            lastPositionSeconds,
             completedAt,
           },
           $setOnInsert: {
@@ -747,7 +756,9 @@ class ProgressService {
       : latestLessonRow?.lessonId || '';
     const lastPositionSeconds = latestLessonRow?.lessonId === lastLessonId
       ? latestLessonRow.lastPositionSeconds || 0
-      : existing?.lastPositionSeconds || 0;
+      : lastLessonId && existing?.lastLessonId === lastLessonId
+        ? existing?.lastPositionSeconds || 0
+        : 0;
 
     if (
       existing &&
@@ -755,7 +766,9 @@ class ProgressService {
       existing.completedLessons === completedLessons &&
       existing.totalLessons === totalLessons &&
       existing.progressPercent === progressPercent &&
-      existing.lastLessonId === lastLessonId
+      existing.lastLessonId === lastLessonId &&
+      existing.lastPositionSeconds === lastPositionSeconds &&
+      (existing.completedAt?.getTime() || null) === (completedAt?.getTime() || null)
     ) {
       return existing.toObject();
     }
@@ -1074,7 +1087,7 @@ class ProgressService {
 
   private resolveLesson(context: CourseProgressContext, lessonId: string, lessonType: LessonProgressType) {
     const lesson = context.lessons.find((item) => item.lessonId === lessonId);
-    if (!lesson) throw new Error('Bài học không thuộc khóa học hiện tại.');
+    if (!lesson) throw new LearningSessionAccessError(409, 'COURSE_VERSION_CHANGED', 'Khóa học vừa được cập nhật. Đang tải phiên bản mới nhất.');
     if (lesson.type !== lessonType) throw new Error('Loại bài học không khớp với tiến độ gửi lên.');
     return lesson;
   }

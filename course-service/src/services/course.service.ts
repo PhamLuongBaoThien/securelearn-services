@@ -1966,10 +1966,10 @@ class CourseService {
     const [oldSections, newSections, oldLessons, newLessons, historicalLessons] = await Promise.all([
       Section.find({ courseId: oldVersionId }).select("_id order").lean(),
       Section.find({ courseId: newVersionId }).select("_id order").lean(),
-      Lesson.find({ courseId: oldVersionId }).select("_id sectionId sourceLessonId type order").lean(),
-      Lesson.find({ courseId: newVersionId }).select("_id sectionId sourceLessonId type order").lean(),
+      Lesson.find({ courseId: oldVersionId }).select("_id sectionId sourceLessonId type order videoAssetId").lean(),
+      Lesson.find({ courseId: newVersionId }).select("_id sectionId sourceLessonId type order videoAssetId").lean(),
       historicalVersionIds.length
-        ? Lesson.find({ courseId: { $in: historicalVersionIds } }).select("_id sourceLessonId type").lean()
+        ? Lesson.find({ courseId: { $in: historicalVersionIds } }).select("_id sourceLessonId type videoAssetId").lean()
         : Promise.resolve([]),
     ]);
     const oldSectionOrderById = new Map(oldSections.map((section) => [section._id.toString(), section.order]));
@@ -1990,7 +1990,18 @@ class CourseService {
       oldLessonId: string;
       newLessonId: string;
       lessonType: LessonType;
+      preserveProgress: boolean;
     }>();
+
+    const canPreserveProgress = (
+      source: { type: LessonType; videoAssetId?: Types.ObjectId | null },
+      target: { type: LessonType; videoAssetId?: Types.ObjectId | null },
+    ) => {
+      if (source.type !== LessonType.VIDEO || target.type !== LessonType.VIDEO) return true;
+      const sourceAssetId = source.videoAssetId?.toString() || "";
+      const targetAssetId = target.videoAssetId?.toString() || "";
+      return Boolean(sourceAssetId && targetAssetId && sourceAssetId === targetAssetId);
+    };
 
     for (const lesson of newLessons) {
       const identity = lesson.sourceLessonId?.toString();
@@ -2000,10 +2011,14 @@ class CourseService {
             `${newSectionOrderById.get(lesson.sectionId.toString()) || 0}:${lesson.order}:${lesson.type}`,
           );
       if (matched) {
+        // Mapping theo vị trí chỉ phục vụ tương thích dữ liệu cũ. Không dùng nó để
+        // kế thừa tiến độ vì một lesson mới có thể tình cờ nằm đúng vị trí lesson đã xóa.
+        const matchedByStableIdentity = Boolean(identity);
         mappings.set(`${matched._id.toString()}:${lesson._id.toString()}`, {
           oldLessonId: matched._id.toString(),
           newLessonId: lesson._id.toString(),
           lessonType: lesson.type,
+          preserveProgress: matchedByStableIdentity && canPreserveProgress(matched, lesson),
         });
       }
 
@@ -2015,6 +2030,7 @@ class CourseService {
           oldLessonId: historicalLesson._id.toString(),
           newLessonId: lesson._id.toString(),
           lessonType: lesson.type,
+          preserveProgress: canPreserveProgress(historicalLesson, lesson),
         });
       }
     }

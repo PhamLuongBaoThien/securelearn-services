@@ -1,7 +1,7 @@
 import { GrpcStatus, createCourseGrpcServer, createGrpcError } from '@securelearn/common';
 import { Course, CourseProgressionMode, CourseStatus } from '../models/course.model';
 import { CourseVersion } from '../models/courseVersion.model';
-import { Lesson } from '../models/lesson.model';
+import { Lesson, LessonType } from '../models/lesson.model';
 import { Section } from '../models/section.model';
 import { Enrollment, EnrollmentStatus } from '../models/enrollment.model';
 import { CourseReview } from '../models/courseReview.model';
@@ -77,7 +77,7 @@ export const createInternalGrpcServer = () =>
       const allVersionIds = versionIds.some((versionId) => versionId.toString() === currentVersionId)
         ? versionIds
         : [...versionIds, course.currentVersionId];
-      const [lessons, sections, allLessons, allSections] = await Promise.all([
+      const [lessons, sections, allLessons] = await Promise.all([
         Lesson.find({ courseId: course.currentVersionId })
           .sort({ order: 1, createdAt: 1 })
           .select('_id title type duration order sectionId sourceLessonId videoAssetId')
@@ -86,30 +86,19 @@ export const createInternalGrpcServer = () =>
           .select('_id order')
           .lean(),
         Lesson.find({ courseId: { $in: allVersionIds } })
-          .select('_id courseId sectionId sourceLessonId type order')
-          .lean(),
-        Section.find({ courseId: { $in: allVersionIds } })
-          .select('_id courseId order')
+          .select('_id courseId sectionId sourceLessonId type order videoAssetId')
           .lean(),
       ]);
       const sectionOrderById = new Map(sections.map((section) => [section._id.toString(), section.order || 0]));
-      const allSectionOrderById = new Map(allSections.map((section) => [section._id.toString(), section.order || 0]));
       const equivalentIdsByIdentity = new Map<string, Set<string>>();
-      const equivalentIdsByPosition = new Map<string, Set<string>>();
+      const videoAssetIdByLessonId = new Map<string, string>();
 
       for (const lesson of allLessons) {
         const lessonId = lesson._id.toString();
         const identityKey = `${lesson.type}:${(lesson.sourceLessonId || lesson._id).toString()}`;
         if (!equivalentIdsByIdentity.has(identityKey)) equivalentIdsByIdentity.set(identityKey, new Set());
         equivalentIdsByIdentity.get(identityKey)!.add(lessonId);
-
-        const positionKey = [
-          lesson.type,
-          allSectionOrderById.get(lesson.sectionId.toString()) || 0,
-          lesson.order,
-        ].join(':');
-        if (!equivalentIdsByPosition.has(positionKey)) equivalentIdsByPosition.set(positionKey, new Set());
-        equivalentIdsByPosition.get(positionKey)!.add(lessonId);
+        videoAssetIdByLessonId.set(lessonId, lesson.videoAssetId?.toString() || '');
       }
 
       return {
@@ -128,13 +117,16 @@ export const createInternalGrpcServer = () =>
           const lessonId = lesson._id.toString();
           const sectionOrder = sectionOrderById.get(lesson.sectionId.toString()) || 0;
           const identityKey = `${lesson.type}:${(lesson.sourceLessonId || lesson._id).toString()}`;
-          const positionKey = [lesson.type, sectionOrder, lesson.order].join(':');
           const equivalentLessonIds = new Set<string>(equivalentIdsByIdentity.get(identityKey) || []);
-          if (!lesson.sourceLessonId) {
-            for (const equivalentId of equivalentIdsByPosition.get(positionKey) || []) {
-              equivalentLessonIds.add(equivalentId);
-            }
-          }
+          const currentVideoAssetId = lesson.videoAssetId?.toString() || '';
+          const compatibleEquivalentLessonIds = Array.from(equivalentLessonIds).filter((equivalentId) => {
+            if (equivalentId === lessonId) return false;
+            if (lesson.type !== LessonType.VIDEO) return true;
+            return Boolean(
+              currentVideoAssetId
+              && videoAssetIdByLessonId.get(equivalentId) === currentVideoAssetId
+            );
+          });
 
           return {
             lessonId,
@@ -145,7 +137,7 @@ export const createInternalGrpcServer = () =>
             sectionId: lesson.sectionId.toString(),
             sectionOrder,
             required: true,
-            equivalentLessonIds: Array.from(equivalentLessonIds).filter((id) => id !== lessonId),
+            equivalentLessonIds: compatibleEquivalentLessonIds,
             videoAssetId: lesson.videoAssetId?.toString() || '',
           };
         }),
