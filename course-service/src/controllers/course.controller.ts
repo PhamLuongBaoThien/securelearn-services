@@ -369,6 +369,28 @@ class CourseController {
     }
   }
 
+  public async updateAdminCourseCategory(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const categoryId = String(req.body.categoryId || '').trim();
+      if (!categoryId) {
+        res.status(400).json({ status: 'ERR', message: 'Vui lòng chọn danh mục mới.' });
+        return;
+      }
+
+      const result = await courseService.updateAdminCourseCategory(
+        req.params.id as string,
+        categoryId,
+      );
+      res.status(200).json({
+        status: 'OK',
+        message: 'Đã cập nhật danh mục khóa học.',
+        data: result,
+      });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
   /**
    * [GET] /api/admin/courses/review
    * Danh sách khóa học/revision đang chờ admin duyệt.

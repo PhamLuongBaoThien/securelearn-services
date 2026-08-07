@@ -890,7 +890,7 @@ class CourseService {
     limit?: number;
     search?: string;
     status?: string;
-    subscriptionStatus?: SubscriptionCatalogStatus;
+    subscriptionStatus?: SubscriptionCatalogStatus | "NOT_APPROVED";
     categoryId?: string;
     level?: string;
     instructorId?: string;
@@ -932,8 +932,11 @@ class CourseService {
         },
       ];
     }
-    if (query.subscriptionStatus)
+    if (query.subscriptionStatus === "NOT_APPROVED") {
+      filter.subscriptionStatus = { $ne: SubscriptionCatalogStatus.APPROVED };
+    } else if (query.subscriptionStatus) {
       filter.subscriptionStatus = query.subscriptionStatus;
+    }
     if (query.categoryId && Types.ObjectId.isValid(query.categoryId)) {
       filter.categoryId = new Types.ObjectId(query.categoryId);
     }
@@ -1102,6 +1105,58 @@ class CourseService {
     );
 
     return { matched: result.matchedCount, modified: result.modifiedCount };
+  }
+
+  public async updateAdminCourseCategory(
+    courseId: string,
+    categoryId: string,
+  ): Promise<{
+    courseId: string;
+    category: { _id: string; name: string; slug: string; parentId: string | null };
+  }> {
+    if (!Types.ObjectId.isValid(courseId)) {
+      throw new Error("Khóa học không hợp lệ.");
+    }
+
+    const category = await categoryService.resolveActiveCategoryById(categoryId);
+    const course = await Course.findOne({
+      _id: courseId,
+      status: CourseStatus.PUBLISHED,
+      currentVersionId: { $ne: null },
+    });
+    if (!course) {
+      throw new Error("Không tìm thấy khóa học đã xuất bản.");
+    }
+
+    // Chỉ đổi bản đang public. Bản nháp/chờ duyệt giữ nguyên để không đi vòng
+    // qua quyết định phân loại của flow kiểm duyệt revision.
+    const versionResult = await CourseVersion.updateOne(
+      { _id: course.currentVersionId, courseId: course._id, status: CourseStatus.PUBLISHED },
+      {
+        $set: {
+          categoryId: category._id,
+          categoryResolutionStatus: CategoryResolutionStatus.NONE,
+          suggestedCategoryName: "",
+          suggestedCategoryNote: "",
+        },
+      },
+    );
+    if (versionResult.matchedCount === 0) {
+      throw new Error("Không tìm thấy bản khóa học đang xuất bản.");
+    }
+
+    course.categoryId = category._id as Types.ObjectId;
+    await course.save();
+
+    return {
+      courseId: course._id.toString(),
+      category: {
+        _id: category._id.toString(),
+        name: category.name,
+        slug: category.slug,
+        parentId: category.parentId?.toString() || null,
+      },
+    };
   }
 
   public async getCourseReviewDetail(

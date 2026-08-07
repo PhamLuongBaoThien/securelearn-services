@@ -278,7 +278,7 @@ class EnrollmentService {
       Enrollment.countDocuments({ courseId }),
     ]);
 
-    const progressList = enrollments.map((enrollment: any) => ({
+    const students = enrollments.map((enrollment: any) => ({
       _id: enrollment._id?.toString(),
       user: {
         _id: enrollment.userId,
@@ -287,15 +287,10 @@ class EnrollmentService {
         avatarUrl: enrollment.learnerAvatarUrl || '',
       },
       enrolledAt: enrollment.enrolledAt,
-      progressPercent: 0, // Giá trị mặc định
-      completedLessons: 0,
-      totalLessons: 0,
-      totalWatchTime: 0,
-      lastActivityAt: enrollment.enrolledAt,
     }));
 
     return {
-      progress: progressList,
+      students,
       total,
     };
   }

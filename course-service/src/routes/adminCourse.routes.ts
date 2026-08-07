@@ -13,6 +13,7 @@ const router = Router();
 
 router.get('/', extractUser, requireAdmin, requirePermission('course:read'), courseController.getAdminCourses);
 router.patch('/watch', extractUser, requireAdmin, requirePermission('course:update'), courseController.updateAdminCourseWatch);
+router.patch('/:id/category', extractUser, requireAdmin, requirePermission('course:update'), courseController.updateAdminCourseCategory);
 router.get('/:id/students', extractUser, requireAdmin, requirePermission('course:read'), courseController.getCourseStudents);
 router.get('/review', extractUser, requireAdmin, requirePermission('course:approve'), courseController.getCoursesForReview);
 router.patch('/review/multi', extractUser, requireAdmin, requirePermission('course:approve'), courseController.multiReviewCourses);
