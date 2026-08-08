@@ -172,6 +172,12 @@ class AdminService {
    * Cập nhật thông tin Admin (adminRole, status, department, etc).
    */
   public async updateAdminInfo(adminId: string, updateData: any): Promise<IAdmin> {
+    const existingAdmin = await Admin.findById(adminId).select('adminRole');
+    if (!existingAdmin) throw new Error('Tài khoản admin không tồn tại.');
+    if (existingAdmin.adminRole === SUPER_ADMIN_ROLE) {
+      throw new Error('Không thể chỉnh sửa tài khoản Super Admin.');
+    }
+
     const sanitizedUpdate = this.pickUpdateAdminData(updateData);
     if (Object.keys(sanitizedUpdate).length === 0) {
       throw new Error('Không có dữ liệu hợp lệ để cập nhật.');
@@ -192,12 +198,12 @@ class AdminService {
       }
     }
 
-    const admin = await Admin.findByIdAndUpdate(
-      adminId,
+    const admin = await Admin.findOneAndUpdate(
+      { _id: adminId, adminRole: { $ne: SUPER_ADMIN_ROLE } },
       { $set: sanitizedUpdate },
       { new: true, runValidators: true }
     ).select('-password');
-    if (!admin) throw new Error('Tài khoản admin không tồn tại.');
+    if (!admin) throw new Error('Không thể chỉnh sửa tài khoản Super Admin.');
     return admin;
   }
 
