@@ -1,6 +1,9 @@
 // - định nghĩa các role (vai trò) động trong hệ thống kèm theo permission (quyền hạn)
 // - phục vụ hệ thống phân quyền (RBAC) linh hoạt thay vì fix cứng enum
 import mongoose, { Schema, Document } from 'mongoose';
+import { ALL_PERMISSIONS } from '../utils/permission.utils';
+
+export { ALL_PERMISSIONS, PermissionId } from '../utils/permission.utils';
 
 export interface IRolePermissionDoc extends Document {
   roleKey: string;       // Key duy nhất, uppercase (VD: 'CONTENT_MANAGER', 'CUSTOM_ROLE')
@@ -40,17 +43,6 @@ const rolePermissionSchema: Schema = new Schema(
 );
 
 export const RolePermission = mongoose.model<IRolePermissionDoc>('RolePermission', rolePermissionSchema);
-
-// ===== Danh sách tất cả permissions trong hệ thống =====
-export const ALL_PERMISSIONS = [
-  'course:read', 'course:update', 'course:delete', 'course:approve',
-  'user:read', 'user:lock',
-  'finance:read', 'finance:manage',
-  'notif:read', 'notif:manage', 'inbox:manage',
-  'system:config', 'system:rbac',
-] as const;
-
-export type PermissionId = (typeof ALL_PERMISSIONS)[number];
 
 // ===== Màu có thể chọn cho badge =====
 export const ROLE_COLORS = ['red', 'violet', 'emerald', 'blue', 'amber', 'pink', 'indigo', 'teal', 'orange', 'zinc'] as const;

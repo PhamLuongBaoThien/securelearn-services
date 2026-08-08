@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import { Admin, IAdmin, SUPER_ADMIN_ROLE } from '../models/admin.model';
 import { RolePermission, IRolePermissionDoc as IRolePermission } from '../models/rolePermission.model';
 import { User } from '../models/user.model';
+import { normalizePermissionDependencies } from '../utils/permission.utils';
 
 class AdminService {
   // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -249,7 +250,7 @@ class AdminService {
       roleKey: cleanKey,
       label,
       color,
-      permissions,
+      permissions: normalizePermissionDependencies(permissions),
       isSystem: false,
     });
     return newRole;
@@ -271,7 +272,9 @@ class AdminService {
     }
 
     const updateSet: Record<string, any> = {};
-    if (data.permissions !== undefined && !role.isSystem) updateSet.permissions = data.permissions;
+    if (data.permissions !== undefined && !role.isSystem) {
+      updateSet.permissions = normalizePermissionDependencies(data.permissions);
+    }
     if (data.label !== undefined) updateSet.label = data.label;
     if (data.color !== undefined) updateSet.color = data.color;
 

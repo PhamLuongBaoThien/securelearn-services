@@ -8,6 +8,7 @@ import { Response, NextFunction } from 'express';
 import { Admin, SUPER_ADMIN_ROLE } from '../models/admin.model';
 import { RolePermission } from '../models/rolePermission.model';
 import { AuthRequest } from './auth.middleware';
+import { getRequiredPermissions } from '../utils/permission.utils';
 
 /**
  * Chỉ cho phép Super Admin truy cập các endpoint quản lý nhân viên admin.
@@ -71,10 +72,14 @@ export const requirePermission = (permissionId: string) => {
 
       // Lookup permissions của role từ DB
       const rolePermission = await RolePermission.findOne({ roleKey: admin.adminRole }).select('permissions');
-      if (!rolePermission || !rolePermission.permissions.includes(permissionId)) {
+      const requiredPermissions = getRequiredPermissions(permissionId);
+      const hasRequiredPermissions = requiredPermissions.every((requiredPermission) =>
+        rolePermission?.permissions.includes(requiredPermission),
+      );
+      if (!rolePermission || !hasRequiredPermissions) {
         res.status(403).json({
           status: 'ERR',
-          message: `Bạn không có quyền thực hiện hành động này. (Yêu cầu: ${permissionId})`,
+          message: `Bạn không có quyền thực hiện hành động này. (Yêu cầu: ${requiredPermissions.join(', ')})`,
         });
         return;
       }

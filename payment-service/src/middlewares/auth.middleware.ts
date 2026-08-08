@@ -2,6 +2,10 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import redisClient from '../config/redis';
 
+const PERMISSION_PREREQUISITES: Record<string, string> = {
+  'finance:manage': 'finance:read',
+};
+
 export interface AuthRequest extends Request {
   userId?: string;
   userRole?: string;
@@ -90,7 +94,10 @@ export const requireRoles = (...roles: string[]) =>
 
 export const requirePermission = (permission: string) =>
   (req: AuthRequest, res: Response, next: NextFunction): void => {
-    if (req.userRole !== 'ADMIN' || !req.userPermissions?.includes(permission)) {
+    const prerequisite = PERMISSION_PREREQUISITES[permission];
+    const hasPermission = req.userPermissions?.includes(permission) &&
+      (!prerequisite || req.userPermissions.includes(prerequisite));
+    if (req.userRole !== 'ADMIN' || !hasPermission) {
       res.status(403).json({ status: 'ERR', message: 'Bạn không có quyền thực hiện thao tác này.' });
       return;
     }
