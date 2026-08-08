@@ -150,7 +150,7 @@ const handleCourseAnnouncement = async (payload: CourseAnnouncementPublishedPayl
 
 export const registerEventHandlers = async () => {
   await subscribeMessage<UserRegisteredPayload>(Exchange.IDENTITY, RoutingKey.USER_REGISTERED, 'notification-service.user-registered', async p =>
-    notificationService.sendEvent('WELCOME', user(p.userId, p.email, p.fullName, p.role), { userName: p.fullName }, `event:${RoutingKey.USER_REGISTERED}:${p.userId}`, { category: 'SYSTEM', actionUrl: '/student/dashboard', actionLabel: 'Bắt đầu học' }), reliable);
+    notificationService.sendEvent('WELCOME', user(p.userId, p.email, p.fullName, p.role), { userName: p.fullName }, `event:${RoutingKey.USER_REGISTERED}:${p.userId}`, { category: 'CAMPAIGN', actionUrl: '/student/dashboard', actionLabel: 'Bắt đầu học' }), reliable);
 
   await subscribeMessage<PaymentCourseSucceededPayload>(Exchange.PAYMENT, RoutingKey.PAYMENT_COURSE_SUCCEEDED, 'notification-service.payment-succeeded', async p =>
     notificationService.sendEvent('PAYMENT_SUCCESS', user(p.userId, p.email, p.fullName, p.userRole), { userName: p.fullName, amount: p.amount, transactionId: p.transactionCode, courseName: p.items.map(i => i.title).join(', '), createdAt: p.paidAt }, `event:${RoutingKey.PAYMENT_COURSE_SUCCEEDED}:${p.transactionId}`, { category: 'PAYMENT', priority: 'HIGH', actionUrl: '/student/dashboard', actionLabel: 'Học ngay' }), reliable);

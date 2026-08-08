@@ -111,7 +111,6 @@ class TemplateService {
       rows.map((row) => String(row.event) + ":" + String(row.type)),
     );
     const groups: Record<string, string[]> = {
-      SYSTEM: ["WELCOME"],
       PAYMENT: ["PAYMENT_SUCCESS", "PAYMENT_FAILED"],
       COURSE: [
         "COURSE_APPROVED",

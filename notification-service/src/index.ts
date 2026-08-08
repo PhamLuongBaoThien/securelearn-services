@@ -50,7 +50,7 @@ const boot = async () => {
     {
       $set: {
         recipientType: "USER",
-        category: "SYSTEM",
+        category: "CAMPAIGN",
         priority: "NORMAL",
         actionUrl: "",
         actionLabel: "",
@@ -132,4 +132,3 @@ boot().catch((error) => {
   console.error("Khởi động notification service thất bại:", error);
   process.exit(1);
 });
-

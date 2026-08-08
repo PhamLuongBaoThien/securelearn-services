@@ -1,7 +1,7 @@
 import { NotificationPreference } from '../models/notificationPreference.model';
 export type RecipientType = 'USER' | 'ADMIN';
-export type NotificationCategory = 'SYSTEM' | 'PAYMENT' | 'COURSE' | 'LEARNING' | 'INBOX' | 'CAMPAIGN';
-const CATEGORIES: NotificationCategory[] = ['SYSTEM', 'PAYMENT', 'COURSE', 'LEARNING', 'INBOX', 'CAMPAIGN'];
+export type NotificationCategory = 'PAYMENT' | 'COURSE' | 'LEARNING' | 'INBOX' | 'CAMPAIGN';
+const CATEGORIES: NotificationCategory[] = ['PAYMENT', 'COURSE', 'LEARNING', 'INBOX', 'CAMPAIGN'];
 const defaults = () => Object.fromEntries(CATEGORIES.map(category => [category, { email: true, inApp: true }]));
 class PreferenceService {
   async get(recipientType: RecipientType, userId: string) {

@@ -4,7 +4,6 @@ const schema = new Schema({
   recipientType: { type: String, enum: ['USER', 'ADMIN'], required: true },
   userId: { type: String, required: true },
   categories: {
-    SYSTEM: { type: channelSchema, default: () => ({}) },
     PAYMENT: { type: channelSchema, default: () => ({}) },
     COURSE: { type: channelSchema, default: () => ({}) },
     LEARNING: { type: channelSchema, default: () => ({}) },

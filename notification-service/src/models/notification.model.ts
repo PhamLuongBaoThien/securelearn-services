@@ -1,12 +1,12 @@
 import mongoose, { Schema } from 'mongoose';
 export const RECIPIENT_TYPES = ['USER', 'ADMIN'] as const;
-export const NOTIFICATION_CATEGORIES = ['SYSTEM', 'PAYMENT', 'COURSE', 'LEARNING', 'INBOX', 'CAMPAIGN'] as const;
+export const NOTIFICATION_CATEGORIES = ['PAYMENT', 'COURSE', 'LEARNING', 'INBOX', 'CAMPAIGN'] as const;
 export const NOTIFICATION_PRIORITIES = ['NORMAL', 'HIGH'] as const;
 const schema = new Schema({
   recipientType: { type: String, enum: RECIPIENT_TYPES, default: 'USER', required: true, index: true },
   userId: { type: String, required: true, index: true },
   type: { type: String, required: true, index: true },
-  category: { type: String, enum: NOTIFICATION_CATEGORIES, default: 'SYSTEM', index: true },
+  category: { type: String, enum: NOTIFICATION_CATEGORIES, default: 'CAMPAIGN', index: true },
   priority: { type: String, enum: NOTIFICATION_PRIORITIES, default: 'NORMAL' },
   title: { type: String, required: true },
   body: { type: String, required: true },
