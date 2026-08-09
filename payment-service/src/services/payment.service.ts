@@ -1054,23 +1054,42 @@ class PaymentService {
       ];
     }
     if (query?.startDate || query?.endDate) {
-      filter.createdAt = {};
-      if (query.startDate) filter.createdAt.$gte = new Date(query.startDate);
-      if (query.endDate) filter.createdAt.$lte = new Date(query.endDate);
+      const effectiveDateRange: Record<string, Date> = {};
+      if (query.startDate) effectiveDateRange.$gte = new Date(query.startDate);
+      if (query.endDate) effectiveDateRange.$lte = new Date(query.endDate);
+
+      // Báo cáo tài chính dùng thời điểm thanh toán nếu đã có; các giao dịch
+      // chưa thanh toán vẫn dùng thời điểm tạo để có thể theo dõi trong bảng.
+      filter.$and = [
+        ...(filter.$and || []),
+        {
+          $or: [
+            { paidAt: effectiveDateRange },
+            { paidAt: null, createdAt: effectiveDateRange },
+          ],
+        },
+      ];
     }
 
     const page = Math.max(Number(query?.page || 1), 1);
     const limit = Math.min(Math.max(Number(query?.limit || 10), 1), 100);
     const skip = (page - 1) * limit;
     const transactionSortOptions: Record<string, Record<string, 1 | -1>> = {
-      newest: { createdAt: -1 },
-      oldest: { createdAt: 1 },
-      amount_desc: { amount: -1, createdAt: -1 },
-      amount_asc: { amount: 1, createdAt: -1 },
+      newest: { effectiveAt: -1 },
+      oldest: { effectiveAt: 1 },
+      amount_desc: { amount: -1, effectiveAt: -1 },
+      amount_asc: { amount: 1, effectiveAt: -1 },
     };
     const transactionSort = transactionSortOptions[query?.sort || 'newest'] || transactionSortOptions.newest;
     const [transactions, total] = await Promise.all([
-      PaymentTransaction.find(filter).sort(transactionSort).skip(skip).limit(limit),
+      PaymentTransaction.aggregate([
+        { $match: filter },
+        { $addFields: { effectiveAt: { $ifNull: ['$paidAt', '$createdAt'] } } },
+        { $sort: transactionSort },
+        { $skip: skip },
+        { $limit: limit },
+        { $project: { effectiveAt: 0 } },
+      ]),
       PaymentTransaction.countDocuments(filter),
     ]);
     return { transactions, total, page, limit, filter };
@@ -1082,7 +1101,8 @@ class PaymentService {
           return acc;
         }
         const paidAt = transaction.paidAt || transaction.createdAt;
-        const month = `${paidAt.getFullYear()}-${String(paidAt.getMonth() + 1).padStart(2, '0')}`;
+        const date = paidAt.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+        const month = date.slice(0, 7);
         const splitTotals = this.calculateTransactionSplitTotals(transaction);
 
         const isSubscription = transaction.productType === 'SUBSCRIPTION';
@@ -1119,6 +1139,22 @@ class PaymentService {
             transactions: 1,
             courseRevenue: isSubscription ? 0 : transaction.amount,
             subscriptionRevenue: isSubscription ? transaction.amount : 0,
+          });
+        }
+
+        const dayBucket = acc.dailyData.find((entry: any) => entry.date === date);
+        if (dayBucket) {
+          dayBucket.revenue += transaction.amount;
+          dayBucket.adminRevenue += splitTotals.adminAmount;
+          dayBucket.instructorRevenue += splitTotals.instructorAmount;
+          dayBucket.transactions += 1;
+        } else {
+          acc.dailyData.push({
+            date,
+            revenue: transaction.amount,
+            adminRevenue: splitTotals.adminAmount,
+            instructorRevenue: splitTotals.instructorAmount,
+            transactions: 1,
           });
         }
 
@@ -1160,6 +1196,7 @@ class PaymentService {
     );
 
     summary.monthlyData.sort((a: any, b: any) => a.month.localeCompare(b.month));
+    summary.dailyData.sort((a: any, b: any) => a.date.localeCompare(b.date));
 
     const [splitConfig, activeSubscriptions] = await Promise.all([
       this.ensureFinanceSplitConfig(productType),
@@ -1497,9 +1534,6 @@ class PaymentService {
 }
 
 export default new PaymentService();
-
-
-
 
 
 
