@@ -1,8 +1,19 @@
-// Flow upload video:
-// 1. initiateUpload: validate sớm, tạo VideoAsset + multipart session.
-// 2. getBatchPartPresignedUrls: cấp URL để FE PUT từng chunk lên storage.
-// 3. confirmUpload: complete multipart, chuyển sang background processing.
-// 4. processVideoInBackground: validate file thật, convert HLS multi-quality, upload segments, publish event.
+// LUỒNG VIDEO ĐƯỢC TÁCH THÀNH HAI GIAI ĐOẠN:
+//
+// GIAI ĐOẠN 1 - NHẬN TỆP GỐC:
+// - initiateUpload (POST /api/media/videos/initiate-upload) kiểm tra metadata, tạo VideoAsset
+//   và khởi tạo Multipart Upload trên Cloudflare R2.
+// - getBatchPartPresignedUrls (GET .../batch-part-urls) cấp URL có chữ ký để trình duyệt
+//   PUT từng part trực tiếp lên R2; Media Service không nhận byte của file video.
+// - confirmUpload (POST .../confirm-upload) nhận PartNumber/ETag, yêu cầu R2 ghép các part,
+//   kiểm tra object gốc tồn tại rồi lưu trạng thái QUEUED trong Media DB.
+//
+// GIAI ĐOẠN 2 - XỬ LÝ NỀN:
+// - Worker nội bộ Media Service lấy job QUEUED từ MongoDB, không lấy job mã hóa từ RabbitMQ.
+// - Worker tải object gốc từ R2, dùng FFprobe xác minh file, FFmpeg tạo HLS đa chất lượng
+//   mã hóa AES-128, rồi tải master/playlist/segment lên lại R2.
+// - Khi hoàn tất, VideoAsset thành READY hoặc FAILED và RabbitMQ chỉ phát sự kiện kết quả
+//   để Course Service đồng bộ trạng thái Lesson.
 import fs from 'fs';
 import path from 'path';
 import { processVideoToHLS, probeVideoMetadata, type ProbedVideoMetadata } from './videoProcessor';
@@ -62,6 +73,11 @@ class VideoAssetService {
     return PLAYBACK_SEGMENT_URL_TTL_SECONDS;
   }
 
+  /**
+   * Kiểm tra metadata ban đầu, tạo VideoAsset và khởi tạo Multipart Upload trên R2.
+   * Hàm chỉ chuẩn bị phiên tải; nội dung video chưa được gửi qua Media Service ở bước này.
+   * @returns Mã asset, Object Key và Multipart Upload ID để tiếp tục tải từng part.
+   */
   public async initiateUpload(data: {
     ownerUserId: string;
     courseId: string;
@@ -123,6 +139,11 @@ class VideoAssetService {
     };
   }
 
+  /**
+   * Cấp một Presigned URL cho mỗi PartNumber để trình duyệt PUT trực tiếp các part lên R2.
+   * @param videoAssetId Asset sở hữu multipart session.
+   * @param totalParts Tổng số part mà Frontend đã tính từ kích thước tệp.
+   */
   public async getBatchPartPresignedUrls(videoAssetId: string, totalParts: number): Promise<string[]> {
     const asset = await VideoAsset.findById(videoAssetId);
     if (!asset) throw new Error(`Video asset không tồn tại khi lấy batch part-urls: ${videoAssetId}.`);
@@ -137,6 +158,11 @@ class VideoAssetService {
     );
   }
 
+  /**
+   * Hoàn tất giai đoạn tải tệp gốc: sắp xếp PartNumber, ghép các part trên R2,
+   * xác minh object tồn tại và chuyển VideoAsset sang QUEUED cho worker xử lý nền.
+   * Hàm có tính idempotent đối với asset đã QUEUED, PROCESSING hoặc READY.
+   */
   public async confirmUpload(
     videoAssetId: string,
     parts: { ETag: string; PartNumber: number }[],
@@ -157,9 +183,11 @@ class VideoAssetService {
       throw new Error('Upload session không hợp lệ.');
     }
 
+    // PartNumber xác định thứ tự ghép; ETag chứng minh R2 đã nhận đúng part tương ứng.
     const completedParts = [...parts].sort((a, b) => a.PartNumber - b.PartNumber);
     await s3Service.completeMultipartUpload(asset.rawObjectKey, asset.multipartUploadId, completedParts);
 
+    // Chỉ đưa job sang giai đoạn xử lý nền sau khi object video gốc thực sự tồn tại trên R2.
     const exists = await s3Service.objectExists(asset.rawObjectKey);
     if (!exists) throw new Error('File không tìm thấy trên storage sau khi complete.');
 
@@ -308,9 +336,15 @@ class VideoAssetService {
     console.log(`[VideoAssetService] Đã xoá video asset ${videoAssetId}`);
   }
 
+  /**
+   * Khởi động worker xử lý nền nằm trong Media Service.
+   * Hàm phục hồi job bị gián đoạn, tạo bộ hẹn giờ quét MongoDB và xử lý ngay job đang chờ.
+   */
   public async startProcessingWorker(): Promise<void> {
     this.processingWorkerStopping = false;
 
+    // Hàng đợi xử lý được lưu bền bằng status của VideoAsset trong MongoDB.
+    // Vì vậy Pod khởi động lại có thể đưa các job PROCESSING bị gián đoạn trở về QUEUED.
     // Với Deployment Recreate và 1 replica, job PROCESSING còn sót lại
     // là job bị gián đoạn khi pod cũ dừng, nên có thể đưa về queue.
     const recovery = await VideoAsset.updateMany(
@@ -338,6 +372,7 @@ class VideoAssetService {
     await this.pumpProcessingQueue();
   }
 
+  /** Dừng nhận job mới và hủy bộ hẹn giờ quét hàng đợi khi service chuẩn bị tắt. */
   public stopProcessingWorker(): void {
     this.processingWorkerStopping = true;
     if (this.processingWorkerTimer) {
@@ -346,12 +381,17 @@ class VideoAssetService {
     }
   }
 
+  /**
+   * Lấy nguyên tử các VideoAsset QUEUED cũ nhất cho tới giới hạn encode concurrency.
+   * Mỗi slot hoàn tất sẽ gọi lại hàm để nhận job kế tiếp.
+   */
   private async pumpProcessingQueue(): Promise<void> {
     if (this.processingWorkerStopping || this.isClaimingJobs) return;
     this.isClaimingJobs = true;
 
     try {
       while (!this.processingWorkerStopping && this.activeProcessingJobs < VIDEO_ENCODE_CONCURRENCY) {
+        // Claim nguyên tử job QUEUED cũ nhất và đổi ngay sang PROCESSING để tránh nhận trùng job.
         const asset = await VideoAsset.findOneAndUpdate(
           { status: VideoAssetStatus.QUEUED },
           {
@@ -382,6 +422,11 @@ class VideoAssetService {
     }
   }
 
+  /**
+   * Xử lý một job đã được claim: tải video gốc, xác minh bằng FFprobe, tạo HLS bằng FFmpeg,
+   * tải artifact lên R2, cập nhật READY/FAILED và phát kết quả qua RabbitMQ.
+   * @param videoAssetId Mã asset đang ở trạng thái PROCESSING.
+   */
   private async processClaimedVideo(videoAssetId: string): Promise<void> {
     const asset = await VideoAsset.findById(videoAssetId);
     if (!asset) return;
@@ -399,6 +444,7 @@ class VideoAssetService {
         throw new Error('Không tìm thấy file video để xử lý.');
       }
       const rawFilePath = path.join(assetDir, 'raw_input');
+      // Worker tải video gốc từ R2 về thư mục tạm cục bộ vì FFprobe/FFmpeg xử lý theo đường dẫn file.
       console.log(`[VideoAssetService] Downloading raw video từ storage: ${asset.rawObjectKey}`);
       await s3Service.downloadFile(asset.rawObjectKey, rawFilePath);
 
@@ -422,6 +468,7 @@ class VideoAssetService {
 
       let probeResult: ProbedVideoMetadata;
       try {
+        // FFprobe kiểm tra dữ liệu thật của file thay vì chỉ tin fileName, MIME type do Frontend khai báo.
         probeResult = await probeVideoMetadata(rawFilePath);
         if (!probeResult.video) {
           throw new Error('Không tìm thấy video stream trong file.');
@@ -448,6 +495,7 @@ class VideoAssetService {
         );
       };
 
+      // FFmpeg tạo các rendition phù hợp nguồn, segment khoảng 6 giây, playlist HLS và AES-128 key.
       const {
         encryptionKeyHex,
         durationSec,
@@ -476,6 +524,7 @@ class VideoAssetService {
       };
 
       const files = listFilesRecursive(outputDir);
+      // Đưa các artifact HLS lên R2 theo từng nhóm để giới hạn số request tải lên đồng thời.
       console.log(`[VideoAssetService] Uploading ${files.length} HLS artifacts (concurrency=${HLS_UPLOAD_CONCURRENCY})...`);
 
       const uploadArtifact = async (filePath: string) => {
@@ -507,6 +556,7 @@ class VideoAssetService {
       }));
       await asset.save();
 
+      // Khi HLS đã sẵn sàng, object video gốc không còn cần thiết và được xóa để tiết kiệm lưu trữ.
       await s3Service.deleteFile(asset.rawObjectKey!).catch((cleanupError) => {
         console.error(`[VideoAssetService] Không thể xóa raw video ${asset.rawObjectKey}:`, cleanupError);
       });
@@ -517,6 +567,7 @@ class VideoAssetService {
 
       console.log(`[VideoAssetService] Video ${videoAssetId} READY`);
 
+      // RabbitMQ thông báo kết quả để Course Service cập nhật Lesson; không dùng để vận chuyển video.
       await publishVideoReady({
         videoAssetId: asset._id.toString(),
         lessonId: asset.lessonId,
@@ -540,6 +591,7 @@ class VideoAssetService {
 
       console.error(`[VideoAssetService] Video ${videoAssetId} FAILED:`, error.message);
 
+      // Nhánh lỗi cũng phát sự kiện để Course Service và Frontend hiển thị trạng thái FAILED.
       await publishVideoFailed({
         videoAssetId: asset._id.toString(),
         lessonId: asset.lessonId,
