@@ -50,7 +50,10 @@ const presignClient = new S3Client({
 });
 
 class S3Service {
-  /** Upload file vật lý từ disk lên storage. */
+  /**
+   * Tải một file cục bộ lên Cloudflare R2 bằng PutObject.
+   * Được dùng để đưa playlist và segment HLS sau xử lý lên kho lưu trữ.
+   */
   public async uploadFile(
     filePath: string,
     objectKey: string,
@@ -66,13 +69,16 @@ class S3Service {
     await s3Client.send(command);
   }
 
-  /** Xóa 1 file. */
+  /** Xóa một object theo Object Key, ví dụ video gốc sau khi HLS đã tạo thành công. */
   public async deleteFile(objectKey: string): Promise<void> {
     const command = new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: objectKey });
     await s3Client.send(command);
   }
 
-  /** Xoá toàn bộ file có chung prefix (tương đương xoá folder). */
+  /**
+   * Liệt kê và xóa theo từng trang tất cả object có chung prefix.
+   * R2 là object storage không có thư mục thật; prefix đóng vai trò như đường dẫn thư mục.
+   */
   public async deleteFolder(prefix: string): Promise<void> {
     let continuationToken: string | undefined;
 
@@ -100,7 +106,10 @@ class S3Service {
     } while (continuationToken);
   }
 
-  /** Sinh URL public để truy cập file. */
+  /**
+   * Ghép URL truy cập trực tiếp từ domain/endpoint đã cấu hình và Object Key.
+   * Hàm không ký URL và chỉ phù hợp với tài nguyên được phép truy cập công khai.
+   */
   public getFileUrl(objectKey: string): string {
     if (process.env.S3_PUBLIC_DOMAIN) {
       return `${process.env.S3_PUBLIC_DOMAIN}/${objectKey}`;
@@ -116,7 +125,10 @@ class S3Service {
 
   // ===== Multipart Upload =====
 
-  /** Tạo multipart upload session. Trả về UploadId. */
+  /**
+   * Khởi tạo Multipart Upload cho một object video gốc trên R2.
+   * @returns UploadId liên kết tất cả part và bước complete/abort của cùng phiên tải.
+   */
   public async createMultipartUpload(objectKey: string, mimeType: string): Promise<string> {
     const result = await s3Client.send(
       new CreateMultipartUploadCommand({ Bucket: BUCKET_NAME, Key: objectKey, ContentType: mimeType }),
@@ -126,9 +138,12 @@ class S3Service {
   }
 
   /**
-   * Sinh presigned URL để browser PUT 1 part trực tiếp lên storage.
-   * Dùng presignClient (S3_PUBLIC_ENDPOINT) để chữ ký khớp với host mà browser gửi request.
+   * Sinh Presigned URL để trình duyệt PUT một part trực tiếp lên R2 mà không lộ Secret Key.
+   * URL được ràng buộc với Bucket, Object Key, UploadId, PartNumber và thời hạn sử dụng.
    *
+   * @param objectKey Định danh object video gốc trên R2.
+   * @param uploadId Mã Multipart Upload đã tạo trước đó.
+   * @param partNumber Thứ tự part, bắt đầu từ 1.
    * @param expiresIn Thời gian URL có hiệu lực (giây).
    * Mặc định 3600 giây = 1 giờ, đủ cho đa số lượt upload video theo từng part.
    */
@@ -171,24 +186,33 @@ class S3Service {
     return url;
   }
 
+  /**
+   * Sinh URL GET có chữ ký và thời hạn để tải một object mà không công khai bucket.
+   * @param expiresIn Thời gian URL còn hiệu lực, mặc định một giờ.
+   */
   public async getDownloadPresignedUrl(objectKey: string, expiresIn: number = 3600): Promise<string> {
     const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: objectKey });
     return getSignedUrl(presignClient, command, { expiresIn });
   }
 
+  /** Đọc toàn bộ nội dung object dạng văn bản UTF-8, thường dùng cho playlist HLS. */
   public async getObjectText(objectKey: string): Promise<string> {
     const response = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: objectKey }));
     if (!response.Body) throw new Error(`Không thể đọc object: ${objectKey}`);
     return response.Body.transformToString('utf-8');
   }
 
+  /** Trả stream của object để Backend truyền dữ liệu mà không cần giữ toàn bộ file trong RAM. */
   public async getObjectStream(objectKey: string): Promise<Readable> {
     const response = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: objectKey }));
     if (!response.Body) throw new Error(`Không thể đọc object: ${objectKey}`);
     return response.Body as Readable;
   }
 
-  /** Hoàn tất multipart upload sau khi tất cả parts đã PUT xong. */
+  /**
+   * Yêu cầu R2 ghép các part đã tải thành object hoàn chỉnh.
+   * Danh sách PartNumber/ETag phải đúng với kết quả R2 trả về cho từng request PUT.
+   */
   public async completeMultipartUpload(
     objectKey: string,
     uploadId: string,
@@ -204,14 +228,14 @@ class S3Service {
     );
   }
 
-  /** Hủy multipart session khi user cancel. */
+  /** Hủy Multipart Upload chưa hoàn tất để giải phóng các part tạm khi người dùng hủy hoặc có lỗi. */
   public async abortMultipartUpload(objectKey: string, uploadId: string): Promise<void> {
     await s3Client.send(
       new AbortMultipartUploadCommand({ Bucket: BUCKET_NAME, Key: objectKey, UploadId: uploadId }),
     );
   }
 
-  /** Kiểm tra object có tồn tại trên storage không. */
+  /** Kiểm tra object có tồn tại bằng HeadObject mà không tải nội dung của object. */
   public async objectExists(objectKey: string): Promise<boolean> {
     try {
       await s3Client.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: objectKey }));
@@ -222,8 +246,10 @@ class S3Service {
   }
 
   /**
-   * Download object từ storage về file local.
-   * Dùng trong processVideoInBackground để lấy raw video về trước khi FFmpeg xử lý.
+   * Tải object từ R2 về file cục bộ bằng stream pipeline.
+   * Worker dùng hàm này để lấy video gốc về trước khi FFprobe và FFmpeg xử lý.
+   * @param objectKey Định danh video gốc trên R2.
+   * @param destPath Đường dẫn file tạm sẽ được ghi trên máy xử lý.
    */
   public async downloadFile(objectKey: string, destPath: string): Promise<void> {
     const response = await s3Client.send(

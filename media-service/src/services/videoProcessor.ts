@@ -51,19 +51,28 @@ const QUALITY_PRESETS = [360, 720, 1080] as const;
 const QUALITY_CODECS = 'avc1.42e028,mp4a.40.2';
 const TARGET_FPS = 30;
 
+/** Làm tròn kích thước khung hình về số chẵn vì bộ mã hóa H.264/yuv420p yêu cầu chiều chẵn. */
 const normalizeEven = (value: number) => {
   const rounded = Math.max(2, Math.round(value));
   return rounded % 2 === 0 ? rounded : rounded - 1;
 };
 
+/** Chuẩn hóa nhãn chất lượng thành tên thư mục an toàn, ví dụ "720P" thành "720p". */
 const sanitizeQualityLabel = (quality: string) => quality.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
+/** Ước lượng bandwidth ghi trong master.m3u8 để trình phát lựa chọn rendition phù hợp. */
 const estimateBandwidth = (height: number) => {
   const preset = DEFAULT_RENDITION_BANDWIDTHS[height];
   if (preset) return preset;
   return Math.max(500_000, Math.round((height / 360) * DEFAULT_RENDITION_BANDWIDTHS[360]));
 };
 
+/**
+ * Tạo danh sách chất lượng không vượt quá độ phân giải video nguồn.
+ * Ví dụ nguồn 1080p tạo 360p/720p/1080p; nguồn thấp hơn 720p giữ thêm độ cao gốc.
+ * @param sourceHeight Chiều cao video nguồn đọc từ FFprobe.
+ * @returns Danh sách nhãn chất lượng tăng dần và không trùng lặp.
+ */
 export const buildQualityLadder = (sourceHeight: number): string[] => {
   const normalizedSourceHeight = Math.max(1, Math.round(sourceHeight));
   const qualities = QUALITY_PRESETS.filter((height) => height <= normalizedSourceHeight).map((height) => `${height}p`);
@@ -73,10 +82,15 @@ export const buildQualityLadder = (sourceHeight: number): string[] => {
     if (!qualities.includes(exactSourceLabel)) qualities.push(exactSourceLabel);
   }
 
+  // Bảo đảm danh sách chất lượng không rỗng, loại bỏ phần tử trùng và sắp xếp chất lượng từ thấp đến cao
   if (qualities.length === 0) qualities.push(`${normalizedSourceHeight}p`);
   return Array.from(new Set(qualities)).sort((left, right) => Number.parseInt(left, 10) - Number.parseInt(right, 10));
 };
 
+/**
+ * Chuyển quality ladder thành cấu hình encode cho từng rendition, gồm kích thước,
+ * bandwidth, đường dẫn playlist và thư mục đầu ra, đồng thời giữ đúng tỷ lệ khung hình.
+ */
 const buildRenditions = (sourceWidth: number, sourceHeight: number): ProcessedRendition[] => {
   const aspectRatio = sourceWidth > 0 && sourceHeight > 0 ? sourceWidth / sourceHeight : 16 / 9;
   return buildQualityLadder(sourceHeight).map((quality) => {
@@ -99,6 +113,11 @@ const buildRenditions = (sourceWidth: number, sourceHeight: number): ProcessedRe
   });
 };
 
+/**
+ * Gọi FFprobe để đọc codec video/audio, thời lượng và độ phân giải thật của tệp nguồn.
+ * Dữ liệu này dùng để phát hiện file hỏng/giả mạo và xây dựng quality ladder.
+ * @param inputPath Đường dẫn file video tạm trên máy chạy Media Service.
+ */
 export const probeVideoMetadata = (inputPath: string): Promise<ProbedVideoMetadata> =>
   new Promise((resolve, reject) => {
     ffmpeg.ffprobe(inputPath, (err: unknown, metadata: ffmpeg.FfprobeData) => {
@@ -121,6 +140,11 @@ export const probeVideoMetadata = (inputPath: string): Promise<ProbedVideoMetada
     });
   });
 
+/**
+ * Gọi FFmpeg để mã hóa một rendition sang H.264/AAC, chia segment khoảng 6 giây,
+ * mã hóa AES-128 và tạo playlist.m3u8 cùng các tệp .ts trong thư mục chất lượng.
+ * @param params Chứa file nguồn, thư mục đích, cấu hình rendition, key-info và callback tiến độ.
+ */
 const encodeRenditionToHls = async (params: {
   inputPath: string;
   outputDir: string;
@@ -153,9 +177,9 @@ const encodeRenditionToHls = async (params: {
         '-preset veryfast',
         '-crf 23',
         '-threads ' + FFMPEG_THREADS,
-        '-profile:v baseline',
-        '-level 4.0',
-        '-pix_fmt yuv420p',
+        '-profile:v baseline', // cấu hình profile baseline để đảm bảo tương thích với nhiều thiết bị
+        '-level 4.0', // đặt level 4.0 để hỗ trợ độ phân giải cao hơn
+        '-pix_fmt yuv420p', // định dạng pixel yuv420p để đảm bảo tương thích với nhiều thiết bị
         '-sc_threshold 0',
         `-r ${TARGET_FPS}`,
         `-force_key_frames expr:gte(t,n_forced*${HLS_SEGMENT_DURATION_SECONDS})`,
@@ -182,6 +206,17 @@ const encodeRenditionToHls = async (params: {
       .run();
   });
 };
+
+/**
+ * Điều phối toàn bộ quá trình chuyển một video nguồn thành gói HLS đa chất lượng.
+ * Hàm tạo khóa AES-128, lần lượt encode các rendition, tạo master.m3u8, tổng hợp metadata
+ * trả về cho VideoAssetService và luôn xóa các file key/key-info tạm sau khi xử lý.
+ * @param inputPath Đường dẫn video nguồn đã tải từ R2 về máy xử lý.
+ * @param outputDir Thư mục tạm chứa master, playlist và segment HLS.
+ * @param videoId Mã video dùng để tạo key URI và tên file khóa tạm.
+ * @param onProgress Callback ghi phần trăm xử lý tổng hợp của các rendition.
+ * @param preProbed Metadata FFprobe đã đọc trước đó để tránh probe lại.
+ */
 export const processVideoToHLS = async (
   inputPath: string,
   outputDir: string,
