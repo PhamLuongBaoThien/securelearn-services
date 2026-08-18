@@ -41,6 +41,7 @@ export const buildMomoCreatePayload = (input: {
   ipnUrl: string;
   extraData?: string;
   lang?: string;
+  orderExpireTime?: number;
 }) => {
   const config = getMomoConfig();
   const payload: Record<string, Primitive> = {
@@ -55,6 +56,7 @@ export const buildMomoCreatePayload = (input: {
     requestType: config.requestType,
     extraData: input.extraData || '',
     lang: input.lang || config.lang,
+    orderExpireTime: input.orderExpireTime || config.orderExpireTime,
   };
 
   const signatureKeys = [
@@ -81,6 +83,7 @@ export const buildMomoCreatePayload = (input: {
     requestType: String(payload.requestType),
     extraData: String(payload.extraData || ''),
     lang: String(payload.lang || config.lang),
+    orderExpireTime: Number(payload.orderExpireTime),
     signature: createMomoSignature(payload, config.secretKey, signatureKeys),
   };
 };

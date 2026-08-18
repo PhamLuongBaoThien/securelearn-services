@@ -19,6 +19,7 @@ export type MomoCreateSessionInput = {
   ipnUrl: string;
   extraData?: string;
   lang?: string;
+  orderExpireTime?: number;
 };
 
 export type MomoCreateResponse = {
@@ -93,6 +94,7 @@ export const createMomoPaymentSession = async (input: MomoCreateSessionInput): P
     ipnUrl: input.ipnUrl,
     extraData: input.extraData || '',
     lang: input.lang,
+    orderExpireTime: input.orderExpireTime || config.orderExpireTime,
   });
   const response = await postJson<MomoCreateResponse>(config.apiUrl, request);
 
