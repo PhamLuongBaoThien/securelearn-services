@@ -3,22 +3,44 @@
 // - startAttempt tạo lượt làm bài
 // - submitAttempt chấm điểm và khóa lượt làm bài
 // - logic hiện tại phù hợp nhất với kiểu 1 đáp án chọn duy nhất
+import { Types } from 'mongoose';
 import { QuizAttempt, QuizAttemptStatus } from '../models/quizAttempt.model';
 import { Quiz } from '../models/quiz.model';
 import { Course, CourseStatus } from '../models/course.model';
 import { CourseVersion } from '../models/courseVersion.model';
+import { Lesson } from '../models/lesson.model';
+import { resolveLessonIdentityId } from '../utils/lessonIdentity.utils';
 
 class QuizAttemptService {
   public async listAttempts(courseId: string, lessonId: string, quizId: string, userId: string) {
     const context = await this.resolveCourseQuizContext(courseId);
-    const quiz = await Quiz.findOne({ _id: quizId, lessonId, courseId: context.versionId }).select('_id').lean();
-    if (!quiz) throw new Error('Quiz không tồn tại.');
+    const [quiz, currentLesson] = await Promise.all([
+      Quiz.findOne({ _id: quizId, lessonId, courseId: context.versionId }).select('_id').lean(),
+      Lesson.findOne({ _id: lessonId, courseId: context.versionId })
+        .select('_id sourceLessonId')
+        .lean(),
+    ]);
+    if (!quiz || !currentLesson) throw new Error('Quiz không tồn tại.');
+
+    // Mỗi lần tạo phiên bản khóa học, Lesson và Quiz nhận _id mới. sourceLessonId
+    // giữ định danh logic của bài học để có thể truy xuất các lượt làm ở phiên bản cũ
+    // mà không chuyển chúng sang quiz hiện tại hoặc dùng chúng để chấm điểm hiện tại.
+    const lessonIdentityId = resolveLessonIdentityId(currentLesson);
+    const courseVersionIds = await CourseVersion.find({ courseId: context.courseId }).distinct('_id');
+    const compatibleLessons = await Lesson.find({
+      courseId: { $in: courseVersionIds },
+      $or: [
+        { _id: lessonIdentityId },
+        { sourceLessonId: lessonIdentityId },
+      ],
+    })
+      .select('_id')
+      .lean();
+    const compatibleLessonIds = compatibleLessons.map((lesson) => new Types.ObjectId(lesson._id));
 
     const attempts = await QuizAttempt.find({
-      quizId,
-      lessonId,
       courseId: context.courseId,
-      courseVersionId: context.versionId,
+      lessonId: { $in: compatibleLessonIds },
       userId,
     })
       .sort({ startedAt: -1 })
@@ -41,6 +63,8 @@ class QuizAttemptService {
     };
   }
 
+  // Xác minh quiz thuộc phiên bản khóa học hiện tại và tạo một lượt làm mới
+  // ở trạng thái IN_PROGRESS trước khi người học bắt đầu trả lời câu hỏi.
   public async startAttempt(courseId: string, lessonId: string, quizId: string, userId: string) {
     const context = await this.resolveCourseQuizContext(courseId);
     const quiz = await Quiz.findOne({ _id: quizId, lessonId, courseId: context.versionId }).lean();
