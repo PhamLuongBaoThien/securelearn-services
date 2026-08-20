@@ -52,7 +52,7 @@ class ChatbotContextClient {
   searchCourses(q: string, limit = 8) {
     return withTimeout<ChatbotCourseContext[]>(`${COURSE_SERVICE_URL}/internal/chatbot/courses/search?q=${query(q)}&limit=${limit}`);
   }
-
+  // Lấy danh sách phổ biến làm dữ liệu dự phòng khi tìm kiếm không có kết quả.
   popularCourses(limit = 8) {
     return withTimeout<ChatbotCourseContext[]>(`${COURSE_SERVICE_URL}/internal/chatbot/courses/popular?limit=${limit}`);
   }
