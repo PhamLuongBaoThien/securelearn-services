@@ -5,6 +5,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 import documentAssetService from '../services/documentAsset.service';
 import s3Service from '../services/s3.service';
 
+/** Ẩn Object Key và URL nội bộ khỏi response nếu người gọi không phải chủ sở hữu hoặc quản trị viên. */
 const sanitizeDocumentAsset = (asset: Awaited<ReturnType<typeof documentAssetService.getAsset>>, requester?: { userId?: string; role?: string }) => {
   const { objectKey: _hiddenObjectKey, filePath: _hiddenFilePath, ...safeAsset } = asset;
   if (requester?.role === 'ADMIN' || asset.ownerUserId === requester?.userId) {
@@ -13,10 +14,12 @@ const sanitizeDocumentAsset = (asset: Awaited<ReturnType<typeof documentAssetSer
   return safeAsset;
 };
 
+/** Chỉ cho phép trình duyệt xem trực tiếp PDF và hình ảnh; định dạng khác phải tải xuống. */
 const isInlineViewableMimeType = (mimeType: string) =>
   mimeType === 'application/pdf' || mimeType.startsWith('image/');
 
 class DocumentAssetController {
+  /** Nhận tệp từ Multer và chuyển sang DocumentAssetService để lưu trên R2. */
   public async uploadDocument(req: AuthRequest, res: Response): Promise<void> {
     try {
       if (!req.file) {
@@ -39,6 +42,7 @@ class DocumentAssetController {
     }
   }
 
+  /** Trả metadata an toàn của tài liệu để Frontend theo dõi và hiển thị trạng thái. */
   public async getAsset(req: AuthRequest, res: Response): Promise<void> {
     try {
       const asset = await documentAssetService.getAsset(req.params.documentAssetId as string);
@@ -51,6 +55,7 @@ class DocumentAssetController {
     }
   }
 
+  /** Đọc stream PDF/hình ảnh từ R2 và chuyển tiếp với Content-Disposition=inline. */
   public async viewDocument(req: AuthRequest, res: Response): Promise<void> {
     try {
       const documentAssetId = req.params.documentAssetId as string;
@@ -75,6 +80,7 @@ class DocumentAssetController {
     }
   }
 
+  /** Đọc stream tài liệu từ R2 và chuyển tiếp dưới dạng tệp tải xuống. */
   public async downloadDocument(req: AuthRequest, res: Response): Promise<void> {
     try {
       const documentAssetId = req.params.documentAssetId as string;

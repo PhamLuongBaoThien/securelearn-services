@@ -1,5 +1,6 @@
-// [BƯỚC 2 & BƯỚC 2.2 & BƯỚC 2.4: ĐỊNH TUYẾN TÀI NGUYÊN VIDEO (VIDEO ASSET ROUTING)]
-// Phân chia các route dành riêng cho Admin/Giảng viên (Ownership) và Học viên (Entitlement).
+// Route upload video gồm: khởi tạo multipart -> cấp Presigned URL -> xác nhận hoặc hủy upload.
+// Trình duyệt PUT các part thẳng lên R2; các route này chỉ điều phối metadata và phiên tải.
+// Nhóm route phía sau phục vụ đọc trạng thái và phát video sau khi asset đã xử lý xong.
 
 import { Router } from 'express';
 import videoAssetController from '../controllers/videoAsset.controller';
@@ -7,10 +8,12 @@ import { requireVideoAssetAccess, requireVideoAssetOwner } from '../middlewares/
 
 const router = Router();
 
+// Giai đoạn 1: nhận tệp gốc bằng Multipart Upload.
 router.post('/initiate-upload', videoAssetController.initiateUpload);
 router.post('/:videoAssetId/confirm-upload', requireVideoAssetOwner, videoAssetController.confirmUpload);
 router.post('/:videoAssetId/abort-upload', requireVideoAssetOwner, videoAssetController.abortUpload);
 router.get('/:videoAssetId/batch-part-urls', requireVideoAssetOwner, videoAssetController.getBatchPartUrls);
+// Giai đoạn 2: Frontend đọc trạng thái xử lý nền; các route còn lại phục vụ phát HLS.
 router.get('/:videoAssetId', requireVideoAssetAccess, videoAssetController.getAsset);
 router.post('/:videoAssetId/playback-session', requireVideoAssetAccess, videoAssetController.createPlaybackSession);
 router.get('/:videoAssetId/manifest', requireVideoAssetAccess, videoAssetController.getRenditionManifest);

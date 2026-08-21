@@ -7,12 +7,17 @@ import videoAssetService from '../services/videoAsset.service';
 import playbackAccessService from '../services/playbackAccess.service';
 import learningLeaseService, { MediaLearningLeaseError } from '../services/learningLease.service';
 
+/** Loại encryptionKey khỏi dữ liệu VideoAsset trước khi trả metadata cho Frontend. */
 const sanitizeVideoAsset = (asset: Awaited<ReturnType<typeof videoAssetService.getAsset>>) => {
   const { encryptionKey: _hiddenKey, rawObjectKey: _hiddenRawKey, multipartUploadId: _hiddenUploadId, ...safeAsset } = asset;
   return safeAsset;
 };
 
 class VideoAssetController {
+  /**
+   * POST /api/media/videos/initiate-upload
+   * Nhận metadata tệp, lấy người sở hữu từ JWT và yêu cầu service mở Multipart Upload trên R2.
+   */
   public async initiateUpload(req: AuthRequest, res: Response): Promise<void> {
     try {
       const { courseId, lessonId, fileName, mimeType, sizeBytes } = req.body;
@@ -34,6 +39,10 @@ class VideoAssetController {
     }
   }
 
+  /**
+   * GET /api/media/videos/:videoAssetId
+   * Trả metadata và tiến độ để Frontend theo dõi video từ QUEUED/PROCESSING đến READY/FAILED.
+   */
   public async getAsset(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -227,6 +236,10 @@ class VideoAssetController {
     }
   }
 
+  /**
+   * GET /api/media/videos/:videoAssetId/batch-part-urls
+   * Kiểm tra số part và cấp Presigned URL tương ứng cho trình duyệt tải trực tiếp lên R2.
+   */
   public async getBatchPartUrls(req: AuthRequest, res: Response): Promise<void> {
     try {
       const totalParts = parseInt(req.query.totalParts as string, 10);
@@ -243,6 +256,10 @@ class VideoAssetController {
     }
   }
 
+  /**
+   * POST /api/media/videos/:videoAssetId/confirm-upload
+   * Kiểm tra danh sách PartNumber/ETag rồi hoàn tất tệp gốc và đưa video vào hàng đợi xử lý nền.
+   */
   public async confirmUpload(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -268,6 +285,10 @@ class VideoAssetController {
     }
   }
 
+  /**
+   * POST /api/media/videos/:videoAssetId/abort-upload
+   * Hủy multipart session khi người dùng hủy hoặc Frontend gặp lỗi trước bước confirm.
+   */
   public async abortUpload(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;

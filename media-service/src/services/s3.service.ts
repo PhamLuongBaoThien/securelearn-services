@@ -1,3 +1,10 @@
+/**
+ * Lớp truy cập Cloudflare R2 thông qua Amazon S3 API bằng AWS SDK.
+ *
+ * S3Client gửi các command mô tả thao tác cần thực hiện (đọc, ghi, xóa,
+ * Multipart Upload...). Dữ liệu vẫn được lưu trên Cloudflare R2; AWS SDK chỉ
+ * là thư viện giao tiếp vì R2 tương thích với Amazon S3 API.
+ */
 import {
   S3Client, // lớp chính để tương tác với S3/R2/MinIO, cung cấp phương thức send() để gửi các lệnh (command) mô tả thao tác muốn thực hiện.
   PutObjectCommand, // command để upload một file lên storage.
@@ -11,13 +18,42 @@ import {
   HeadObjectCommand, // command để kiểm tra sự tồn tại của một object trên storage, trả về metadata nếu tồn tại hoặc lỗi nếu không.
   GetObjectCommand, // command để download một file từ storage, trả về stream dữ liệu nếu thành công.
 } from '@aws-sdk/client-s3';
+// Tạo URL đã ký có thời hạn để browser thao tác trực tiếp với R2 mà không nhận Secret Key.
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import fs from 'fs';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || 'securelearn-media';
+const FILE_UPLOAD_MAX_ATTEMPTS = 3;
+const FILE_UPLOAD_RETRY_BASE_MS = 500;
 
+/** Tạm dừng giữa các lần thử lại upload để tránh gửi dồn request khi R2/mạng đang lỗi tạm thời. */
+const wait = (delayMs: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, delayMs));
+
+/**
+ * Chỉ thử lại các lỗi tạm thời do mạng, timeout, giới hạn tần suất hoặc lỗi 5xx từ storage.
+ * Những lỗi cấu hình/xác thực 4xx khác cần được trả về ngay để tránh gửi lại vô ích.
+ */
+const isRetryableUploadError = (error: any): boolean => {
+  const statusCode = Number(error?.$metadata?.httpStatusCode || 0);
+  const code = String(error?.code || error?.name || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+
+  return (
+    statusCode === 408 ||
+    statusCode === 429 ||
+    statusCode >= 500 ||
+    ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'TIMEOUTERROR'].includes(code) ||
+    message.includes('socket hang up') ||
+    message.includes('connection reset') ||
+    message.includes('network') ||
+    message.includes('timeout')
+  );
+};
+
+// Client nội bộ để Backend gửi các command trực tiếp đến endpoint S3-compatible của R2.
 export const s3Client = new S3Client({
   region: process.env.S3_REGION || 'us-east-1',
   endpoint: process.env.S3_ENDPOINT || undefined,
@@ -59,14 +95,40 @@ class S3Service {
     objectKey: string,
     mimeType: string,
   ): Promise<void> {
-    const fileStream = fs.createReadStream(filePath);
-    const command = new PutObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: objectKey,
-      Body: fileStream,
-      ContentType: mimeType,
-    });
-    await s3Client.send(command);
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= FILE_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+      // ReadStream đã đọc không thể phát lại. Mỗi lần thử phải mở stream mới từ đầu file.
+      const fileStream = fs.createReadStream(filePath);
+
+      try {
+        const command = new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: objectKey,
+          Body: fileStream,
+          ContentType: mimeType,
+        });
+        await s3Client.send(command);
+        return;
+      } catch (error) {
+        lastError = error;
+        fileStream.destroy();
+
+        if (attempt >= FILE_UPLOAD_MAX_ATTEMPTS || !isRetryableUploadError(error)) {
+          throw error;
+        }
+
+        const delayMs = FILE_UPLOAD_RETRY_BASE_MS * (2 ** (attempt - 1));
+        console.warn(
+          `[S3Service] Upload ${objectKey} lỗi tạm thời; thử lại ` +
+          `${attempt + 1}/${FILE_UPLOAD_MAX_ATTEMPTS} sau ${delayMs}ms: ` +
+          `${(error as Error)?.message || error}`,
+        );
+        await wait(delayMs);
+      }
+    }
+
+    throw lastError;
   }
 
   /** Xóa một object theo Object Key, ví dụ video gốc sau khi HLS đã tạo thành công. */

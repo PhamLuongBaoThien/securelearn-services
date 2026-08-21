@@ -39,7 +39,7 @@ export type ProcessedHlsOutput = {
   sourceHeight: number;
 };
 
-const HLS_SEGMENT_DURATION_SECONDS = 6;
+const HLS_SEGMENT_DURATION_SECONDS = 10;
 const MASTER_MANIFEST_FILE_NAME = 'master.m3u8';
 const DEFAULT_RENDITION_BANDWIDTHS: Record<number, number> = {
   360: 800_000,
@@ -141,7 +141,7 @@ export const probeVideoMetadata = (inputPath: string): Promise<ProbedVideoMetada
   });
 
 /**
- * Gọi FFmpeg để mã hóa một rendition sang H.264/AAC, chia segment khoảng 6 giây,
+ * Gọi FFmpeg để mã hóa một rendition sang H.264/AAC, chia segment khoảng 10 giây,
  * mã hóa AES-128 và tạo playlist.m3u8 cùng các tệp .ts trong thư mục chất lượng.
  * @param params Chứa file nguồn, thư mục đích, cấu hình rendition, key-info và callback tiến độ.
  */

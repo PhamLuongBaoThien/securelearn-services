@@ -184,7 +184,10 @@ class LessonService {
     await Lesson.bulkWrite(finalOps);
   }
 
-  // Video được bind trước, nhưng chỉ READY sau khi media-service xử lý xong và bắn event về.
+  /**
+   * Xác minh quyền sở hữu khóa học và VideoAsset qua gRPC, chuyển bài học sang VIDEO/PROCESSING,
+   * rồi phát VIDEO_ASSET_ATTACHED. Bài học chỉ READY sau sự kiện xử lý thành công từ Media Service.
+   */
   public async bindVideoAsset(
     courseId: string,
     lessonId: string,
@@ -220,6 +223,7 @@ class LessonService {
     return lesson;
   }
 
+  /** Gỡ tham chiếu video khỏi lesson và dọn asset cũ nếu không còn khóa học/bản nháp nào sử dụng. */
   public async unbindVideoAsset(courseId: string, lessonId: string, instructorId: string) {
     await this.assertCourseOwnership(courseId, instructorId);
     const lesson = await Lesson.findOne({ _id: lessonId, courseId });
@@ -314,7 +318,10 @@ class LessonService {
     return lesson;
   }
 
-  // Hàm này là điểm nối từ RabbitMQ event video về lại lesson state của course-service.
+  /**
+   * Nhận kết quả PROCESSING/READY/FAILED từ RabbitMQ và đồng bộ trạng thái, thời lượng vào Lesson.
+   * Chỉ cập nhật khi videoAssetId trong sự kiện vẫn là asset hiện tại để tránh event cũ ghi đè video mới.
+   */
   public async updateVideoLessonState(data: {
     lessonId: string;
     videoAssetId: string;

@@ -9,6 +9,7 @@ import s3Service from './s3.service';
 const ORPHAN_TTL_MS = Number(process.env.MEDIA_ORPHAN_TTL_MS || 30 * 60 * 1000);
 const MAX_SAFE_FILE_NAME_LENGTH = 180;
 
+/** Loại bỏ ký tự đường dẫn/điều khiển trước khi đưa tên tệp vào Object Key trên R2. */
 const sanitizeFileName = (fileName: string): string => {
   const safeName = fileName
     .replace(/[\\/]/g, '_')
@@ -19,10 +20,11 @@ const sanitizeFileName = (fileName: string): string => {
 };
 
 class DocumentAssetService {
-  // Flow document upload:
-  // 1. Multer nhận file tạm ở tmp-media/incoming.
-  // 2. Service sanitize tên file, upload lên storage.
-  // 3. Xóa file tạm local và tạo asset READY.
+  /**
+   * Tải tài liệu lên R2 theo flow một bước:
+   * Multer lưu tệp tạm, service chuẩn hóa tên và PutObject lên R2, xóa tệp tạm,
+   * sau đó tạo DocumentAsset ở trạng thái READY.
+   */
   public async uploadDocument(
     data: { ownerUserId: string; courseId: string; lessonId: string },
     file: Express.Multer.File
@@ -62,12 +64,14 @@ class DocumentAssetService {
     return asset;
   }
 
+  /** Đọc đầy đủ metadata và trạng thái của DocumentAsset từ MongoDB. */
   public async getAsset(documentAssetId: string) {
     const asset = await DocumentAsset.findById(documentAssetId).lean();
     if (!asset) throw new Error('Document asset không tồn tại.');
     return asset;
   }
 
+  /** Trả metadata tối thiểu để Course Service xác minh tài liệu trước khi gắn vào bài học. */
   public async getBindingSnapshot(documentAssetId: string) {
     const asset = await DocumentAsset.findById(documentAssetId)
       .select('_id ownerUserId courseId lessonId status isAttached')
@@ -83,6 +87,7 @@ class DocumentAssetService {
     };
   }
 
+  /** Đánh dấu tài liệu đã được gắn vào bài học để job dọn dữ liệu không xóa nhầm. */
   public async markAssetAttached(documentAssetId: string): Promise<void> {
     await DocumentAsset.updateOne(
       { _id: documentAssetId },
@@ -95,7 +100,7 @@ class DocumentAssetService {
   }
 
   /**
-   * Xoá document asset hoàn toàn: file trên S3 + record trong DB.
+   * Xóa document asset hoàn toàn: object trên R2 và bản ghi trong MongoDB.
    * Gọi từ RabbitMQ cleanup event khi course-service gỡ attachment khỏi lesson.
    */
   public async deleteAsset(documentAssetId: string): Promise<void> {
@@ -103,7 +108,7 @@ class DocumentAssetService {
     if (!asset) return; // idempotent — đã xoá rồi thì bỏ qua
 
     try {
-      // Xoá file trên S3
+      // Xóa object trên R2 thông qua Amazon S3 API.
       if (asset.objectKey) {
         await s3Service.deleteFile(asset.objectKey).catch(() => {});
       }
@@ -116,12 +121,14 @@ class DocumentAssetService {
     console.log(`[DocumentAssetService] Đã xoá document asset ${documentAssetId}`);
   }
 
+  /** Khởi động lịch dọn các tài liệu tải lên nhưng không được gắn vào bài học sau thời gian TTL. */
   public startOrphanCleanupJob(): void {
     setInterval(() => {
       void this.cleanupOrphanedAssets();
     }, ORPHAN_TTL_MS);
   }
 
+  /** Tìm DocumentAsset quá hạn còn isAttached=false và xóa dữ liệu trên R2/MongoDB. */
   private async cleanupOrphanedAssets(): Promise<void> {
     const cutoff = new Date(Date.now() - ORPHAN_TTL_MS);
     const staleAssets = await DocumentAsset.find({

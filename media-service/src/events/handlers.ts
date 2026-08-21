@@ -40,7 +40,7 @@ export const registerEventHandlers = async (): Promise<void> => {
     }
   );
 
-  // ===== 3. Đánh dấu video asset đã được attach vào lesson =====
+  // ===== 3. Nhận xác nhận bind từ Course Service để asset không bị cleanup như tài nguyên mồ côi =====
   await subscribeMessage<AssetAttachedPayload>(
     Exchange.COURSE,
     RoutingKey.VIDEO_ASSET_ATTACHED,
@@ -65,4 +65,3 @@ export const registerEventHandlers = async (): Promise<void> => {
 
   console.log('[MediaEvent] Đã đăng ký lắng nghe tất cả events.');
 };
-

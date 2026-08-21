@@ -25,7 +25,11 @@ import playbackAccessService from './playbackAccess.service';
 const MEDIA_ROOT = path.resolve(process.cwd(), 'tmp-media');
 const ORPHAN_TTL_MS = Number(process.env.MEDIA_ORPHAN_TTL_MS || 30 * 60 * 1000);
 const PROCESSING_TIMEOUT_MS = Number(process.env.MEDIA_PROCESSING_TIMEOUT_MS || 45 * 60 * 1000);
-const HLS_UPLOAD_CONCURRENCY = Number(process.env.HLS_UPLOAD_CONCURRENCY || 10);
+// Giới hạn số PutObject đồng thời để tránh làm nghẽn kết nối tới R2 khi tải nhiều segment HLS.
+const HLS_UPLOAD_CONCURRENCY = Math.max(
+  1,
+  Math.min(10, Number.parseInt(process.env.HLS_UPLOAD_CONCURRENCY || '5', 10) || 5),
+);
 const PLAYBACK_SEGMENT_URL_TTL_SECONDS = Number(process.env.PLAYBACK_SEGMENT_URL_TTL_SECONDS || 3600);
 const VIDEO_ENCODE_CONCURRENCY = Math.max(
   1,
@@ -37,7 +41,9 @@ const VIDEO_QUEUE_POLL_INTERVAL_MS = Math.max(
 );
 
 const MAX_CONCURRENT_UPLOADS = 3;
-const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024;
+// Giới hạn mỗi video ở mức 2 GiB để phù hợp tài nguyên xử lý của môi trường hiện tại.
+// Giá trị này được kiểm tra khi khởi tạo upload và kiểm tra lại trên file thực tế trước khi xử lý.
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
 const ALLOWED_VIDEO_MIME_TYPES = new Set([
   'video/mp4',
   'video/quicktime',
@@ -49,9 +55,11 @@ const ALLOWED_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm']);
 const MAX_SAFE_FILE_NAME_LENGTH = 180;
 const PRESIGN_FIXED_EXPIRY = 6 * 3600;
 
+/** Lấy phần mở rộng để kiểm tra đồng thời MIME type và tên tệp ngay khi khởi tạo upload. */
 const getVideoExtension = (fileName: string): string =>
   fileName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
 
+/** Loại bỏ ký tự điều khiển/đường dẫn khỏi tên tệp trước khi ghép vào Object Key trên R2. */
 const sanitizeFileName = (fileName: string): string => {
   const safeName = fileName
     .replace(/[\\/]/g, '_')
@@ -61,6 +69,7 @@ const sanitizeFileName = (fileName: string): string => {
   return safeName.slice(0, MAX_SAFE_FILE_NAME_LENGTH);
 };
 
+/** Chuẩn hóa đường dẫn Windows thành Object Key dùng dấu gạch chéo của R2. */
 const toPosixPath = (value: string) => value.replace(/\\/g, '/');
 
 class VideoAssetService {
@@ -69,6 +78,7 @@ class VideoAssetService {
   private processingWorkerTimer: NodeJS.Timeout | null = null;
   private processingWorkerStopping = false;
 
+  /** Công khai TTL của URL phân đoạn để controller trả đúng thời hạn cho Frontend. */
   public get playbackSegmentUrlTtlSeconds(): number {
     return PLAYBACK_SEGMENT_URL_TTL_SECONDS;
   }
@@ -201,6 +211,7 @@ class VideoAssetService {
     return asset;
   }
 
+  /** Hủy multipart session trên R2 và xóa VideoAsset khi giai đoạn tải tệp gốc chưa hoàn tất. */
   public async abortUpload(videoAssetId: string): Promise<void> {
     const asset = await VideoAsset.findById(videoAssetId);
     if (!asset) return;
@@ -211,12 +222,17 @@ class VideoAssetService {
     console.log(`[VideoAssetService] Đã hủy upload session ${videoAssetId}`);
   }
 
+  /** Đọc metadata/trạng thái để Frontend theo dõi tiến độ xử lý nền. */
   public async getAsset(videoAssetId: string) {
     const asset = await VideoAsset.findById(videoAssetId).lean();
     if (!asset) throw new Error(`Video asset không tồn tại khi đọc trạng thái: ${videoAssetId}.`);
     return asset;
   }
 
+  /**
+   * Đọc master playlist từ R2 và thay đường dẫn rendition bằng API được bảo vệ
+   * của Media Service để người xem không nhận trực tiếp Object Key nội bộ.
+   */
   public async getPlaybackManifest(videoAssetId: string, keyUri?: string, sessionToken?: string) {
     const asset = await VideoAsset.findById(videoAssetId).lean();
     if (!asset?.manifestKey || asset.status !== 'READY') {
@@ -242,6 +258,10 @@ class VideoAssetService {
       .join('\n');
   }
 
+  /**
+   * Tìm playlist của mức chất lượng được yêu cầu rồi viết lại khóa giải mã và
+   * các đường dẫn segment thành endpoint có kiểm tra phiên phát.
+   */
   public async getRenditionManifest(videoAssetId: string, quality: string, keyUri: string, sessionToken: string) {
     const asset = await VideoAsset.findById(videoAssetId).lean();
     if (!asset?.manifestKey || asset.status !== 'READY') {
@@ -256,6 +276,10 @@ class VideoAssetService {
     return this.rewriteLeafManifest(rendition.manifestKey, keyUri, videoAssetId, sessionToken);
   }
 
+  /**
+   * Đọc leaf playlist từ R2, thay URI khóa AES-128 và tạo Segment Ticket cho
+   * từng phân đoạn trước khi trả playlist cho hls.js.
+   */
   private async rewriteLeafManifest(manifestKey: string, keyUri: string | undefined, videoAssetId: string, sessionToken: string) {
     const manifest = await s3Service.getObjectText(manifestKey);
     const baseKey = manifestKey.slice(0, manifestKey.lastIndexOf('/') + 1);
@@ -272,6 +296,10 @@ class VideoAssetService {
     }).join('\n');
   }
 
+  /**
+   * Xác minh Segment Ticket và Object Key, sau đó tạo Presigned GET URL 15 giây
+   * để trình duyệt tải đúng phân đoạn từ R2.
+   */
   public async getSegmentRedirectUrl(videoAssetId: string, ticket: string): Promise<string> {
     const objectKey = playbackAccessService.verifySegmentTicket(ticket, videoAssetId);
     if (!objectKey) throw new Error('Segment ticket không hợp lệ hoặc đã hết hạn.');
@@ -281,6 +309,7 @@ class VideoAssetService {
     if (!objectKey.startsWith(allowedPrefix) || objectKey.includes('..')) throw new Error('Đường dẫn segment không hợp lệ.');
     return s3Service.getDownloadPresignedUrl(objectKey, 15);
   }
+  /** Trả thông tin tối thiểu để Course Service xác minh asset trước khi gắn vào bài học qua gRPC. */
   public async getBindingSnapshot(videoAssetId: string) {
     const asset = await VideoAsset.findById(videoAssetId)
       .select('_id ownerUserId courseId lessonId status isAttached')
@@ -296,6 +325,7 @@ class VideoAssetService {
     };
   }
 
+  /** Đánh dấu asset đã được Course Service gắn vào lesson sau sự kiện VIDEO_ASSET_ATTACHED. */
   public async markAssetAttached(videoAssetId: string): Promise<void> {
     await VideoAsset.updateOne(
       { _id: videoAssetId },
@@ -307,6 +337,7 @@ class VideoAssetService {
     );
   }
 
+  /** Xóa multipart còn dang dở, video gốc và toàn bộ HLS của asset khi không còn được tham chiếu. */
   public async deleteAsset(videoAssetId: string): Promise<void> {
     const asset = await VideoAsset.findById(videoAssetId);
     if (!asset) return;
@@ -488,6 +519,7 @@ class VideoAssetService {
         throw new Error('Tệp tải lên bị hỏng, sai định dạng hoặc không phải là một video hợp lệ. Vui lòng kiểm tra lại!');
       }
 
+      /** Lưu tiến độ FFmpeg vào MongoDB để Frontend đọc qua API polling. */
       const onProgress = async (percent: number) => {
         await VideoAsset.updateOne(
           { _id: asset._id },
@@ -495,7 +527,7 @@ class VideoAssetService {
         );
       };
 
-      // FFmpeg tạo các rendition phù hợp nguồn, segment khoảng 6 giây, playlist HLS và AES-128 key.
+      // FFmpeg tạo các rendition phù hợp nguồn, segment khoảng 10 giây, playlist HLS và AES-128 key.
       const {
         encryptionKeyHex,
         durationSec,
@@ -514,6 +546,7 @@ class VideoAssetService {
 
       asset.encryptionKey = encryptionKeyHex;
 
+      /** Liệt kê đệ quy master playlist, rendition playlist và segment trong thư mục HLS tạm. */
       const listFilesRecursive = (dirPath: string): string[] => {
         const entries = fs.readdirSync(dirPath, { withFileTypes: true });
         return entries.flatMap((entry) => {
@@ -527,6 +560,7 @@ class VideoAssetService {
       // Đưa các artifact HLS lên R2 theo từng nhóm để giới hạn số request tải lên đồng thời.
       console.log(`[VideoAssetService] Uploading ${files.length} HLS artifacts (concurrency=${HLS_UPLOAD_CONCURRENCY})...`);
 
+      /** Đưa một artifact HLS lên đúng Object Key trên R2 với MIME type tương ứng. */
       const uploadArtifact = async (filePath: string) => {
         const relativePath = toPosixPath(path.relative(outputDir, filePath));
         const objectKey = `courses/${asset.courseId}/lessons/${asset.lessonId}/videos/${asset._id}/hls/${relativePath}`;
@@ -576,12 +610,8 @@ class VideoAssetService {
         manifestKey: asset.manifestKey,
       });
     } catch (error: any) {
-      if (asset.rawObjectKey) {
-        await s3Service.deleteFile(asset.rawObjectKey).catch((cleanupErr) => {
-          console.error(`[VideoAssetService] Không thể xóa raw file ${asset.rawObjectKey}:`, cleanupErr);
-        });
-      }
-
+      // Giữ video gốc trên R2 khi xử lý thất bại. Lỗi tải artifact HLS có thể chỉ là lỗi mạng
+      // tạm thời; nguồn này cần được giữ lại để có thể xử lý lại hoặc phục vụ điều tra lỗi.
       asset.status = VideoAssetStatus.FAILED;
       asset.processingProgress = 0;
       asset.errorMessage = error.message;
@@ -601,18 +631,21 @@ class VideoAssetService {
     }
   }
 
+  /** Khởi động lịch dọn VideoAsset không được Course Service gắn vào bài học sau thời gian TTL. */
   public startOrphanCleanupJob(): void {
     setInterval(() => {
       void this.cleanupOrphanedAssets();
     }, ORPHAN_TTL_MS);
   }
 
+  /** Khởi động lịch phát hiện job PROCESSING bị treo quá lâu và chuyển chúng sang FAILED. */
   public startProcessingTimeoutJob(): void {
     setInterval(() => {
       void this.failStuckProcessingAssets();
     }, Math.min(PROCESSING_TIMEOUT_MS, 5 * 60 * 1000));
   }
 
+  /** Tìm các asset quá hạn vẫn isAttached=false và xóa dữ liệu liên quan trên DB/R2. */
   private async cleanupOrphanedAssets(): Promise<void> {
     const cutoff = new Date(Date.now() - ORPHAN_TTL_MS);
     const staleAssets = await VideoAsset.find({
@@ -638,6 +671,7 @@ class VideoAssetService {
     }
   }
 
+  /** Đánh dấu job xử lý quá thời hạn là FAILED và phát sự kiện để Course Service cập nhật bài học. */
   private async failStuckProcessingAssets(): Promise<void> {
     const cutoff = new Date(Date.now() - PROCESSING_TIMEOUT_MS);
     const stuckAssets = await VideoAsset.find({

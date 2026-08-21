@@ -96,6 +96,7 @@ export const publishDocumentAssetCleanup = async (
   );
 };
 
+/** Báo cho Media Service rằng VideoAsset đã được Course Service gắn hợp lệ vào một bài học. */
 export const publishVideoAssetAttached = async (
   payload: AssetAttachedPayload,
 ): Promise<void> => {

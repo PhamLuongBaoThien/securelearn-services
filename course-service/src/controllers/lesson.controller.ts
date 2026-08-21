@@ -81,6 +81,10 @@ class LessonController {
     }
   }
 
+  /**
+   * POST /api/courses/:courseId/lessons/:lessonId/video-asset
+   * Nối VideoAsset của Media Service vào bài học sau khi Frontend đã tải đủ các part lên R2.
+   */
   public async bindVideoAsset(req: AuthRequest, res: Response): Promise<void> {
     try {
       const lesson = await lessonService.bindVideoAsset(
@@ -97,6 +101,7 @@ class LessonController {
     }
   }
 
+  /** DELETE route tương ứng: gỡ video khỏi bài học và kích hoạt dọn asset nếu không còn tham chiếu. */
   public async unbindVideoAsset(req: AuthRequest, res: Response): Promise<void> {
     try {
       const lesson = await lessonService.unbindVideoAsset(
