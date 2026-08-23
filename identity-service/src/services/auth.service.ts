@@ -231,6 +231,13 @@ class AuthService {
     if (!isMatch) throw new Error('Mật khẩu hiện tại không đúng.');
   }
 
+  /** Ngăn người dùng đặt lại đúng mật khẩu đang được lưu trên tài khoản. */
+  private async ensureNewPasswordDiffers(user: IUser, newPassword: string): Promise<void> {
+    if (user.password && await bcrypt.compare(newPassword, user.password)) {
+      throw new Error('Mật khẩu mới phải khác mật khẩu hiện tại.');
+    }
+  }
+
   /**
    * Gửi OTP về email của tài khoản đang đăng nhập để xác nhận đổi mật khẩu.
    */
@@ -241,6 +248,7 @@ class AuthService {
     await this.verifyCurrentPassword(user, oldPassword);
     if (!newPassword || newPassword.length < 6) throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự.');
     if (newPassword !== confirmPassword) throw new Error('Mật khẩu xác nhận không khớp.');
+    await this.ensureNewPasswordDiffers(user, newPassword);
     const otp = await otpService.issue('password_change', userId, { email: user.email }, 300);
     await mailerService.sendPasswordChangeOTP(user.email, otp);
   }
@@ -258,6 +266,7 @@ class AuthService {
     if (!otp) throw new Error('Vui lòng nhập mã OTP đã gửi đến email.');
 
     await this.verifyCurrentPassword(user, oldPassword);
+    await this.ensureNewPasswordDiffers(user, newPassword);
     await otpService.verify<{ email: string }>('password_change', userId, otp);
 
     const salt = await bcrypt.genSalt(10);
