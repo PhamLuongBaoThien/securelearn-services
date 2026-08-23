@@ -1,3 +1,8 @@
+/**
+ * Đăng ký consumer RabbitMQ cho các event nghiệp vụ cần tạo notification.
+ * Mỗi handler chuyển payload thành recipient, biến template, sourceKey chống trùng
+ * và metadata; notificationService tiếp tục quyết định gửi IN_APP, EMAIL hoặc cả hai.
+ */
 import {
   Exchange,
   RoutingKey,
@@ -26,6 +31,7 @@ const reliable = {
   enableDeadLetter: true,
 };
 
+/** Thông báo in-app cho admin có quyền quản lý khi có report/hỗ trợ/góp ý mới. */
 const handleInboxEvent = async (event: 'REPORT_CREATED' | 'SUPPORT_REQUEST_CREATED' | 'FEEDBACK_CREATED', payload: InboxItemCreatedPayload) => {
   const admins = await notificationService.getRecipients({ recipientType: 'ADMIN', permission: 'inbox:manage' });
   const actionUrl = payload.actionUrl || `/admin/notifications/inbox?type=${payload.type}&id=${payload.resourceId}`;
@@ -38,6 +44,7 @@ const handleInboxEvent = async (event: 'REPORT_CREATED' | 'SUPPORT_REQUEST_CREAT
   )));
 };
 
+/** Điều hướng phản hồi ticket tới admin hoặc người gửi; chỉ một số trạng thái mới gửi thêm email. */
 const handleTicketEvent = async (event: 'INBOX_USER_REPLIED' | 'INBOX_ADMIN_REPLIED' | 'INBOX_STATUS_CHANGED', payload: InboxTicketEventPayload) => {
   const values = { senderName: payload.senderName, title: payload.title, summary: payload.summary || '', status: payload.status || '' };
   if (event === 'INBOX_USER_REPLIED') {
@@ -68,6 +75,7 @@ const handleTicketEvent = async (event: 'INBOX_USER_REPLIED' | 'INBOX_ADMIN_REPL
   );
 };
 
+/** Gửi thông báo thảo luận cho người nhận, bỏ qua trường hợp người thao tác cũng là người nhận. */
 const handleDiscussionEvent = async (
   event: 'DISCUSSION_CREATED' | 'DISCUSSION_REPLIED',
   payload: CourseDiscussionEventPayload,
@@ -98,6 +106,7 @@ const handleDiscussionEvent = async (
     },
   );
 };
+/** Thông báo kết quả duyệt/tháo khóa học khỏi gói thuê bao cho giảng viên. */
 const handleCourseSubscriptionReviewed = async (payload: CourseSubscriptionReviewedPayload) => {
   const [recipient] = await notificationService.getRecipients({ userId: payload.instructorId, recipientType: 'USER' });
   if (!recipient) return;
@@ -126,6 +135,7 @@ const handleCourseSubscriptionReviewed = async (payload: CourseSubscriptionRevie
     },
   );
 };
+/** Phân phối thông báo khóa học mới cho toàn bộ học viên đã ghi danh. */
 const handleCourseAnnouncement = async (payload: CourseAnnouncementPublishedPayload) => {
   const recipients = await notificationService.getCourseRecipients(payload.courseId);
   await Promise.all(recipients.map(recipient => notificationService.sendEvent(
@@ -148,6 +158,7 @@ const handleCourseAnnouncement = async (payload: CourseAnnouncementPublishedPayl
   )));
 };
 
+/** Kết nối toàn bộ routing key với handler khi notification-service khởi động. */
 export const registerEventHandlers = async () => {
   await subscribeMessage<UserRegisteredPayload>(Exchange.IDENTITY, RoutingKey.USER_REGISTERED, 'notification-service.user-registered', async p =>
     notificationService.sendEvent('WELCOME', user(p.userId, p.email, p.fullName, p.role), { userName: p.fullName }, `event:${RoutingKey.USER_REGISTERED}:${p.userId}`, { category: 'CAMPAIGN', actionUrl: '/student/dashboard', actionLabel: 'Bắt đầu học' }), reliable);

@@ -1,3 +1,9 @@
+/**
+ * Gửi trực tiếp các email OTP của identity-service qua SMTP.
+ * Luồng sử dụng: auth.service tạo OTP bằng otpService -> gọi hàm theo nghiệp vụ
+ * tại đây -> Nodemailer gửi mã đến email tài khoản. Service này không lưu OTP;
+ * Redis và quy tắc hết hạn/giới hạn lượt nhập do otp.service quản lý.
+ */
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 
@@ -13,24 +19,35 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+const mailFrom = process.env.SMTP_FROM || `"SecureLearn" <${process.env.SMTP_USER}>`;
+
 class MailerService {
+  /**
+   * Hàm gửi OTP dùng chung cho các email có cùng bố cục, thời hạn và người gửi.
+   * Các hàm public bên dưới chỉ truyền tiêu đề/nội dung phù hợp từng nghiệp vụ.
+   */
   private async sendOTP(to: string, otp: string, title: string, description: string): Promise<void> {
     try {
-      await transporter.sendMail({ from: `"SecureLearn Support" <${process.env.SMTP_USER}>`, to, subject: title, html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto"><h2>${title}</h2><p>${description}</p><div style="font-size:32px;font-weight:700;letter-spacing:8px;padding:20px;background:#f4f4f5;text-align:center">${otp}</div><p>Mã có hiệu lực trong 5 phút.</p></div>` });
+      await transporter.sendMail({ from: mailFrom, to, subject: title, html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto"><h2>${title}</h2><p>${description}</p><div style="font-size:32px;font-weight:700;letter-spacing:8px;padding:20px;background:#f4f4f5;text-align:center">${otp}</div><p>Mã có hiệu lực trong 5 phút.</p></div>` });
     } catch { throw new Error('Lỗi xảy ra khi gửi email, vui lòng thử lại sau.'); }
   }
+
+  /** Gửi OTP xác nhận email ở bước đăng ký, trước khi tài khoản được tạo. */
   public sendRegistrationOTP(to: string, otp: string): Promise<void> { return this.sendOTP(to, otp, 'Xác nhận đăng ký SecureLearn', 'Nhập mã dưới đây để hoàn tất tạo tài khoản.'); }
+
+  /** Gửi OTP xác nhận đổi/tạo mật khẩu cho người dùng đang đăng nhập. */
   public sendPasswordChangeOTP(to: string, otp: string): Promise<void> { return this.sendOTP(to, otp, 'Xác nhận đổi mật khẩu SecureLearn', 'Nhập mã dưới đây để xác nhận thay đổi mật khẩu tài khoản.'); }
 
   /**
-   * Gửi email OTP khôi phục mật khẩu
+   * Gửi OTP cho luồng quên mật khẩu bằng mẫu email khôi phục chi tiết.
+   * OTP chỉ được dùng để đặt mật khẩu mới sau khi otpService xác thực thành công.
    * @param to Địa chỉ email người nhận
    * @param otp Mã OTP gồm 6 chữ số
    */
   public async sendPasswordResetOTP(to: string, otp: string): Promise<void> {
     try {
       const mailOptions = {
-        from: `"SecureLearn Support" <${process.env.SMTP_USER}>`,
+        from: mailFrom,
         to,
         subject: 'Khôi phục mật khẩu của bạn',
         html: `

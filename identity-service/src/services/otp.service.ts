@@ -8,12 +8,19 @@ import { createHmac, randomInt, timingSafeEqual } from 'crypto';
 import redisClient from '../config/redis';
 type OtpRecord<T> = { digest: string; attempts: number; payload: T };
 class OtpService {
+  /** Tạo HMAC của OTP để Redis không phải lưu mã gốc có thể đọc được. */
   private digest(scope: string, target: string, otp: string): string {
     const secret = process.env.OTP_SECRET || process.env.ACCESS_TOKEN || 'securelearn-development-otp-secret';
     return createHmac('sha256', secret).update(`${scope}:${target}:${otp}`).digest('hex');
   }
+
+  /** Tạo khóa Redis tách biệt theo nghiệp vụ (scope) và email/user (target). */
   private key(scope: string, target: string): string { return `otp:${scope}:${target}`; }
-  // Tạo OTP mới, lưu bản băm trong Redis và trả về mã gốc (dùng cho bước gửi OTP).
+
+  /**
+   * Phát OTP 6 chữ số cho bước gửi email: chặn gửi lại trong 60 giây, giới hạn
+   * 5 lượt gửi/giờ, lưu bản băm cùng payload trong Redis và mặc định hết hạn sau 5 phút.
+   */
   public async issue<T>(scope: string, target: string, payload: T, ttlSeconds = 300): Promise<string> {
     const cooldownKey = `otp:cooldown:${scope}:${target}`;
     const allowed = await redisClient.set(cooldownKey, '1', 'EX', 60, 'NX');
@@ -27,7 +34,10 @@ class OtpService {
     if (process.env.NODE_ENV !== 'production') console.log(`[OTP:${scope}] ${target}: ${otp}`);
     return otp;
   }
-  /** Kiểm tra OTP mà không xoá khỏi Redis (dùng cho bước verify trung gian). */
+  /**
+   * Kiểm tra OTP ở bước trung gian nhưng chưa tiêu thụ mã; dùng khi giao diện cần
+   * xác nhận mã hợp lệ trước bước cuối. Mỗi lần sai tăng bộ đếm, sai lần 5 sẽ xoá mã.
+   */
   public async check<T>(scope: string, target: string, otp: string): Promise<T> {
     const key = this.key(scope, target);
     const raw = await redisClient.get(key);
@@ -44,7 +54,10 @@ class OtpService {
     }
     return record.payload;
   }
-  /** Xác thực OTP và xoá khỏi Redis (consume — dùng cho bước cuối cùng). */
+  /**
+   * Xác thực và tiêu thụ OTP ở bước hoàn tất đăng ký/đổi/khôi phục mật khẩu.
+   * Mã đúng bị xoá ngay để không thể dùng lại; mã sai tuân theo giới hạn 5 lần.
+   */
   public async verify<T>(scope: string, target: string, otp: string): Promise<T> {
     const key = this.key(scope, target);
     const raw = await redisClient.get(key);

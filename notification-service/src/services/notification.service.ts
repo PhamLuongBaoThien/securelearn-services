@@ -1,3 +1,9 @@
+/**
+ * Điều phối notification đa kênh.
+ * Event nghiệp vụ/RabbitMQ -> sendEvent -> kiểm tra preference -> render template
+ * -> lưu và phát realtime cho IN_APP hoặc enqueue DeliveryAttempt cho EMAIL.
+ * Campaign thủ công cũng dùng chung createInApp/emailService nhưng xử lý theo lô.
+ */
 import { Types } from 'mongoose';
 import { Exchange, RoutingKey, publishMessage, type NotificationCampaignRequestedPayload } from '@securelearn/common';
 import { Notification } from '../models/notification.model';
@@ -59,6 +65,7 @@ class NotificationService {
     emitToRecipient(recipientType, userId, 'notification:unread-count', { count: 0 });
     return { updated: result.modifiedCount };
   }
+  /** Lưu notification trong ứng dụng và phát Socket.IO realtime; sourceKey chống tạo trùng. */
   async createInApp(recipient: Recipient, event: string, title: string, body: string, sourceKey: string, metadata: NotificationMetadata) {
     const recipientType = recipient.recipientType || 'USER';
     try {
@@ -72,6 +79,7 @@ class NotificationService {
       throw error;
     }
   }
+  /** Lấy danh sách user/admin nhận thông báo từ identity-service qua gRPC theo từng trang. */
   async getRecipients(request: Record<string, unknown>): Promise<Recipient[]> {
     const recipientType = String(request.recipientType || 'USER') as RecipientType;
     const result: Recipient[] = [];
@@ -84,6 +92,7 @@ class NotificationService {
     } while (page < 1000);
     return result;
   }
+  /** Lấy học viên của một khóa học từ course-service để gửi thông báo theo khóa. */
   async getCourseRecipients(courseId: string): Promise<Recipient[]> {
     const result: Recipient[] = []; let page = 1;
     do {
@@ -94,6 +103,10 @@ class NotificationService {
     } while (page < 1000);
     return result;
   }
+  /**
+   * Điểm vào chung cho notification phát sinh từ event: xét kênh được yêu cầu và
+   * preference người nhận, render template tương ứng rồi chuyển sang IN_APP hoặc EMAIL.
+   */
   async sendEvent(event: string, recipient: Recipient, values: Record<string, unknown>, sourceKey: string, metadata: NotificationMetadata) {
     const recipientType = recipient.recipientType || 'USER';
     for (const type of ['IN_APP', 'EMAIL'] as const) {
@@ -108,6 +121,7 @@ class NotificationService {
       else if (recipient.email) await emailService.enqueue({ deliveryKey: `${sourceKey}:EMAIL:${recipientType}:${recipient.userId}`, userId: recipient.userId, email: recipient.email, subject: title, body });
     }
   }
+  /** Kiểm tra dữ liệu chiến dịch admin, lưu Campaign và phát RabbitMQ event để xử lý bất đồng bộ. */
   async queueCampaign(adminId: string, input: Record<string, any>) {
     const audiences = ['ALL_LEARNERS', 'ALL_INSTRUCTORS', 'ALL_ADMINS', 'ALL_USERS', 'SPECIFIC_USER', 'COURSE_STUDENTS'];
     const channels: string[] = (input.channels || []).filter((value: string) => ['EMAIL', 'IN_APP'].includes(value));
@@ -127,6 +141,7 @@ class NotificationService {
     }
     return campaign;
   }
+  /** Chọn người nhận campaign theo lô 50, render biến cá nhân hóa và phân phối từng kênh. */
   async processCampaign(campaignId: string) {
     const campaign: any = await Campaign.findOneAndUpdate({ _id: campaignId, status: 'PROCESSING', processingStartedAt: null }, { $set: { processingStartedAt: new Date() } }, { new: true });
     if (!campaign) return;
@@ -162,6 +177,7 @@ class NotificationService {
       if (campaign.channels.includes('EMAIL')) await emailService.refreshCampaign(campaign.id);
     } catch (error) { campaign.status = 'FAILED'; campaign.completedAt = new Date(); await campaign.save(); throw error; }
   }
+  /** Đưa các email FAILED của campaign về PENDING và phát event để chạy lại campaign. */
   async retryCampaign(id: string) {
     const campaign = await Campaign.findById(id); if (!campaign) throw new Error('Campaign không tồn tại.');
     await DeliveryAttempt.updateMany({ campaignId: id, status: 'FAILED' }, { $set: { status: 'PENDING', attempts: 0, lastError: '', nextAttemptAt: new Date() }, $unset: { completedAt: 1 } });
