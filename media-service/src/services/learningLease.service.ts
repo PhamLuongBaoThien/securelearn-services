@@ -21,6 +21,11 @@ export class MediaLearningLeaseError extends Error {
 const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 
 class LearningLeaseService {
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.2: XÁC MINH LEARNING LEASE]
+   * Đối chiếu session id/token/user/auth session/video với lease do Progress Service lưu trong Redis.
+   * Mục đích: Media Service không tin trực tiếp dữ liệu header do FE gửi lên.
+   */
   async validate(input: {
     userId: string; authSessionId: string; learningSessionId: string; learningSessionToken?: string;
     tokenHash?: string; videoAssetId: string;

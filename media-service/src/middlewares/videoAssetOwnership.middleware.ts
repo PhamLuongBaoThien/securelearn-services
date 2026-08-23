@@ -27,6 +27,11 @@ export const requireVideoAssetOwner = async (
 };
 
 // middleware này giúp learner đã có entitlement (đã thanh toán hoặc đã đăng ký học khóa học) đọc manifest/key mà không phải là owner upload của video asset.
+/**
+ * [FLOW HỌC VIDEO - MEDIA.0: CỔNG ENTITLEMENT]
+ * Chạy trước playback-session/manifest/key/segment để xác định asset và kiểm tra user có quyền đọc video.
+ * Learning Session/Key Session vẫn được kiểm tra sâu hơn trong controller/service tương ứng.
+ */
 export const requireVideoAssetAccess = async (
   req: AuthRequest,
   res: Response,

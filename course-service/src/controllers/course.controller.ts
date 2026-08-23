@@ -302,6 +302,11 @@ class CourseController {
     }
   }
 
+  /**
+   * [FLOW HỌC VIDEO - COURSE.1: HTTP ENTRY GIÁO TRÌNH]
+   * Nhận GET /api/courses/:id/learning từ LearningInterface.
+   * Mục đích: chuyển user/course context xuống service và chỉ trả giáo trình khi còn quyền học.
+   */
   public async getCourseForLearning(req: AuthRequest, res: Response): Promise<void> {
     try {
       const course = await courseService.getCourseForLearning(

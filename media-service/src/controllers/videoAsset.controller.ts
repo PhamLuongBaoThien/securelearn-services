@@ -53,6 +53,11 @@ class VideoAssetController {
     }
   }
 
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.8: CẤP KHÓA AES-128]
+   * Được Hls.js gọi từ URI đã viết lại trong leaf playlist.
+   * Chỉ trả khóa khi JWT, Key Session, auth session và Learning Lease vẫn hợp lệ.
+   */
   public async getEncryptionKey(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -97,6 +102,11 @@ class VideoAssetController {
     }
   }
 
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.1: TẠO PLAYBACK SESSION]
+   * Nhận JWT và Learning Session headers từ VideoPlayer, xác minh lease rồi sinh Playback Token dùng một lần.
+   * Trả playbackUrl để Hls.js bắt đầu tải master.m3u8.
+   */
   public async createPlaybackSession(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -159,6 +169,11 @@ class VideoAssetController {
     }
   }
 
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.4: TRẢ MASTER PLAYLIST]
+   * Tiêu thụ và xóa Playback Token, kiểm tra lease còn sống, tạo Key Session rồi viết lại master.m3u8.
+   * Token đã dùng/hết hạn trả 410 để URL khởi tạo không thể tái sử dụng.
+   */
   public async getOneTimePlaybackManifest(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -189,6 +204,10 @@ class VideoAssetController {
     }
   }
 
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.6: TRẢ PLAYLIST CHẤT LƯỢNG]
+   * Hls.js gọi sau khi chọn rendition; controller xác minh Key Session rồi trả leaf playlist đã bảo vệ key/segment.
+   */
   public async getRenditionManifest(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = req.params.videoAssetId as string;
@@ -209,6 +228,10 @@ class VideoAssetController {
     }
   }
 
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.9: CẤP SEGMENT]
+   * Xác minh Key Session và Segment Ticket, tạo Presigned URL ngắn hạn rồi trả 302 để browser tải trực tiếp từ R2.
+   */
   public async getSegment(req: AuthRequest, res: Response): Promise<void> {
     try {
       const videoAssetId = String(req.params.videoAssetId || '');

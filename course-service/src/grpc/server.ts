@@ -52,6 +52,11 @@ export const createInternalGrpcServer = () =>
             : undefined,
       };
     },
+    /**
+     * [FLOW HỌC VIDEO - COURSE.3: CONTEXT NỘI BỘ CHO PROGRESS]
+     * Được gọi qua gRPC bởi Progress Service khi acquire, heartbeat hoặc tính access/progress.
+     * Trả entitlement, currentVersion, lesson/video binding và progression mode để backend kiểm tra độc lập với FE.
+     */
     getCourseProgressContext: async ({ userId, userRole, courseId }) => {
       if (!userId || !userRole || !courseId) {
         throw createGrpcError(GrpcStatus.INVALID_ARGUMENT, 'Thiếu userId, userRole hoặc courseId.');

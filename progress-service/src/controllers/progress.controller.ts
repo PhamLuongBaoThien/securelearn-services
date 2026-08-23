@@ -5,6 +5,10 @@ import { LessonProgressType } from '../models/lessonProgress.model';
 import learningSessionAccessService, { LearningSessionAccessError } from '../services/learningSessionAccess.service';
 
 class ProgressController {
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.1: HTTP ACQUIRE]
+   * Nhận yêu cầu từ VideoPlayer và chuyển user/session/course/lesson/video xuống LearningSessionAccessService.
+   */
   public async acquireLearningSession(req: AuthRequest, res: Response): Promise<void> {
     try {
       const data = await learningSessionAccessService.acquire({
@@ -21,6 +25,10 @@ class ProgressController {
     }
   }
 
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.8: HTTP RELEASE]
+   * Nhận yêu cầu khi VideoPlayer unmount; giải phóng lease đúng user, auth session và token.
+   */
   public async releaseLearningSession(req: AuthRequest, res: Response): Promise<void> {
     try {
       const released = await learningSessionAccessService.release(
@@ -31,6 +39,10 @@ class ProgressController {
       res.status(400).json({ status: 'ERR', message: error.message });
     }
   }
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.5: HTTP HEARTBEAT]
+   * Nhận vị trí/khoảng xem từ VideoPlayer và bổ sung identity cùng Learning Session Token trước khi xử lý nghiệp vụ.
+   */
   public async heartbeat(req: AuthRequest, res: Response): Promise<void> {
     try {
       const data = await progressService.heartbeat({
@@ -76,6 +88,7 @@ class ProgressController {
     }
   }
 
+  /** [FLOW HỌC VIDEO - PROGRESS.0A] Trả tiến độ từng bài và toàn khóa cho query khởi tạo của LearningInterface. */
   public async getCourseProgress(req: AuthRequest, res: Response): Promise<void> {
     try {
       const data = await progressService.getCourseProgress(
@@ -89,6 +102,7 @@ class ProgressController {
     }
   }
 
+  /** [FLOW HỌC VIDEO - PROGRESS.0B] Trả access map để FE biết bài nào mở hoặc khóa. */
   public async getCourseAccess(req: AuthRequest, res: Response): Promise<void> {
     try {
       const data = await progressService.getCourseAccess(
@@ -102,6 +116,7 @@ class ProgressController {
     }
   }
 
+  /** [FLOW HỌC VIDEO - PROGRESS.0C] Trả hoạt động theo ngày phục vụ streak và thống kê. */
   public async getLearnerActivity(req: AuthRequest, res: Response): Promise<void> {
     try {
       const data = await progressService.getLearnerActivity(

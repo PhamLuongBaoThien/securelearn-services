@@ -46,6 +46,11 @@ class CourseContextService {
    * Khi nào sử dụng: Gọi mỗi khi có heartbeat gửi lên, hoặc khi học viên yêu cầu lấy tiến độ khóa học, lấy trạng thái mở khóa.
    *  Điều này đảm bảo progress-service luôn có cấu trúc bài học mới nhất của khóa học mà không cần lưu trữ dư thừa bản sao giáo trình trong DB của nó.
    */
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.2: LẤY COURSE CONTEXT]
+   * Được gọi bởi: acquire, heartbeat, getCourseProgress và getCourseAccess.
+   * Mục đích: gọi Course Service qua gRPC để lấy nguồn sự thật về entitlement, phiên bản và lesson/video binding.
+   */
   public async getContext(input: {
     courseId: string;
     userId: string;
@@ -81,4 +86,3 @@ class CourseContextService {
 }
 
 export default new CourseContextService();
-

@@ -233,6 +233,10 @@ class VideoAssetService {
    * Đọc master playlist từ R2 và thay đường dẫn rendition bằng API được bảo vệ
    * của Media Service để người xem không nhận trực tiếp Object Key nội bộ.
    */
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.4B: VIẾT LẠI MASTER PLAYLIST]
+   * Đọc master.m3u8 từ R2 và thay URI mỗi rendition bằng endpoint /manifest có Key Session.
+   */
   public async getPlaybackManifest(videoAssetId: string, keyUri?: string, sessionToken?: string) {
     const asset = await VideoAsset.findById(videoAssetId).lean();
     if (!asset?.manifestKey || asset.status !== 'READY') {
@@ -262,6 +266,10 @@ class VideoAssetService {
    * Tìm playlist của mức chất lượng được yêu cầu rồi viết lại khóa giải mã và
    * các đường dẫn segment thành endpoint có kiểm tra phiên phát.
    */
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.6A: ĐỌC LEAF PLAYLIST]
+   * Chọn đúng rendition theo quality, đọc playlist từ R2 rồi chuyển sang bước bảo vệ key và segment.
+   */
   public async getRenditionManifest(videoAssetId: string, quality: string, keyUri: string, sessionToken: string) {
     const asset = await VideoAsset.findById(videoAssetId).lean();
     if (!asset?.manifestKey || asset.status !== 'READY') {
@@ -279,6 +287,10 @@ class VideoAssetService {
   /**
    * Đọc leaf playlist từ R2, thay URI khóa AES-128 và tạo Segment Ticket cho
    * từng phân đoạn trước khi trả playlist cho hls.js.
+   */
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.7B: BẢO VỆ LEAF PLAYLIST]
+   * Thay URI khóa AES bằng /key và mỗi file .ts bằng /segment chứa Segment Ticket cùng Key Session.
    */
   private async rewriteLeafManifest(manifestKey: string, keyUri: string | undefined, videoAssetId: string, sessionToken: string) {
     const manifest = await s3Service.getObjectText(manifestKey);
@@ -299,6 +311,10 @@ class VideoAssetService {
   /**
    * Xác minh Segment Ticket và Object Key, sau đó tạo Presigned GET URL 15 giây
    * để trình duyệt tải đúng phân đoạn từ R2.
+   */
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.9B: TẠO URL TẢI TRỰC TIẾP]
+   * Xác minh ticket và object prefix của asset, sau đó xin Presigned GET URL R2 có hiệu lực 15 giây.
    */
   public async getSegmentRedirectUrl(videoAssetId: string, ticket: string): Promise<string> {
     const objectKey = playbackAccessService.verifySegmentTicket(ticket, videoAssetId);

@@ -252,6 +252,10 @@ class S3Service {
    * Sinh URL GET có chữ ký và thời hạn để tải một object mà không công khai bucket.
    * @param expiresIn Thời gian URL còn hiệu lực, mặc định một giờ.
    */
+  /**
+   * [FLOW HỌC VIDEO - STORAGE.1: PRESIGNED GET]
+   * Tạo URL có chữ ký để browser tải object trực tiếp từ R2/MinIO; flow segment truyền expiresIn=15 giây.
+   */
   public async getDownloadPresignedUrl(objectKey: string, expiresIn: number = 3600): Promise<string> {
     const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: objectKey });
     return getSignedUrl(presignClient, command, { expiresIn });

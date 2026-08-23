@@ -110,6 +110,11 @@ return 1
 `;
 
 class LearningSessionAccessService {
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.3: CẤP LEARNING SESSION]
+   * Kiểm tra entitlement, bài VIDEO và videoAsset binding; sau đó dùng Redis lease để chống phát đồng thời.
+   * Thành công: lưu/đồng bộ LearningSession trong MongoDB và trả id, token cùng TTL 30 giây.
+   */
   async acquire(input: {
     userId: string; userRole: string; authSessionId: string; clientInstanceId: string;
     courseId: string; lessonId: string; videoAssetId?: string; force?: boolean;
@@ -193,6 +198,10 @@ class LearningSessionAccessService {
     };
   }
 
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.6: GIA HẠN LEASE]
+   * Được gọi đầu mỗi heartbeat; chỉ gia hạn khi user, auth session, session id và token vẫn khớp lease Redis hiện tại.
+   */
   async renew(userId: string, authSessionId: string, sessionId: string, token: string) {
     if (sessionId.length > 128 || token.length > 256) throw new LearningSessionAccessError(400, 'INVALID_LEARNING_SESSION_INPUT', 'Thông tin phiên học không hợp lệ.');
     if (!sessionId || !token) throw new LearningSessionAccessError(409, 'LEARNING_SESSION_EXPIRED', 'Phiên học đã hết hạn. Vui lòng phát lại video.');
@@ -211,6 +220,10 @@ class LearningSessionAccessService {
     return parseLease(result[1])!;
   }
 
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.9: KẾT THÚC PHIÊN]
+   * Xóa lease bằng phép so khớp an toàn và đánh dấu LearningSession MongoDB là ENDED.
+   */
   async release(userId: string, authSessionId: string, sessionId: string, token: string) {
     if (!sessionId || !token || sessionId.length > 128 || token.length > 256) return false;
     const released = Number(await redisClient.eval(releaseScript, 1, activeKey(userId), sessionId, hashToken(token), authSessionId)) === 1;

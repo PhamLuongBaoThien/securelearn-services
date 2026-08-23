@@ -148,6 +148,11 @@ class ProgressService {
    *  9. Tính toán lại tổng tiến độ khóa học (recalculateCourseProgress). Nếu hoàn thành 100%, phát sự kiện PROGRESS_COURSE_COMPLETED qua RabbitMQ.
    * Khi nào sử dụng: Gọi mỗi khi frontend gửi request POST lên endpoint /api/progress/heartbeat.
    */
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.7: XỬ LÝ HEARTBEAT]
+   * Thứ tự: gia hạn lease → kiểm tra lại Course Context/quyền mở bài → chuẩn hóa thời gian xem
+   * → gộp watched segments → lưu tiến độ/hoạt động ngày → tính lại phần trăm toàn khóa.
+   */
   public async heartbeat(input: HeartbeatInput): Promise<CourseProgressResponse> {
     this.assertHeartbeatPayload(input);
     
@@ -281,6 +286,10 @@ class ProgressService {
     return this.getCourseProgress(input.userId, input.userRole, input.courseId);
   }
 
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.0D: TỔNG HỢP TIẾN ĐỘ]
+   * Dựng response tiến độ theo current course version để FE chọn bài gần nhất và vị trí resume.
+   */
   public async getCourseProgress(userId: string, userRole: string, courseId: string): Promise<CourseProgressResponse> {
     const context = await this.loadAllowedContext(userId, userRole, courseId);
     await this.ensureCurrentVersionLessonProgress(userId, context);
@@ -437,6 +446,10 @@ class ProgressService {
     }
   }
 
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.0E: TÍNH ACCESS MAP]
+   * Áp dụng progression mode và tiến độ prerequisite để đánh dấu locked/reason cho từng bài.
+   */
   public async getCourseAccess(userId: string, userRole: string, courseId: string): Promise<CourseAccessResponse> {
     const context = await this.loadReadableContext(userId, userRole, courseId);
     if (context.reason === 'OWNER_PREVIEW') {
@@ -479,6 +492,7 @@ class ProgressService {
     };
   }
 
+  /** [FLOW HỌC VIDEO - PROGRESS.0F] Đọc hoạt động học theo ngày để trả streak/goal cho FE. */
   public async getLearnerActivity(userId: string, from?: string, to?: string): Promise<LearnerActivityResponse> {
     const query: Record<string, unknown> = { userId };
     if (from || to) {
@@ -582,6 +596,10 @@ class ProgressService {
       lessons,
     };
   }
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.7A: LƯU TIẾN ĐỘ VIDEO]
+   * Gộp segment mới với segment cũ, tính tỷ lệ phủ thực tế và đánh dấu COMPLETED khi đạt ít nhất 90%.
+   */
   private async upsertVideoHeartbeat(
     input: HeartbeatInput,
     context: CourseProgressContext,
@@ -677,6 +695,10 @@ class ProgressService {
     );
   }
 
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.7B: TÍNH TIẾN ĐỘ TOÀN KHÓA]
+   * Tổng hợp trạng thái các bài của phiên bản hiện tại; phát sự kiện hoàn thành nếu khóa học đạt 100%.
+   */
   private async recalculateCourseProgress(
     userId: string,
     context: CourseProgressContext,
@@ -1211,6 +1233,10 @@ class ProgressService {
    * Trả về: Danh sách các phân đoạn không chồng lấn đã được gộp lại tối ưu.
    * Khi nào sử dụng: Gọi trong upsertVideoHeartbeat để cập nhật watchedSegments trước khi lưu vào MongoDB.
    */
+  /**
+   * [FLOW HỌC VIDEO - PROGRESS.7C: CHỐNG TÍNH TRÙNG]
+   * Sắp xếp và hợp nhất các khoảng xem giao nhau/liền nhau để tua hoặc xem lại không làm tăng sai tỷ lệ.
+   */
   private mergeSegments(segments: WatchedSegment[]) {
     const sorted = segments
       .map((segment) => ({
@@ -1242,4 +1268,3 @@ class ProgressService {
 }
 
 export default new ProgressService();
-

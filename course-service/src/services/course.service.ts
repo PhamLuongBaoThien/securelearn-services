@@ -1746,6 +1746,12 @@ class CourseService {
     );
   }
 
+  /**
+   * [FLOW HỌC VIDEO - COURSE.2: KIỂM TRA QUYỀN VÀ PHIÊN BẢN]
+   * Được gọi bởi: courseController.getCourseForLearning.
+   * Mục đích: yêu cầu khóa học PUBLISHED, có currentVersionId và user còn entitlement
+   * (hoặc là instructor sở hữu), rồi dựng giáo trình từ đúng phiên bản đang xuất bản.
+   */
   public async getCourseForLearning(
     courseId: string,
     userId: string,
@@ -2399,5 +2405,4 @@ class CourseService {
 }
 
 export default new CourseService();
-
 

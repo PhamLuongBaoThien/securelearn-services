@@ -36,6 +36,7 @@ const keySessionKey = (token: string) => `playback:key-session:${hashToken(token
 const segmentSecret = () => process.env.PLAYBACK_SEGMENT_SECRET || process.env.ACCESS_TOKEN || 'securelearn-segment-development-secret';
 
 class PlaybackAccessService {
+  /** [FLOW HỌC VIDEO - MEDIA.3] Tạo Playback Token ngẫu nhiên, lưu Redis 60 giây và chỉ cho phép một key duy nhất. */
   async createOneTimePlayback(input: Omit<OneTimePlaybackValue, 'createdAt'>): Promise<string> {
     const token = crypto.randomBytes(32).toString('base64url');
     const value = { ...input, createdAt: new Date().toISOString() };
@@ -43,6 +44,7 @@ class PlaybackAccessService {
     return result === 'OK' ? token : this.createOneTimePlayback(input);
   }
 
+  /** [FLOW HỌC VIDEO - MEDIA.4A] Đọc rồi xóa Playback Token nguyên tử để mỗi URL master chỉ dùng đúng một lần. */
   async consumeOneTimePlayback(token: string): Promise<OneTimePlaybackValue | null> {
     const script = `local value = redis.call('GET', KEYS[1]); if value then redis.call('DEL', KEYS[1]) end; return value`;
     const raw = await redisClient.eval(script, 1, playbackKey(token));
@@ -50,6 +52,7 @@ class PlaybackAccessService {
     return JSON.parse(raw) as OneTimePlaybackValue;
   }
 
+  /** [FLOW HỌC VIDEO - MEDIA.5] Tạo Key Session ràng buộc user/video/lesson/lease cho chuỗi request HLS tiếp theo. */
   async createKeySession(input: Omit<KeySessionValue, 'createdAt'>): Promise<string> {
     const token = crypto.randomBytes(32).toString('base64url');
     await redisClient.setex(keySessionKey(token), KEY_SESSION_TTL_SECONDS, JSON.stringify({ ...input, createdAt: new Date().toISOString() }));
@@ -73,6 +76,10 @@ class PlaybackAccessService {
     }
   }
 
+  /**
+   * [FLOW HỌC VIDEO - MEDIA.7: KIỂM TRA KEY SESSION]
+   * Dùng trước rendition/key/segment; đối chiếu token với user, auth session, client instance và lease Redis hiện tại.
+   */
   async validateKeySession(
     token: string,
     videoAssetId: string,
@@ -100,12 +107,14 @@ class PlaybackAccessService {
     }
   }
 
+  /** [FLOW HỌC VIDEO - MEDIA.7A] Ký capability chỉ cho phép đúng video và đúng object segment được ghi trong ticket. */
   createSegmentTicket(videoAssetId: string, objectKey: string): string {
     const payload = Buffer.from(JSON.stringify({ videoAssetId, objectKey, exp: Date.now() + SEGMENT_TICKET_TTL_SECONDS * 1000 })).toString('base64url');
     const signature = crypto.createHmac('sha256', segmentSecret()).update(payload).digest('base64url');
     return `${payload}.${signature}`;
   }
 
+  /** [FLOW HỌC VIDEO - MEDIA.9A] Xác minh HMAC, hạn dùng và videoId trước khi trả lại objectKey của segment. */
   verifySegmentTicket(ticket: string, videoAssetId: string): string | null {
     const [payload, signature] = ticket.split('.');
     if (!payload || !signature) return null;
