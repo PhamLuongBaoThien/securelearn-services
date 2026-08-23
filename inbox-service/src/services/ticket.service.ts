@@ -160,6 +160,8 @@ class TicketService {
     if (input.type === "REPORT") {
       if (!input.target?.type || !input.target?.id)
         throw new Error("Báo cáo phải có đối tượng.");
+      if (input.target.type === "LESSON")
+        throw new Error("Chức năng báo cáo bài học không được hỗ trợ.");
       target = await this.target(input.target);
       if (!(target as any)?.found && input.target.type !== "USER")
         throw new Error("Đối tượng báo cáo không tồn tại hoặc không khớp.");
