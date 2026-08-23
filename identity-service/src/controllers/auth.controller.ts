@@ -308,13 +308,27 @@ class AuthController {
     }
   }
   /**
+   * [POST] /api/auth/password/otp
+   * Gửi OTP xác nhận đổi mật khẩu về email của người dùng đang đăng nhập
+   */
+  public async requestPasswordChangeOTP(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { oldPassword, newPassword, confirmPassword } = req.body;
+      await authService.requestPasswordChangeOTP(req.userId!, oldPassword, newPassword, confirmPassword);
+      res.status(200).json({ status: 'OK', message: 'Mã OTP đã được gửi đến email của bạn.' });
+    } catch (error: any) {
+      res.status(400).json({ status: 'ERR', message: error.message });
+    }
+  }
+
+  /**
    * [PUT] /api/auth/password
    * Thay đổi mật khẩu
    */
   public async changePassword(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { oldPassword, newPassword } = req.body;
-      const updatedUser = await authService.changePassword(req.userId!, oldPassword, newPassword);
+      const { oldPassword, newPassword, otp } = req.body;
+      const updatedUser = await authService.changePassword(req.userId!, oldPassword, newPassword, otp);
       await authSessionService.revokeAll(req.userId!, 'PASSWORD_CHANGED');
       res.clearCookie('refresh_token');
       res.status(200).json({

@@ -20,6 +20,7 @@ class MailerService {
     } catch { throw new Error('Lỗi xảy ra khi gửi email, vui lòng thử lại sau.'); }
   }
   public sendRegistrationOTP(to: string, otp: string): Promise<void> { return this.sendOTP(to, otp, 'Xác nhận đăng ký SecureLearn', 'Nhập mã dưới đây để hoàn tất tạo tài khoản.'); }
+  public sendPasswordChangeOTP(to: string, otp: string): Promise<void> { return this.sendOTP(to, otp, 'Xác nhận đổi mật khẩu SecureLearn', 'Nhập mã dưới đây để xác nhận thay đổi mật khẩu tài khoản.'); }
 
   /**
    * Gửi email OTP khôi phục mật khẩu

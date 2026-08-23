@@ -222,24 +222,43 @@ class AuthService {
   }
 
   /**
-   * Đổi mật khẩu
+   * Kiểm tra mật khẩu hiện tại trước khi gửi OTP đổi mật khẩu.
    */
-  public async changePassword(userId: string, oldPassword?: string, newPassword?: string): Promise<any> {
+  private async verifyCurrentPassword(user: IUser, oldPassword?: string): Promise<void> {
+    if (!user.password) return;
+    if (!oldPassword) throw new Error('Vui lòng nhập mật khẩu hiện tại.');
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) throw new Error('Mật khẩu hiện tại không đúng.');
+  }
+
+  /**
+   * Gửi OTP về email của tài khoản đang đăng nhập để xác nhận đổi mật khẩu.
+   */
+  public async requestPasswordChangeOTP(userId: string, oldPassword?: string, newPassword?: string, confirmPassword?: string): Promise<void> {
+    const user = await User.findById(userId);
+    if (!user) throw new Error('Người dùng không tồn tại.');
+
+    await this.verifyCurrentPassword(user, oldPassword);
+    if (!newPassword || newPassword.length < 6) throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự.');
+    if (newPassword !== confirmPassword) throw new Error('Mật khẩu xác nhận không khớp.');
+    const otp = await otpService.issue('password_change', userId, { email: user.email }, 300);
+    await mailerService.sendPasswordChangeOTP(user.email, otp);
+  }
+
+  /**
+   * Đổi mật khẩu sau khi xác thực mật khẩu hiện tại và OTP email.
+   */
+  public async changePassword(userId: string, oldPassword?: string, newPassword?: string, otp?: string): Promise<any> {
     const user = await User.findById(userId);
     if (!user) throw new Error('Người dùng không tồn tại.');
 
     if (!newPassword || newPassword.length < 6) {
        throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự.');
     }
+    if (!otp) throw new Error('Vui lòng nhập mã OTP đã gửi đến email.');
 
-    if (user.password) {
-      // User đăng nhập bằng mật khẩu
-      if (!oldPassword) throw new Error('Vui lòng nhập mật khẩu hiện tại.');
-      const isMatch = await bcrypt.compare(oldPassword, user.password);
-      if (!isMatch) throw new Error('Mật khẩu hiện tại không đúng.');
-    } else {
-      // User ban đầu đăng nhập bằng google, chưa có mật khẩu
-    }
+    await this.verifyCurrentPassword(user, oldPassword);
+    await otpService.verify<{ email: string }>('password_change', userId, otp);
 
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);

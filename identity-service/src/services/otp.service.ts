@@ -1,5 +1,5 @@
 /**
- * Quản lý OTP dùng chung cho đăng ký và khôi phục mật khẩu qua email.
+ * Quản lý OTP dùng chung cho đăng ký, đổi và khôi phục mật khẩu qua email.
  * Mã được tạo bằng crypto, chỉ lưu bản băm trong Redis, có thời hạn, giới hạn gửi
  * và giới hạn số lần nhập sai. Mã hợp lệ bị xoá sau khi sử dụng thành công.
  * Service này không xử lý OTP qua SMS và không hỗ trợ đổi email tài khoản.
@@ -13,6 +13,7 @@ class OtpService {
     return createHmac('sha256', secret).update(`${scope}:${target}:${otp}`).digest('hex');
   }
   private key(scope: string, target: string): string { return `otp:${scope}:${target}`; }
+  // Tạo OTP mới, lưu bản băm trong Redis và trả về mã gốc (dùng cho bước gửi OTP).
   public async issue<T>(scope: string, target: string, payload: T, ttlSeconds = 300): Promise<string> {
     const cooldownKey = `otp:cooldown:${scope}:${target}`;
     const allowed = await redisClient.set(cooldownKey, '1', 'EX', 60, 'NX');

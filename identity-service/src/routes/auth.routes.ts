@@ -42,6 +42,7 @@ router.put('/profile/role', extractUser, authController.switchToInstructor);
 router.delete('/account', extractUser, authController.deleteAccount);
 
 // [PUT] /api/auth/password — Thay đổi mật khẩu
+router.post('/password/otp', extractUser, authController.requestPasswordChangeOTP);
 router.put('/password', extractUser, authController.changePassword);
 
 // ========== REFRESH TOKEN ==========
