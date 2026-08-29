@@ -14,11 +14,13 @@ import chatbotContextRoutes from './chatbotContext.routes';
 const routes = (app: Application) => {
   // Admin review APIs phải mount riêng để không bị slug route của /api/courses bắt nhầm.
   app.use('/api/admin/courses', adminCourseRoutes);
+  // API nội bộ để Inbox Service tìm khóa học/danh mục thật làm context cho chatbot.
   app.use('/internal/chatbot', chatbotContextRoutes);
 
   // Route này xử lý quiz attempt cho student.
   // Đặt trước courseRoutes để không bị các nested route (route "lồng nhau") quản lý của instructor chặn nhầm.
   app.use('/api/quiz-attempts', quizAttemptRoutes);
+  // Mount thêm cùng prefix /api/courses để tương thích endpoint làm quiz phía frontend.
   app.use('/api/courses', quizAttemptRoutes);
 
   // Route này xử lý cả public course routes và authenticated course routes
