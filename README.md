@@ -25,6 +25,28 @@ Backend của SecureLearn được tổ chức theo kiến trúc microservices v
 
 Thư mục `shared/` chứa protobuf/gRPC, event bus RabbitMQ, kiểu lỗi và response format dùng chung giữa các service.
 
+## Tổng quan API
+
+Frontend chỉ gọi một địa chỉ Kong API Gateway. Kong giữ nguyên đường dẫn và định tuyến request đến service tương ứng; các route được tách thành public, protected và admin theo HTTP method và chính sách JWT.
+
+| Service | Cổng nội bộ | Tiền tố API qua Kong |
+| --- | ---: | --- |
+| `identity-service` | `5001` | `/api/auth`, `/api/admin/auth` |
+| `course-service` | `5002` | `/api/courses`, `/api/categories`, `/api/quiz-attempts`, `/api/cart`, `/api/wishlist`, `/api/admin/courses` |
+| `media-service` | `5003` | `/api/media/videos`, `/api/media/documents` |
+| `payment-service` | `5004` | `/api/payments` |
+| `progress-service` | `5005` | `/api/progress` |
+| `notification-service` | `5006` | `/api/notifications`, `/api/admin/notifications` |
+| `inbox-service` | `5007` | `/api/inbox`, `/api/admin/inbox`, `/api/chatbot` |
+| `content-service` | `5008` | `/api/banners`, `/api/policies`, `/api/website-config`, `/api/admin/system` |
+
+Các kết nối realtime đi qua `/course.socket.io` (thảo luận khóa học), `/socket.io` (thông báo) và `/inbox.socket.io` (hỗ trợ/tin nhắn).
+
+```text
+Docker Compose: http://localhost:8000/api/...
+Kubernetes:     http://localhost:30681/api/...
+```
+
 ## Công nghệ sử dụng
 
 - **Runtime:** Node.js, TypeScript, Express.js.
