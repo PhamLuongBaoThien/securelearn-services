@@ -5,8 +5,7 @@
   "scripts": {
     "dev": "npx ts-node src/index.ts",
     "build": "tsc --ignoreDeprecations 6.0",
-    "start": "node dist/index.js",
-    "test": "npm run build && node dist/services/template.service.test.js"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@securelearn/common": "file:../shared",

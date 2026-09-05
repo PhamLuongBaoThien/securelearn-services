@@ -2,6 +2,10 @@ import {
   NotificationTemplate,
   TEMPLATE_EVENTS,
 } from "../models/notificationTemplate.model";
+import {
+  NOTIFICATION_PREFERENCE_POLICY,
+  type NotificationCategory,
+} from "./preference.service";
 export const VARIABLE_WHITELIST: Record<string, string[]> = {
   WELCOME: ["userName"],
   PAYMENT_SUCCESS: [
@@ -28,6 +32,7 @@ export const VARIABLE_WHITELIST: Record<string, string[]> = {
   DISCUSSION_CREATED: ["actorName", "courseName", "lessonName", "contentPreview"],
   DISCUSSION_REPLIED: ["actorName", "courseName", "lessonName", "contentPreview"],
   COURSE_ANNOUNCEMENT_PUBLISHED: ["instructorName", "courseName", "title", "contentPreview"],
+  SUBSCRIPTION_SETTLEMENT_AVAILABLE: ["period", "amount", "qualifiedMinutes", "courseCount"],
   REPORT_CREATED: ["senderName", "title", "summary", "createdAt"],
   SUPPORT_REQUEST_CREATED: ["senderName", "title", "summary", "createdAt"],
   FEEDBACK_CREATED: ["senderName", "title", "summary", "createdAt"],
@@ -111,7 +116,7 @@ class TemplateService {
       rows.map((row) => String(row.event) + ":" + String(row.type)),
     );
     const groups: Record<string, string[]> = {
-      PAYMENT: ["PAYMENT_SUCCESS", "PAYMENT_FAILED"],
+      PAYMENT: ["PAYMENT_SUCCESS", "PAYMENT_FAILED", "SUBSCRIPTION_SETTLEMENT_AVAILABLE"],
       COURSE: [
         "COURSE_APPROVED",
         "COURSE_REJECTED",
@@ -131,7 +136,9 @@ class TemplateService {
       ],
     };
     const result: Record<string, unknown> = {};
-    for (const [category, events] of Object.entries(groups))
+    // Capability kết hợp trạng thái template với policy cấu hình để frontend không phải hard-code kênh bắt buộc.
+    for (const [category, events] of Object.entries(groups)) {
+      const policy = NOTIFICATION_PREFERENCE_POLICY[category as NotificationCategory];
       result[category] = {
         email: events.every((event) => active.has(event + ":EMAIL")),
         emailAvailable: events.some((event) => active.has(event + ":EMAIL")),
@@ -143,7 +150,10 @@ class TemplateService {
         missingInAppEvents: events.filter(
           (event) => !active.has(event + ":IN_APP"),
         ),
+        emailConfigurable: policy.email.configurable,
+        inAppConfigurable: policy.inApp.configurable,
       };
+    }
     result.CAMPAIGN = {
       email: true,
       emailAvailable: true,
@@ -151,6 +161,8 @@ class TemplateService {
       inAppAvailable: true,
       missingEmailEvents: [],
       missingInAppEvents: [],
+      emailConfigurable: NOTIFICATION_PREFERENCE_POLICY.CAMPAIGN.email.configurable,
+      inAppConfigurable: NOTIFICATION_PREFERENCE_POLICY.CAMPAIGN.inApp.configurable,
     };
     return result;
   }
