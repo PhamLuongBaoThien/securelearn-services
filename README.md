@@ -4,6 +4,7 @@ Backend của SecureLearn được tổ chức theo kiến trúc microservices v
 
 - Repository hệ thống: [securelearn-deploy](https://github.com/PhamLuongBaoThien/securelearn-deploy)
 - Repository frontend: [securelearn-web](https://github.com/PhamLuongBaoThien/securelearn-web)
+- Demo và báo cáo: [Google Drive](https://drive.google.com/drive/folders/1sLt8SGmUhkDaVBrS4YqgW1gkL_hoW8nb?usp=drive_link)
 
 ## Kiến trúc tổng thể
 
@@ -72,13 +73,27 @@ Mỗi service có `package.json`, `Dockerfile`, mã nguồn trong `src/` và có
 
 ## Chạy backend
 
-### Cách khuyến nghị
-
-Sử dụng repository [securelearn-deploy](https://github.com/PhamLuongBaoThien/securelearn-deploy) để khởi tạo đầy đủ Kong, Redis, RabbitMQ và 8 service:
+### Clone repository
 
 ```powershell
+git clone https://github.com/PhamLuongBaoThien/securelearn-services.git
+cd securelearn-services
+```
+
+### Chạy toàn bộ hệ thống
+
+Sử dụng repository [securelearn-deploy](https://github.com/PhamLuongBaoThien/securelearn-deploy) để đặt backend đúng cấu trúc và khởi tạo Kong, Redis, RabbitMQ cùng 8 service:
+
+```powershell
+git clone https://github.com/PhamLuongBaoThien/securelearn-deploy.git SecureLearn
+cd SecureLearn
+git clone https://github.com/PhamLuongBaoThien/securelearn-services.git backend
+git clone https://github.com/PhamLuongBaoThien/securelearn-web.git frontend
+Copy-Item .env.example .env
 docker compose up -d --build
 ```
+
+Mở file `.env` vừa tạo và điền các thông tin bắt buộc trước khi khởi chạy. Mẫu được đặt trong repo deployment để dùng chung cho toàn bộ service.
 
 Hoặc triển khai backend trên Kubernetes local theo hướng dẫn trong [`infra/README.md`](https://github.com/PhamLuongBaoThien/securelearn-deploy/blob/main/infra/README.md).
 
@@ -93,7 +108,9 @@ npm install --prefix identity-service
 npm run dev --prefix identity-service
 ```
 
-Service cần được cung cấp các biến môi trường tương ứng cho MongoDB, Redis, RabbitMQ, JWT và dịch vụ bên thứ ba. Không commit file `.env` hoặc thông tin xác thực thật.
+Repo backend không lưu file `.env` riêng. Khi chạy toàn hệ thống, Docker Compose hoặc Kubernetes lấy cấu hình từ repo deployment và truyền biến môi trường vào từng service. Nếu chạy thủ công một service, người phát triển phải tự cung cấp các biến tương ứng trong terminal hoặc cấu hình chạy cục bộ.
+
+Tham khảo danh sách biến tại [`.env.example` của deployment](https://github.com/PhamLuongBaoThien/securelearn-deploy/blob/main/.env.example). Không commit secret, API key hoặc thông tin xác thực thật.
 
 ## Tác giả
 
